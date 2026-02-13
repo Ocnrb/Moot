@@ -965,7 +965,11 @@ class ChannelManager {
             }
             
             // Pass streamId for session key verification
-            const verification = await identityManager.verifyMessage(data, streamId);
+            // Skip timestamp check for historical messages (older than 30 seconds)
+            // to allow legitimate old messages from history to be verified
+            const verification = await identityManager.verifyMessage(data, streamId, {
+                skipTimestampCheck: !isRecentMessage
+            });
             data.verified = verification;
             
             if (!verification.valid) {

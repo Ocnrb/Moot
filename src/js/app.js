@@ -948,33 +948,58 @@ class App {
     }
 
     /**
-     * Show wallet selector for multiple saved wallets
+     * Show account selector for multiple saved accounts
      */
     async showWalletSelector(wallets) {
+        // Helper to get display name - use stored name or fallback to "Account N"
+        const getDisplayName = (w, index) => {
+            const isDefaultName = !w.name || w.name.startsWith('Wallet ') || w.name.startsWith('Imported ') || w.name.startsWith('Account ');
+            return isDefaultName ? `Account ${index + 1}` : w.name;
+        };
+        
         return new Promise((resolve) => {
             const modal = document.createElement('div');
-            modal.className = 'fixed inset-0 bg-black/80 flex items-center justify-center z-50';
+            modal.className = 'fixed inset-0 bg-black/80 flex items-center justify-center z-50 animate-fadeIn';
             modal.innerHTML = `
-                <div class="bg-[#111111] rounded-xl p-5 w-[340px] border border-[#222]">
-                    <h3 class="text-[15px] font-medium mb-3 text-white">Select Account</h3>
-                    <div class="space-y-2 max-h-60 overflow-y-auto">
-                        ${wallets.map(w => `
-                            <button class="wallet-option w-full bg-[#1a1a1a] hover:bg-[#202020] border border-[#282828] px-3 py-2.5 rounded-lg text-left transition" data-address="${w.address}">
-                                <div class="text-[13px] font-medium text-white">${w.name}</div>
-                                <div class="text-[11px] text-[#888] font-mono">${w.address.slice(0, 10)}...${w.address.slice(-8)}</div>
-                                <div class="text-[10px] text-[#555]">Last used: ${w.lastUsed ? new Date(w.lastUsed).toLocaleDateString() : 'Never'}</div>
+                <div class="bg-[#111111] rounded-xl w-[360px] overflow-hidden shadow-2xl border border-[#222] animate-slideUp">
+                    <!-- Header -->
+                    <div class="px-5 pt-5 pb-3">
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-[15px] font-medium text-white">Select Account</h3>
+                            <button id="close-modal" class="text-[#666] hover:text-white transition p-1 -mr-1">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12"/>
+                                </svg>
                             </button>
-                        `).join('')}
+                        </div>
                     </div>
-                    <button id="cancel-select" class="mt-3 w-full bg-[#1a1a1a] hover:bg-[#202020] border border-[#282828] text-[#888] text-[13px] px-3 py-2 rounded-lg transition">
-                        Cancel
-                    </button>
+                    
+                    <!-- Account List -->
+                    <div class="px-5 pb-5">
+                        <div class="space-y-2 max-h-60 overflow-y-auto scrollbar-thin">
+                            ${wallets.map((w, i) => `
+                                <button class="account-option w-full bg-[#1a1a1a] hover:bg-[#202020] rounded-lg p-3 border border-[#282828] hover:border-[#444] transition-all text-left" data-address="${w.address}">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-9 h-9 rounded-lg bg-[#252525] flex items-center justify-center flex-shrink-0">
+                                            <svg class="w-4 h-4 text-[#888]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/>
+                                            </svg>
+                                        </div>
+                                        <div class="flex-1 min-w-0">
+                                            <div class="text-[13px] font-medium text-white truncate">${getDisplayName(w, i)}</div>
+                                            <div class="text-[11px] text-[#888] font-mono">${w.address.slice(0, 6)}...${w.address.slice(-4)}</div>
+                                        </div>
+                                    </div>
+                                </button>
+                            `).join('')}
+                        </div>
+                    </div>
                 </div>
             `;
             
             document.body.appendChild(modal);
             
-            modal.querySelectorAll('.wallet-option').forEach(btn => {
+            modal.querySelectorAll('.account-option').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     const address = e.currentTarget.dataset.address;
                     document.body.removeChild(modal);
@@ -982,9 +1007,17 @@ class App {
                 });
             });
             
-            modal.querySelector('#cancel-select').addEventListener('click', () => {
+            modal.querySelector('#close-modal').addEventListener('click', () => {
                 document.body.removeChild(modal);
                 resolve(null);
+            });
+            
+            // Close on backdrop click
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    document.body.removeChild(modal);
+                    resolve(null);
+                }
             });
         });
     }

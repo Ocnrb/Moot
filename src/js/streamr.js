@@ -534,6 +534,51 @@ class StreamrController {
     }
 
     /**
+     * Check if current user has DELETE permission on a stream
+     * Uses Streamr SDK hasPermission for real-time on-chain check
+     * @param {string} streamId - Stream ID
+     * @returns {Promise<boolean>}
+     */
+    async hasDeletePermission(streamId) {
+        if (!this.client) {
+            return false;
+        }
+
+        try {
+            const stream = await this.client.getStream(streamId);
+            const StreamPermission = window.StreamPermission;
+            
+            if (!StreamPermission) {
+                Logger.warn('StreamPermission not available, falling back to streamId check');
+                // Fallback: check if streamId starts with current address
+                const currentAddress = await this.client.getAddress();
+                if (currentAddress) {
+                    const streamOwner = streamId.split('/')[0]?.toLowerCase();
+                    return streamOwner === currentAddress.toLowerCase();
+                }
+                return false;
+            }
+
+            const currentAddress = await this.client.getAddress();
+            if (!currentAddress) {
+                return false;
+            }
+
+            const hasDelete = await stream.hasPermission({
+                permission: StreamPermission.DELETE,
+                userId: currentAddress,
+                allowPublic: false
+            });
+            
+            Logger.debug('hasDeletePermission check:', { streamId, currentAddress: currentAddress.slice(0,10), hasDelete });
+            return hasDelete;
+        } catch (error) {
+            Logger.error('Failed to check DELETE permission:', error);
+            return false;
+        }
+    }
+
+    /**
      * Delete a stream (only owner can delete)
     /**
      * Delete a stream

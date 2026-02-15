@@ -709,7 +709,7 @@ class UIController {
             const lastSeen = this.lastSeenCounts.get(channel.streamId) || 0;
             const hasUnread = channel.messages.length > lastSeen;
             const countClass = hasUnread 
-                ? 'text-white bg-[#333]' 
+                ? 'text-white bg-[#F6851B]/20' 
                 : 'text-[#666] bg-[#252525]';
             
             return `
@@ -801,6 +801,9 @@ class UIController {
             
             // Update online users display
             this.updateOnlineUsers(streamId, channelManager.getOnlineUsers(streamId));
+            
+            // Pre-load DELETE permission in background for faster settings modal
+            channelManager.preloadDeletePermission(streamId);
         }
     }
 
@@ -860,6 +863,12 @@ class UIController {
     resetToDisconnectedState() {
         // Clear typing indicator
         this.hideTypingIndicator();
+        
+        // Close any open modals first
+        this.elements.channelSettingsModal?.classList.add('hidden');
+        this.elements.inviteUsersModal?.classList.add('hidden');
+        document.getElementById('delete-channel-modal')?.classList.add('hidden');
+        document.getElementById('leave-channel-modal')?.classList.add('hidden');
         
         // Reset channel name and info
         this.elements.currentChannelName.textContent = 'Select a channel';
@@ -2483,9 +2492,9 @@ class UIController {
             // Update styling based on unread state
             if (hasUnread) {
                 countEl.classList.remove('text-[#666]', 'bg-[#252525]');
-                countEl.classList.add('text-white', 'bg-[#333]');
+                countEl.classList.add('text-white', 'bg-[#F6851B]/20');
             } else {
-                countEl.classList.remove('text-white', 'bg-[#333]');
+                countEl.classList.remove('text-white', 'bg-[#F6851B]/20');
                 countEl.classList.add('text-[#666]', 'bg-[#252525]');
             }
         }
@@ -3395,9 +3404,20 @@ class UIController {
         this.elements.channelSettingsType.innerHTML = this.getChannelTypeLabel(currentChannel.type);
         this.elements.channelSettingsId.textContent = currentChannel.streamId;
 
-        // Determine channel type and ownership
+        // Determine channel type
         const isNative = currentChannel.type === 'native';
-        const isOwner = channelManager.isChannelOwner(currentChannel.streamId);
+        
+        // Use cached DELETE permission if valid for current wallet, else fetch fresh
+        const cached = channelManager.getCachedDeletePermission(currentChannel.streamId);
+        const canDelete = cached.valid 
+            ? cached.canDelete 
+            : await streamrController.hasDeletePermission(currentChannel.streamId);
+        
+        Logger.debug('Channel settings:', { 
+            canDelete,
+            fromCache: cached.valid,
+            currentAddress: authManager.getAddress()?.slice(0,10) 
+        });
         
         // Check if user can add members (owner OR has GRANT permission)
         const canAddMembers = isNative ? await channelManager.canAddMembers(currentChannel.streamId) : false;
@@ -3411,19 +3431,23 @@ class UIController {
 
         // Show/hide members-related elements based on permission to add members
         this.elements.addMemberForm?.classList.toggle('hidden', !canAddMembers);
-        this.elements.permissionsSection?.classList.toggle('hidden', !isOwner || !isNative);
-
-        // Show/hide danger tab for owner only
-        this.elements.dangerTabDivider?.classList.toggle('hidden', !isOwner);
-        this.elements.dangerTabBtn?.classList.toggle('hidden', !isOwner);
+        this.elements.permissionsSection?.classList.toggle('hidden', !canDelete || !isNative);
 
         // Clear members list for non-native channels (prevents stale data)
         if (!isNative && this.elements.membersList) {
             this.elements.membersList.innerHTML = '';
         }
 
-        // Initialize channel settings tabs
+        // Initialize channel settings tabs (clones elements, must be before toggling visibility)
         this.initChannelSettingsTabs();
+        
+        // Re-fetch danger tab elements after cloning (initChannelSettingsTabs replaces DOM elements)
+        const dangerTabDivider = document.getElementById('danger-tab-divider');
+        const dangerTabBtn = document.getElementById('danger-tab-btn');
+        
+        // Show/hide danger tab for users with DELETE permission only
+        dangerTabDivider?.classList.toggle('hidden', !canDelete);
+        dangerTabBtn?.classList.toggle('hidden', !canDelete);
 
         // Select appropriate starting tab (always info for non-native since members tab is hidden)
         this.selectChannelSettingsTab('info');
@@ -3434,7 +3458,7 @@ class UIController {
         // Load members and permissions if native channel
         if (isNative) {
             await this.loadChannelMembers();
-            if (isOwner) {
+            if (canDelete) {
                 this.loadStreamPermissions();
             }
         }

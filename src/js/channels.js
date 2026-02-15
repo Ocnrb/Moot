@@ -11,6 +11,67 @@ import { identityManager } from './identity.js';
 import { secureStorage } from './secureStorage.js';
 import { graphAPI } from './graph.js';
 
+/**
+ * Check if an error is a blockchain/gas related error
+ * @param {Error} error - The error to check
+ * @returns {{ isGasError: boolean, message: string }}
+ */
+function parseChainError(error) {
+    const errorMsg = error.message || '';
+    const errorCode = error.code || '';
+    const reason = error.reason?.code || error.reason || '';
+    const errorMsgLower = errorMsg.toLowerCase();
+    
+    // Insufficient funds for gas (check various formats)
+    if (errorCode === 'INSUFFICIENT_FUNDS' ||
+        errorMsg.includes('INSUFFICIENT_FUNDS') ||
+        errorMsg.includes('code=INSUFFICIENT_FUNDS') ||
+        errorMsgLower.includes('insufficient funds') ||
+        errorMsgLower.includes('not enough balance')) {
+        return {
+            isGasError: true,
+            message: 'Insufficient POL for gas fees. Please add POL to your wallet on Polygon network.'
+        };
+    }
+    
+    // Contract call exception (often means out of gas or reverted)
+    if (errorCode === 'CALL_EXCEPTION' || 
+        reason === 'CALL_EXCEPTION' ||
+        errorMsg.includes('CALL_EXCEPTION')) {
+        return {
+            isGasError: true,
+            message: 'Transaction failed. This usually means insufficient POL for gas fees or the transaction was rejected.'
+        };
+    }
+    
+    // Network/RPC errors
+    if (errorCode === 'NETWORK_ERROR' || 
+        errorCode === 'SERVER_ERROR' ||
+        errorMsgLower.includes('network') ||
+        errorMsgLower.includes('timeout')) {
+        return {
+            isGasError: false,
+            message: 'Network error. Please check your connection and try again.'
+        };
+    }
+    
+    // User rejected transaction
+    if (errorCode === 'ACTION_REJECTED' || 
+        errorCode === 4001 ||
+        errorMsgLower.includes('user rejected')) {
+        return {
+            isGasError: false,
+            message: 'Transaction was cancelled.'
+        };
+    }
+    
+    // Not a recognized chain error
+    return {
+        isGasError: false,
+        message: errorMsg || 'An unknown error occurred'
+    };
+}
+
 class ChannelManager {
     constructor() {
         this.channels = new Map(); // streamId -> channel object
@@ -172,7 +233,9 @@ class ChannelManager {
             return channel;
         } catch (error) {
             Logger.error('Failed to create channel:', error);
-            throw error;
+            // Check if it's a chain/gas error and throw with user-friendly message
+            const chainError = parseChainError(error);
+            throw new Error(chainError.message);
         }
     }
 
@@ -378,7 +441,8 @@ class ChannelManager {
             return true;
         } catch (error) {
             Logger.error('Failed to add member:', error);
-            throw error;
+            const chainError = parseChainError(error);
+            throw new Error(chainError.message);
         }
     }
 
@@ -427,7 +491,8 @@ class ChannelManager {
             return true;
         } catch (error) {
             Logger.error('Failed to remove member:', error);
-            throw error;
+            const chainError = parseChainError(error);
+            throw new Error(chainError.message);
         }
     }
 
@@ -560,7 +625,8 @@ class ChannelManager {
             return true;
         } catch (error) {
             Logger.error('Failed to update permissions:', error);
-            throw error;
+            const chainError = parseChainError(error);
+            throw new Error(chainError.message);
         }
     }
 
@@ -620,6 +686,66 @@ class ChannelManager {
             Logger.warn('Failed to check canAddMembers:', error);
             return false;
         }
+    }
+
+    /**
+     * Pre-load DELETE permission for a channel (fire-and-forget, non-blocking)
+     * Caches result on the channel object for faster modal opening
+     * @param {string} streamId - Stream ID
+     */
+    preloadDeletePermission(streamId) {
+        const channel = this.channels.get(streamId);
+        if (!channel) return;
+        
+        const currentAddress = authManager.getAddress();
+        if (!currentAddress) return;
+        
+        // If already cached for current wallet, skip
+        if (channel._deletePermCache?.address?.toLowerCase() === currentAddress.toLowerCase()) {
+            return;
+        }
+        
+        // Fire-and-forget permission check
+        streamrController.hasDeletePermission(streamId)
+            .then(canDelete => {
+                // Double-check channel still exists and wallet hasn't changed
+                const ch = this.channels.get(streamId);
+                const addr = authManager.getAddress();
+                if (ch && addr) {
+                    ch._deletePermCache = { 
+                        canDelete, 
+                        address: addr.toLowerCase() 
+                    };
+                    Logger.debug('Cached DELETE permission:', { streamId: streamId.slice(-20), canDelete });
+                }
+            })
+            .catch(err => {
+                Logger.warn('Failed to preload DELETE permission:', err.message);
+            });
+    }
+
+    /**
+     * Get cached DELETE permission for a channel if valid for current wallet
+     * @param {string} streamId - Stream ID
+     * @returns {{ valid: boolean, canDelete: boolean }}
+     */
+    getCachedDeletePermission(streamId) {
+        const channel = this.channels.get(streamId);
+        if (!channel?._deletePermCache) {
+            return { valid: false, canDelete: false };
+        }
+        
+        const currentAddress = authManager.getAddress();
+        if (!currentAddress) {
+            return { valid: false, canDelete: false };
+        }
+        
+        // Cache is valid only if it was checked by the current wallet
+        if (channel._deletePermCache.address === currentAddress.toLowerCase()) {
+            return { valid: true, canDelete: channel._deletePermCache.canDelete };
+        }
+        
+        return { valid: false, canDelete: false };
     }
 
     /**
@@ -1262,6 +1388,8 @@ class ChannelManager {
             this.channels.clear();
             this.currentChannel = null;
             this.onlineUsers.clear();
+            this.processingMessages.clear();
+            this.pendingMessages.clear();
             // Don't clear from localStorage - keep for reconnect
             Logger.debug('Left all channels');
         } catch (error) {
@@ -1285,8 +1413,15 @@ class ChannelManager {
                 await streamrController.deleteStream(streamId);
                 Logger.debug('Stream deleted from Streamr network:', streamId);
             } catch (networkError) {
-                // Stream might not exist on network (only in localStorage)
-                // or we don't have delete permission - that's OK, remove locally
+                const chainError = parseChainError(networkError);
+                
+                // Gas/transaction errors should stop the delete and inform user
+                if (chainError.isGasError) {
+                    throw new Error(chainError.message);
+                }
+                
+                // Stream might not exist on network or other non-critical error
+                // - that's OK, proceed to remove locally
                 Logger.warn('Could not delete from network (may not exist):', networkError.message);
             }
             

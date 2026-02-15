@@ -168,8 +168,8 @@ class UIController {
             cancelChannelBtn: document.getElementById('cancel-channel-btn'),
 
             // Online users
-            onlineUsersContainer: document.getElementById('online-users-container'),
             onlineHeader: document.getElementById('online-header'),
+            onlineSeparator: document.getElementById('online-separator'),
             onlineUsersCount: document.getElementById('online-users-count'),
             onlineUsersList: document.getElementById('online-users-list'),
 
@@ -259,14 +259,14 @@ class UIController {
         // Online users dropdown toggle
         this.elements.onlineHeader?.addEventListener('click', () => {
             this.elements.onlineUsersList?.classList.toggle('hidden');
-            this.elements.onlineHeader?.querySelector('svg')?.classList.toggle('rotate-180');
         });
 
         // Close online users list when clicking outside
         document.addEventListener('click', (e) => {
-            if (this.elements.onlineUsersContainer && !this.elements.onlineUsersContainer.contains(e.target)) {
+            const clickedOnHeader = this.elements.onlineHeader?.contains(e.target);
+            const clickedOnList = this.elements.onlineUsersList?.contains(e.target);
+            if (!clickedOnHeader && !clickedOnList) {
                 this.elements.onlineUsersList?.classList.add('hidden');
-                this.elements.onlineHeader?.querySelector('svg')?.classList.remove('rotate-180');
             }
         });
 
@@ -780,7 +780,9 @@ class UIController {
             }
             
             // Show online users container
-            this.elements.onlineUsersContainer?.classList.remove('hidden');
+            this.elements.onlineHeader?.classList.remove('hidden');
+            this.elements.onlineHeader?.classList.add('flex');
+            this.elements.onlineSeparator?.classList.remove('hidden');
 
             // Load reactions from channel state
             this.loadChannelReactions(streamId);
@@ -821,7 +823,9 @@ class UIController {
         this.elements.inviteUsersBtn?.classList.add('hidden');
         this.elements.channelMenuBtn?.classList.add('hidden');
         this.elements.closeChannelBtn?.classList.add('hidden');
-        this.elements.onlineUsersContainer?.classList.add('hidden');
+        this.elements.onlineHeader?.classList.add('hidden');
+        this.elements.onlineHeader?.classList.remove('flex');
+        this.elements.onlineSeparator?.classList.add('hidden');
         
         // Reset online users list
         if (this.elements.onlineUsersList) {
@@ -859,11 +863,12 @@ class UIController {
         this.elements.currentChannelInfo.textContent = '';
         this.elements.messageInputContainer.classList.add('hidden');
         
-        // Hide all channel-specific UI elements
         this.elements.inviteUsersBtn?.classList.add('hidden');
         this.elements.channelMenuBtn?.classList.add('hidden');
         this.elements.closeChannelBtn?.classList.add('hidden');
-        this.elements.onlineUsersContainer?.classList.add('hidden');
+        this.elements.onlineHeader?.classList.add('hidden');
+        this.elements.onlineHeader?.classList.remove('flex');
+        this.elements.onlineSeparator?.classList.add('hidden');
         
         // Reset online users list
         if (this.elements.onlineUsersList) {
@@ -3230,9 +3235,9 @@ class UIController {
      */
     getChannelTypeLabel(type) {
         const labels = {
-            'public': '<span class="inline-flex items-center gap-1 text-[#666]"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>Public</span>',
-            'password': '<span class="inline-flex items-center gap-1 text-[#666]"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>Password</span>',
-            'native': '<span class="inline-flex items-center gap-1 text-[#666]"><svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1.5l-8 13.5 8 4.5 8-4.5-8-13.5zm0 18l-8-4.5 8 9 8-9-8 4.5z"/></svg>Verified Membership</span>'
+            'public': '<span class="inline-flex items-center gap-1"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>Public</span>',
+            'password': '<span class="inline-flex items-center gap-1"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>Password</span>',
+            'native': '<span class="inline-flex items-center gap-1"><svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1.5l-8 13.5 8 4.5 8-4.5-8-13.5zm0 18l-8-4.5 8 9 8-9-8 4.5z"/></svg>Verified</span>'
         };
         return labels[type] || type;
     }

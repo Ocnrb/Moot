@@ -11,16 +11,18 @@ import { graphAPI } from './graph.js';
 import { secureStorage } from './secureStorage.js';
 import { Logger } from './logger.js';
 import { mediaController } from './media.js';
+import { streamrController } from './streamr.js';
 
 // Gas estimation for Polygon network
 const GasEstimator = {
     RPC_URL: 'https://polygon-rpc.com',
     
-    // Approximate gas units for Streamr operations
-    // Native channels use setPermissions (batch) - single tx regardless of member count
+    // Approximate gas units for Streamr operations (based on real tx data)
     GAS_UNITS: {
-        createStream: 250000,           // Creating a new stream
-        setPermissionsBatch: 300000,    // Batch setPermissions (includes ~10 members)
+        createStream: 420000,           // Creating a new stream
+        setPublicPermissions: 80000,    // Public permissions (single assignment)
+        setPermissionsBatch: 210000,    // Batch setPermissions (multiple members)
+        addStorageNode: 165000,         // Adding stream to storage node
     },
     
     cachedGasPrice: null,
@@ -71,18 +73,19 @@ const GasEstimator = {
     async estimateCosts() {
         const gasPrice = await this.getGasPrice();
         
-        const createCost = gasPrice * this.GAS_UNITS.createStream;
-        // Native uses batch setPermissions - single tx for all initial members
-        const nativeCost = gasPrice * (this.GAS_UNITS.createStream + this.GAS_UNITS.setPermissionsBatch);
+        // Public/Password channels: createStream + setPublicPermissions + addStorageNode
+        const publicCost = gasPrice * (this.GAS_UNITS.createStream + this.GAS_UNITS.setPublicPermissions + this.GAS_UNITS.addStorageNode);
+        // Native adds batch setPermissions for members (larger than public permissions)
+        const nativeCost = gasPrice * (this.GAS_UNITS.createStream + this.GAS_UNITS.setPermissionsBatch + this.GAS_UNITS.addStorageNode);
         
         return {
-            public: createCost,
-            password: createCost,
+            public: publicCost,
+            password: publicCost,
             native: nativeCost,
             gasPrice: gasPrice,
             formatted: {
-                public: this.formatPOL(createCost),
-                password: this.formatPOL(createCost),
+                public: this.formatPOL(publicCost),
+                password: this.formatPOL(publicCost),
                 native: this.formatPOL(nativeCost),
                 gasPrice: this.formatGwei(gasPrice)
             }
@@ -4560,18 +4563,30 @@ class UIController {
                             throw new Error('No account connected');
                         }
 
-                        // Leave all channels first (disconnect from Streamr)
+                        // 1. Stop presence tracking
+                        channelManager.stopPresenceTracking();
+
+                        // 2. Leave all channels (unsubscribe from Streamr streams)
                         await channelManager.leaveAllChannels();
 
-                        // Delete the wallet keystore
-                        authManager.deleteWallet(currentAddress);
-                        
-                        // Delete encrypted storage data for this address
+                        // 3. Destroy Streamr client completely
+                        await streamrController.disconnect();
+
+                        // 4. Clear seed files for this user from IndexedDB
+                        await mediaController.clearSeedFilesForOwner(currentAddress);
+
+                        // 5. Reset media controller (clear in-memory state)
+                        mediaController.reset();
+
+                        // 6. Delete encrypted storage data for this address
                         const storageKey = `moot_secure_${currentAddress.toLowerCase()}`;
                         localStorage.removeItem(storageKey);
-                        
-                        // Lock storage
+
+                        // 7. Lock secure storage
                         secureStorage.lock();
+
+                        // 8. Delete the wallet keystore
+                        authManager.deleteWallet(currentAddress);
                         
                         this.showNotification('Account deleted successfully', 'success');
                         

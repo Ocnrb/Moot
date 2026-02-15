@@ -86,6 +86,9 @@ class ChannelManager {
     clearChannels() {
         this.channels.clear();
         this.currentChannel = null;
+        this.onlineUsers.clear();
+        this.processingMessages.clear();
+        this.pendingMessages.clear();
         Logger.debug('Channels cleared from memory');
     }
 
@@ -864,6 +867,11 @@ class ChannelManager {
      * @param {Object} data - Control data
      */
     async handleControlMessage(streamId, data) {
+        // CRITICAL: Check if still connected before processing
+        if (!authManager.isConnected()) {
+            return;
+        }
+        
         // Handle different control message types
         if (data.type === 'typing') {
             this.notifyHandlers('typing', { streamId, user: data.user });
@@ -901,6 +909,12 @@ class ChannelManager {
      * @param {Object} data - Message data
      */
     async handleTextMessage(streamId, data) {
+        // CRITICAL: Check if still connected before processing
+        // This prevents messages from being processed after disconnect
+        if (!authManager.isConnected()) {
+            return;
+        }
+        
         // Skip presence/typing - these are ephemeral
         if (data?.type === 'presence' || data?.type === 'typing') {
             return;
@@ -1023,6 +1037,11 @@ class ChannelManager {
      * @param {Object} data - Media data
      */
     handleMediaMessage(streamId, data) {
+        // CRITICAL: Check if still connected before processing
+        if (!authManager.isConnected()) {
+            return;
+        }
+        
         // Skip control messages (presence, typing, reactions) - these shouldn't be on partition 2
         if (data?.type === 'presence' || data?.type === 'typing' || data?.type === 'reaction') {
             return;
@@ -1242,6 +1261,7 @@ class ChannelManager {
             }
             this.channels.clear();
             this.currentChannel = null;
+            this.onlineUsers.clear();
             // Don't clear from localStorage - keep for reconnect
             Logger.debug('Left all channels');
         } catch (error) {

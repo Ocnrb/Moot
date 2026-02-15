@@ -88,6 +88,9 @@ class MediaController {
         
         // Track total persisted storage size
         this.persistedStorageSize = 0;
+        
+        // Current owner address (for filtering seed files)
+        this.currentOwnerAddress = null;
     }
 
     /**
@@ -96,8 +99,62 @@ class MediaController {
     async init() {
         await this.initIndexedDB();
         this.initFileWorker();
-        await this.loadPersistedSeedFiles();
-        Logger.info('Media controller initialized');
+        // Note: Don't load seed files here - wait for wallet connection
+        // await this.loadPersistedSeedFiles(); 
+        Logger.info('Media controller initialized (waiting for wallet connection)');
+    }
+
+    /**
+     * Set owner address and load their seed files
+     * Called when wallet connects
+     * @param {string} address - Wallet address
+     */
+    async setOwner(address) {
+        this.currentOwnerAddress = address?.toLowerCase() || null;
+        
+        if (this.currentOwnerAddress) {
+            await this.loadPersistedSeedFiles();
+            Logger.info('Media controller: owner set to', this.currentOwnerAddress.slice(0, 8) + '...');
+        }
+    }
+
+    /**
+     * Reset all in-memory state (on disconnect)
+     * Does NOT clear persisted files - just unloads from memory
+     */
+    reset() {
+        // Cancel any pending download timers first
+        for (const [fileId, transfer] of this.incomingFiles) {
+            if (transfer.seederDiscoveryTimer) {
+                clearTimeout(transfer.seederDiscoveryTimer);
+            }
+            // Also clear any piece request timeouts
+            if (transfer.requestsInFlight) {
+                for (const [pieceIndex, request] of transfer.requestsInFlight) {
+                    if (request.timeoutId) {
+                        clearTimeout(request.timeoutId);
+                    }
+                }
+            }
+        }
+        
+        // Revoke all blob URLs to prevent memory leaks
+        for (const url of this.downloadedUrls.values()) {
+            URL.revokeObjectURL(url);
+        }
+        
+        // Clear all maps
+        this.imageCache.clear();
+        this.localFiles.clear();
+        this.downloadedUrls.clear();
+        this.incomingFiles.clear();
+        this.fileSeeders.clear();
+        
+        // Reset owner
+        this.currentOwnerAddress = null;
+        this.persistedStorageSize = 0;
+        
+        Logger.info('Media controller reset');
     }
 
     /**
@@ -1156,11 +1213,16 @@ class MediaController {
 
     /**
      * Load persisted seed files from IndexedDB
-     * Called on init() to restore seeding capabilities
+     * Called on setOwner() to restore seeding capabilities for current user
      */
     async loadPersistedSeedFiles() {
         if (!this.db || !this.db.objectStoreNames.contains('seedFiles')) {
             Logger.debug('No seedFiles store available');
+            return;
+        }
+        
+        if (!this.currentOwnerAddress) {
+            Logger.debug('No owner address set - skipping seed file load');
             return;
         }
         
@@ -1171,8 +1233,17 @@ class MediaController {
             
             let loadedCount = 0;
             let expiredCount = 0;
+            let skippedCount = 0;
             
             for (const record of seedFiles) {
+                // Only load files owned by current user
+                // Skip if: no owner (legacy file) OR owner is different
+                const recordOwner = record.ownerAddress?.toLowerCase();
+                if (!recordOwner || recordOwner !== this.currentOwnerAddress) {
+                    skippedCount++;
+                    continue;
+                }
+                
                 // Check if expired
                 if (now - record.timestamp > expireMs) {
                     await this.removeSeedFile(record.fileId);
@@ -1196,8 +1267,8 @@ class MediaController {
                 loadedCount++;
             }
             
-            if (loadedCount > 0 || expiredCount > 0) {
-                Logger.info(`Seed files: loaded ${loadedCount}, expired ${expiredCount}, storage: ${(this.persistedStorageSize / 1024 / 1024).toFixed(2)}MB`);
+            if (loadedCount > 0 || expiredCount > 0 || skippedCount > 0) {
+                Logger.info(`Seed files: loaded ${loadedCount}, expired ${expiredCount}, skipped ${skippedCount} (other users/legacy), storage: ${(this.persistedStorageSize / 1024 / 1024).toFixed(2)}MB`);
             }
         } catch (error) {
             Logger.error('Failed to load persisted seed files:', error);
@@ -1209,6 +1280,11 @@ class MediaController {
      */
     async persistSeedFile(fileId, blob, metadata, streamId, isPrivateChannel = false) {
         if (!this.db || !this.db.objectStoreNames.contains('seedFiles')) {
+            return false;
+        }
+        
+        if (!this.currentOwnerAddress) {
+            Logger.debug('No owner address set - skipping persistence');
             return false;
         }
         
@@ -1243,7 +1319,8 @@ class MediaController {
                 streamId,
                 metadata,
                 fileData,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                ownerAddress: this.currentOwnerAddress // Associate with current user
             };
             
             await this.saveSeedFile(record);
@@ -1410,6 +1487,33 @@ class MediaController {
         
         this.persistedStorageSize = 0;
         Logger.info('Cleared all persisted seed files');
+    }
+
+    /**
+     * Clear all persisted seed files for a specific owner (for delete account)
+     * @param {string} address - Owner address to clear files for
+     */
+    async clearSeedFilesForOwner(address) {
+        if (!this.db) return;
+        
+        const targetAddress = address?.toLowerCase();
+        if (!targetAddress) return;
+        
+        const seedFiles = await this.getAllSeedFiles();
+        let clearedCount = 0;
+        
+        for (const record of seedFiles) {
+            const recordOwner = record.ownerAddress?.toLowerCase();
+            if (recordOwner === targetAddress || !recordOwner) {
+                // Clear files owned by this user or legacy files without owner
+                await this.removeSeedFile(record.fileId);
+                clearedCount++;
+            }
+        }
+        
+        if (clearedCount > 0) {
+            Logger.info(`Cleared ${clearedCount} seed files for owner: ${targetAddress.slice(0, 8)}...`);
+        }
     }
 
     // ==================== UTILITY FUNCTIONS ====================

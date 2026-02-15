@@ -179,14 +179,7 @@ class StreamrController {
                     await this.grantPublicPermissions(stream);
                     Logger.debug('Public permissions granted');
                 } catch (permError) {
-                    Logger.warn('Failed to grant public permissions:', permError.message);
-                    // Retry with direct stream method
-                    try {
-                        await stream.grantPermissions({ public: true, permissions: ['subscribe', 'publish'] });
-                        Logger.debug('Public permissions granted (retry)');
-                    } catch (retryError) {
-                        Logger.error('Failed to grant public permissions after retry:', retryError.message);
-                    }
+                    Logger.error('Failed to grant public permissions:', permError.message);
                 }
             } else if (type === 'native') {
                 // Private (native) streams: set all permissions in single transaction
@@ -221,13 +214,7 @@ class StreamrController {
                         try {
                             await this.grantPublicPermissions(existingStream);
                         } catch (e) {
-                            Logger.warn('Could not grant public permissions:', e.message);
-                            // Direct fallback
-                            try {
-                                await existingStream.grantPermissions({ public: true, permissions: ['subscribe', 'publish'] });
-                            } catch (e2) {
-                                Logger.error('Public permissions failed completely:', e2.message);
-                            }
+                            Logger.error('Could not grant public permissions:', e.message);
                         }
                     } else if (type === 'native') {
                         // Private channel - set all permissions in single transaction
@@ -257,8 +244,8 @@ class StreamrController {
     }
 
     /**
-     * Set stream permissions in a single transaction (like Streamr Hub)
-     * Uses client.setPermissions() for batch permission updates
+     * Set stream permissions using client.setPermissions (single batch transaction)
+     * Grants permissions to public and/or specific members
      * @param {string} streamId - Stream ID
      * @param {Object} options - Permission options
      * @param {boolean} options.public - Whether to grant public permissions
@@ -281,14 +268,21 @@ class StreamrController {
 
         // Add member permissions
         if (options.members && options.members.length > 0) {
+            Logger.debug('Granting permissions to', options.members.length, 'members...');
+            
             for (const member of options.members) {
                 // Normalize to lowercase (Streamr uses lowercase internally)
                 const normalizedMember = member.toLowerCase();
+                
+                Logger.debug('Granting permissions to member:', normalizedMember);
+                
                 assignments.push({
-                    user: normalizedMember,
+                    userId: normalizedMember,
                     permissions: ['subscribe', 'publish']
                 });
             }
+            
+            Logger.debug('All member permissions granted');
         }
 
         if (assignments.length === 0) {
@@ -296,71 +290,34 @@ class StreamrController {
             return;
         }
 
-        Logger.debug('Setting permissions (single transaction):', assignments.length, 'assignments');
-
         // Use setPermissions for batch update (single transaction)
         await this.client.setPermissions({
             streamId: streamId,
             assignments: assignments
         });
 
-        Logger.debug('Permissions set successfully');
+        Logger.debug('Permissions set successfully (batch)');
     }
 
     /**
      * Grant public SUBSCRIBE and PUBLISH permissions to a stream
+     * Uses setPermissions for single transaction
      * @param {Object} stream - Stream object (or streamId string)
      */
     async grantPublicPermissions(stream) {
         // If string passed, get the stream object
-        if (typeof stream === 'string') {
-            stream = await this.client.getStream(stream);
-        }
+        const streamId = typeof stream === 'string' ? stream : stream.id;
 
-        // Get StreamPermission enum from SDK (different ways it might be exposed)
-        const StreamPermission = window.StreamPermission || 
-                                 window.StreamrClient?.StreamPermission;
-
-        // Try to grant both permissions in a SINGLE transaction
-        // This reduces gas costs and number of confirmation popups
-        const combinedFormats = [];
-        
-        // Format 1: Using StreamPermission enum with both permissions combined
-        if (StreamPermission && StreamPermission.SUBSCRIBE && StreamPermission.PUBLISH) {
-            combinedFormats.push({
+        // Use setPermissions for consistent single-transaction behavior
+        await this.client.setPermissions({
+            streamId: streamId,
+            assignments: [{
                 public: true,
-                permissions: [StreamPermission.SUBSCRIBE, StreamPermission.PUBLISH]
-            });
-        }
-        
-        // Format 2: String format (lowercase) - both combined
-        combinedFormats.push({
-            public: true,
-            permissions: ['subscribe', 'publish']
+                permissions: ['subscribe', 'publish']
+            }]
         });
         
-        // Format 3: String format (uppercase) - both combined
-        combinedFormats.push({
-            public: true,
-            permissions: ['SUBSCRIBE', 'PUBLISH']
-        });
-
-        for (let i = 0; i < combinedFormats.length; i++) {
-            try {
-                await stream.grantPermissions(combinedFormats[i]);
-                Logger.debug('Public permissions granted (combined, format ' + (i + 1) + ')');
-                return;
-            } catch (error) {
-                Logger.warn(`Combined permission format ${i + 1} failed:`, error.message);
-                if (i === combinedFormats.length - 1) {
-                    // All combined formats failed, try separate calls as fallback
-                    Logger.debug('Falling back to separate permission calls...');
-                    await stream.grantPermissions({ public: true, permissions: ['subscribe'] });
-                    await stream.grantPermissions({ public: true, permissions: ['publish'] });
-                    Logger.debug('Public permissions granted (separate calls)');
-                }
-            }
-        }
+        Logger.debug('Public permissions granted (batch)');
     }
 
     /**
@@ -386,13 +343,18 @@ class StreamrController {
 
     /**
      * Grant permissions to specific addresses (for native private channels)
-     * Uses client.setPermissions for reliable batch permission updates
+     * Uses client.setPermissions for batch operation (single transaction)
      * @param {string} streamId - Stream ID
      * @param {string[]} addresses - Array of Ethereum addresses
      */
     async grantPermissionsToAddresses(streamId, addresses) {
         if (!this.client) {
             throw new Error('Streamr client not initialized');
+        }
+
+        if (!addresses || addresses.length === 0) {
+            Logger.debug('No addresses to grant permissions to');
+            return;
         }
 
         try {
@@ -404,17 +366,12 @@ class StreamrController {
                 // Normalize to lowercase (Streamr uses lowercase internally)
                 const normalizedAddress = address.toLowerCase();
                 assignments.push({
-                    user: normalizedAddress,
+                    userId: normalizedAddress,
                     permissions: ['subscribe', 'publish']
                 });
             }
 
-            if (assignments.length === 0) {
-                Logger.debug('No addresses to grant permissions to');
-                return;
-            }
-
-            // Use setPermissions for reliable batch update
+            // Use setPermissions for batch update (single transaction)
             await this.client.setPermissions({
                 streamId: streamId,
                 assignments: assignments
@@ -447,7 +404,7 @@ class StreamrController {
                 // Normalize to lowercase
                 const normalizedAddress = address.toLowerCase();
                 assignments.push({
-                    user: normalizedAddress,
+                    userId: normalizedAddress,
                     permissions: [] // Empty array revokes all permissions
                 });
             }
@@ -501,7 +458,7 @@ class StreamrController {
                 await this.client.setPermissions({
                     streamId: streamId,
                     assignments: [{
-                        user: normalizedAddress,
+                        userId: normalizedAddress,
                         permissions: ['subscribe', 'publish', 'grant']
                     }]
                 });
@@ -513,7 +470,7 @@ class StreamrController {
                 await this.client.setPermissions({
                     streamId: streamId,
                     assignments: [{
-                        user: normalizedAddress,
+                        userId: normalizedAddress,
                         permissions: ['subscribe', 'publish'] // Remove grant by not including it
                     }]
                 });

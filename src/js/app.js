@@ -126,29 +126,43 @@ class App {
     }
 
     /**
-     * Disconnect wallet
+     * Disconnect wallet - COMPLETE CLEANUP
+     * This function is "sovereign" - it must fully reset the app state
      */
     async disconnectWallet() {
         try {
-            // Disconnect auth
-            authManager.disconnect();
+            // 1. Stop presence tracking first to stop publishing
+            channelManager.stopPresenceTracking();
             
-            // Lock storage
-            secureStorage.lock();
-            
-            // Leave all channels
+            // 2. Leave all channels (unsubscribe from Streamr streams)
             await channelManager.leaveAllChannels();
             
-            // Update UI
+            // 3. Destroy Streamr client completely (stops receiving messages)
+            await streamrController.disconnect();
+            
+            // 4. Reset media controller (clear in-memory files)
+            mediaController.reset();
+            
+            // 5. Lock secure storage
+            secureStorage.lock();
+            
+            // 6. Disconnect auth (clear wallet state)
+            authManager.disconnect();
+            
+            // 7. Update UI to disconnected state
             uiController.updateWalletInfo(null);
             uiController.updateNetworkStatus('Disconnected', false);
             uiController.renderChannelList(); // Clear channel list
             uiController.resetToDisconnectedState(); // Reset all UI state
             uiController.showNotification('Account disconnected', 'info');
             
-            Logger.info('Account disconnected');
+            Logger.info('Account disconnected - full cleanup complete');
         } catch (error) {
             Logger.error('Error disconnecting:', error);
+            // Even on error, try to reset UI
+            uiController.updateWalletInfo(null);
+            uiController.updateNetworkStatus('Disconnected', false);
+            uiController.resetToDisconnectedState();
             uiController.showNotification('Error disconnecting: ' + error.message, 'error');
         }
     }
@@ -1114,6 +1128,9 @@ class App {
             // Initialize Streamr client with private key
             await streamrController.init(signer);
 
+            // Set media controller owner to load appropriate seed files
+            await mediaController.setOwner(address);
+
             // Verify Streamr connection
             const streamrAddress = await streamrController.getAddress();
             Logger.info('Streamr connected with address:', streamrAddress);
@@ -1181,6 +1198,13 @@ class App {
         const typingUsers = new Map(); // streamId -> Map(user -> timestamp)
         
         channelManager.onMessage((event, data) => {
+            // CRITICAL: Check if still connected before processing any message
+            // This prevents messages from being processed after disconnect
+            if (!authManager.isConnected()) {
+                Logger.debug('Message ignored - user disconnected');
+                return;
+            }
+            
             // Get current channel to filter events
             const currentChannel = channelManager.getCurrentChannel();
             const currentStreamId = currentChannel?.streamId;

@@ -23,8 +23,11 @@ const LOGSTORE_CONFIG = {
     // LogStore Virtual Storage Node (backup option)
     LOGSTORE_NODE: '0x17f98084757a75add72bf6c5b5a6f69008c28a57',
     
-    // Number of messages to load on join
-    INITIAL_MESSAGES: 100,
+    // Number of messages to load on join (reduced for lazy loading)
+    INITIAL_MESSAGES: 30,
+    
+    // Number of messages to load on scroll (pagination)
+    LOAD_MORE_COUNT: 30,
     
     // Partitions (swapped: messages on 0 for storage compatibility)
     PARTITIONS: {
@@ -615,17 +618,14 @@ class StreamrController {
             throw new Error('Streamr client not initialized');
         }
 
-        // Check if already subscribed to this stream
-        if (this.subscriptions.has(streamId)) {
-            Logger.debug('Already subscribed to stream:', streamId);
-            return true;
-        }
-
         try {
-            const partitionSubs = {};
+            // Get existing subscriptions or create new object
+            // This allows subscribing to individual partitions without blocking others
+            const partitionSubs = this.subscriptions.get(streamId) || {};
 
-            // Subscribe to partition 0 (Control/Metadata)
-            if (handlers.onControl) {
+            // Subscribe to partition 0 (Control/Metadata) - only if not already subscribed
+            if (handlers.onControl && !partitionSubs[0]) {
+                Logger.debug('Subscribing to partition 0 (control) for:', streamId);
                 partitionSubs[0] = await this.client.subscribe({
                     streamId: streamId,
                     partition: 0
@@ -645,8 +645,8 @@ class StreamrController {
                 });
             }
 
-            // Subscribe to partition 1 (Text Messages)
-            if (handlers.onMessage) {
+            // Subscribe to partition 1 (Text Messages) - only if not already subscribed
+            if (handlers.onMessage && !partitionSubs[1]) {
                 Logger.debug('Subscribing to partition 1 (messages) for:', streamId);
                 partitionSubs[1] = await this.client.subscribe({
                     streamId: streamId,
@@ -670,8 +670,9 @@ class StreamrController {
                 Logger.debug('Subscribed to partition 1');
             }
 
-            // Subscribe to partition 2 (Media)
-            if (handlers.onMedia) {
+            // Subscribe to partition 2 (Media) - only if not already subscribed
+            if (handlers.onMedia && !partitionSubs[2]) {
+                Logger.debug('Subscribing to partition 2 (media) for:', streamId);
                 partitionSubs[2] = await this.client.subscribe({
                     streamId: streamId,
                     partition: 2
@@ -798,6 +799,105 @@ class StreamrController {
     }
 
     /**
+     * Subscribe to a specific partition only (lazy/on-demand loading)
+     * @param {string} streamId - Stream ID
+     * @param {number} partition - Partition number (0=Messages, 1=Control, 2=Media)
+     * @param {Function} handler - Message handler
+     * @param {string} password - Optional password for encrypted channels
+     * @returns {Promise<Object>} - Subscription object
+     */
+    async subscribeToPartition(streamId, partition, handler, password = null) {
+        if (!this.client) {
+            throw new Error('Streamr client not initialized');
+        }
+
+        // Get or create partition map for this stream
+        let partitionSubs = this.subscriptions.get(streamId);
+        if (!partitionSubs) {
+            partitionSubs = {};
+            this.subscriptions.set(streamId, partitionSubs);
+        }
+
+        // Skip if already subscribed to this partition
+        if (partitionSubs[partition]) {
+            Logger.debug(`Already subscribed to ${streamId} partition ${partition}`);
+            return partitionSubs[partition];
+        }
+
+        const messageHandler = async (message, metadata) => {
+            try {
+                let data = message;
+                if (password && typeof message === 'string') {
+                    data = await cryptoManager.decryptJSON(message, password);
+                }
+                // Add sender info from metadata if available
+                if (metadata?.publisherId && typeof data === 'object') {
+                    data.senderId = metadata.publisherId;
+                }
+                handler(data);
+            } catch (error) {
+                Logger.error(`Failed to process partition ${partition} message:`, error);
+            }
+        };
+
+        partitionSubs[partition] = await this.client.subscribe({
+            streamId: streamId,
+            partition: partition
+        }, messageHandler);
+
+        Logger.debug(`Subscribed to ${streamId} partition ${partition}`);
+        return partitionSubs[partition];
+    }
+
+    /**
+     * Unsubscribe from a specific partition only
+     * @param {string} streamId - Stream ID
+     * @param {number} partition - Partition number
+     */
+    async unsubscribeFromPartition(streamId, partition) {
+        const partitionSubs = this.subscriptions.get(streamId);
+        
+        if (partitionSubs && partitionSubs[partition]) {
+            try {
+                await partitionSubs[partition].unsubscribe();
+                delete partitionSubs[partition];
+                Logger.debug(`Unsubscribed from ${streamId} partition ${partition}`);
+                
+                // Clean up if no partitions remain
+                if (Object.keys(partitionSubs).length === 0) {
+                    this.subscriptions.delete(streamId);
+                }
+            } catch (error) {
+                Logger.warn(`Failed to unsubscribe from partition ${partition}:`, error);
+            }
+        }
+    }
+
+    /**
+     * Check if subscribed to a specific partition
+     * @param {string} streamId - Stream ID
+     * @param {number} partition - Partition number
+     * @returns {boolean}
+     */
+    isSubscribedToPartition(streamId, partition) {
+        const partitionSubs = this.subscriptions.get(streamId);
+        return partitionSubs && partitionSubs[partition] !== undefined;
+    }
+
+    /**
+     * Ensure media partition is subscribed (lazy load when needed)
+     * @param {string} streamId - Stream ID
+     * @param {Function} handler - Media message handler
+     * @param {string} password - Optional password
+     */
+    async ensureMediaSubscription(streamId, handler, password = null) {
+        if (this.isSubscribedToPartition(streamId, 2)) {
+            return;
+        }
+        return this.subscribeToPartition(streamId, 2, handler, password);
+    }
+
+    /**
      * Disconnect Streamr client
      */
     async disconnect() {
@@ -874,6 +974,101 @@ class StreamrController {
         } catch (error) {
             Logger.warn('History fetch error:', error.message);
             return messages;
+        }
+    }
+
+    /**
+     * Fetch older historical messages (for lazy loading / pagination)
+     * Uses timestamp-based pagination to get messages older than a given point
+     * @param {string} streamId - Stream ID
+     * @param {number} partition - Partition number
+     * @param {number} beforeTimestamp - Unix timestamp (ms) - fetch messages before this
+     * @param {number} count - Number of messages to fetch
+     * @param {string} password - Password for encrypted channels (optional)
+     * @returns {Promise<{messages: Array, hasMore: boolean}>} - Messages and pagination info
+     */
+    async fetchOlderHistory(streamId, partition = 0, beforeTimestamp, count = LOGSTORE_CONFIG.LOAD_MORE_COUNT, password = null) {
+        if (!this.client) {
+            throw new Error('Client not initialized');
+        }
+        
+        const messages = [];
+        
+        // Ephemeral message types that should NEVER be loaded from history
+        const EPHEMERAL_TYPES = ['presence', 'typing'];
+        
+        // Valid message types for partition 0 (stored messages)
+        const isValidStoredMessage = (msg) => {
+            if (msg?.type === 'text') return true;
+            if (msg?.id && msg?.text && msg?.sender && msg?.timestamp && !msg?.type) return true;
+            if (msg?.type === 'reaction') return true;
+            if (msg?.type === 'image' && msg?.imageId) return true;
+            if (msg?.type === 'video_announce' && msg?.metadata) return true;
+            return false;
+        };
+        
+        try {
+            Logger.debug(`Fetching ${count} older messages before ${new Date(beforeTimestamp).toISOString()}`);
+            
+            // Streamr SDK resend with range: from epoch to beforeTimestamp
+            // We request more than needed to account for filtered messages
+            const resend = await this.client.resend(
+                streamId,
+                { 
+                    partition: partition,
+                    from: { timestamp: 0 },
+                    to: { timestamp: beforeTimestamp - 1 } // -1 to exclude the boundary message
+                }
+            );
+            
+            // Collect all messages in range, then take the last N
+            const allMessages = [];
+            
+            for await (const message of resend) {
+                try {
+                    let content = message.content || message;
+                    
+                    // Decrypt if password provided
+                    if (password && typeof content === 'string') {
+                        try {
+                            content = await cryptoManager.decryptJSON(content, password);
+                        } catch (decryptError) {
+                            continue; // Skip messages we can't decrypt
+                        }
+                    }
+                    
+                    // Skip ephemeral messages
+                    if (content?.type && EPHEMERAL_TYPES.includes(content.type)) {
+                        continue;
+                    }
+                    
+                    // For partition 0: only accept valid stored message types
+                    if (partition === 0 && !isValidStoredMessage(content)) {
+                        continue;
+                    }
+                    
+                    allMessages.push(content);
+                } catch (e) {
+                    Logger.warn('Error processing historical message:', e.message);
+                }
+            }
+            
+            // Take the last N messages (most recent before the timestamp)
+            const startIndex = Math.max(0, allMessages.length - count);
+            const resultMessages = allMessages.slice(startIndex);
+            
+            // hasMore is true if there were more messages than we're returning
+            const hasMore = allMessages.length > count;
+            
+            Logger.info(`Loaded ${resultMessages.length} older messages (hasMore: ${hasMore})`);
+            
+            return {
+                messages: resultMessages,
+                hasMore: hasMore
+            };
+        } catch (error) {
+            Logger.warn('Older history fetch error:', error.message);
+            return { messages: [], hasMore: false };
         }
     }
 

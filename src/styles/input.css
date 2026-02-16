@@ -1,3 +1,23 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Channel drag and drop styles */
+.channel-item.dragging {
+    opacity: 0.5;
+    border-color: #F6851B !important;
+}
+
+.channel-item.drag-over {
+    border-color: #F6851B !important;
+    background-color: #1a1a1a !important;
+    transform: scale(1.02);
+}
+
+.channel-item .drag-handle {
+    touch-action: none;
+}
+
+.channel-item .drag-handle:active {
+    cursor: grabbing;
+}

@@ -11,6 +11,7 @@ import { notificationManager } from './notifications.js';
 import { identityManager } from './identity.js';
 import { secureStorage } from './secureStorage.js';
 import { mediaController } from './media.js';
+import { subscriptionManager } from './subscriptionManager.js';
 import { Logger } from './logger.js';
 
 class App {
@@ -134,22 +135,25 @@ class App {
             // 1. Stop presence tracking first to stop publishing
             channelManager.stopPresenceTracking();
             
-            // 2. Leave all channels (unsubscribe from Streamr streams)
+            // 2. Cleanup subscription manager (stops background poller)
+            await subscriptionManager.cleanup();
+            
+            // 3. Leave all channels (unsubscribe from Streamr streams)
             await channelManager.leaveAllChannels();
             
-            // 3. Destroy Streamr client completely (stops receiving messages)
+            // 4. Destroy Streamr client completely (stops receiving messages)
             await streamrController.disconnect();
             
-            // 4. Reset media controller (clear in-memory files)
+            // 5. Reset media controller (clear in-memory files)
             mediaController.reset();
             
-            // 5. Lock secure storage
+            // 6. Lock secure storage
             secureStorage.lock();
             
-            // 6. Disconnect auth (clear wallet state)
+            // 7. Disconnect auth (clear wallet state)
             authManager.disconnect();
             
-            // 7. Update UI to disconnected state
+            // 8. Update UI to disconnected state
             uiController.updateWalletInfo(null);
             uiController.updateNetworkStatus('Disconnected', false);
             uiController.renderChannelList(); // Clear channel list
@@ -1151,11 +1155,26 @@ class App {
             // Show "select a channel" state (connected but no channel open)
             uiController.showConnectedNoChannelState();
 
-            // Re-subscribe to all channels
-            for (const channel of channelManager.getAllChannels()) {
-                await channelManager.subscribeToChannel(channel.streamId, channel.password);
+            // Start background activity poller for all channels
+            // This detects new messages without full subscriptions
+            subscriptionManager.startBackgroundPoller();
+            
+            // Restore last opened channel OR select first channel
+            // Only subscribes to the active channel (not all channels)
+            const lastChannel = secureStorage.getLastOpenedChannel();
+            const channels = channelManager.getAllChannels();
+            
+            if (lastChannel && channelManager.getChannel(lastChannel)) {
+                // Restore previous session's channel
+                Logger.info('Restoring last opened channel:', lastChannel);
+                await uiController.selectChannel(lastChannel);
+            } else if (channels.length > 0) {
+                // Select first channel if no last channel saved
+                Logger.info('Selecting first channel:', channels[0].streamId);
+                await uiController.selectChannel(channels[0].streamId);
             }
-            Logger.info('Subscribed to all channels');
+            
+            Logger.info('Dynamic subscription management active (background poller started)');
 
             // Initialize notification system
             try {
@@ -1210,11 +1229,8 @@ class App {
             const currentStreamId = currentChannel?.streamId;
             
             if (event === 'message') {
-                // Update message count in sidebar for any channel
-                const channel = channelManager.getChannel(data.streamId);
-                if (channel) {
-                    uiController.updateChannelMessageCount(data.streamId, channel.messages.length);
-                }
+                // Update unread count in sidebar for any channel
+                uiController.updateUnreadCount(data.streamId);
                 
                 // Only show message if it's from the current channel
                 if (data.streamId === currentStreamId) {
@@ -1271,6 +1287,16 @@ class App {
             } else if (event === 'channelJoined') {
                 // Re-announce as seeder for any persisted files in this channel
                 mediaController.reannounceForChannel(data.streamId, data.password);
+            } else if (event === 'history_loaded') {
+                // History was loaded via lazy loading - re-render if current channel
+                if (data.streamId === currentStreamId) {
+                    const channel = channelManager.getCurrentChannel();
+                    if (channel) {
+                        // The UI will handle this - renderMessages was already called
+                        // by handleMessagesScroll after loadMoreHistory
+                        Logger.debug(`History loaded: ${data.loaded} messages, hasMore: ${data.hasMore}`);
+                    }
+                }
             }
         });
         

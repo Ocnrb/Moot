@@ -57,11 +57,35 @@
         .reaction-badge:hover { background-color: #4b5563; }
         .reaction-badge.user-reacted { background-color: #3e527b; }
         
-        /* Message actions */
-        .message-actions { position: absolute; bottom: -10px; right: 4px; display: none; gap: 2px; background-color: #374151; border-radius: 12px; padding: 2px 4px; z-index: 5; }
-        .message-bubble:hover .message-actions { display: flex; }
-        .action-btn { cursor: pointer; font-size: 14px; padding: 2px 4px; border-radius: 4px; transition: background-color 0.2s; }
-        .action-btn:hover { background-color: #4b5563; }
+        /* Message actions - minimalist triggers at bottom corner */
+        .react-trigger, .reply-trigger { opacity: 0; transition: opacity 0.15s; cursor: pointer; color: #555; user-select: none; position: absolute; display: flex; align-items: center; }
+        .react-trigger { bottom: 4px; }
+        .reply-trigger { bottom: 28px; }
+        .own-message .react-trigger, .own-message .reply-trigger { left: -28px; }
+        .other-message .react-trigger, .other-message .reply-trigger { right: -28px; }
+        .react-trigger svg, .reply-trigger svg { display: block; width: 20px; height: 20px; }
+        .message-bubble:hover .react-trigger, .message-bubble:hover .reply-trigger { opacity: 1; }
+        .react-trigger:hover, .reply-trigger:hover { color: #888; }
+        
+        /* Reply preview in messages */
+        .reply-preview { background: #252525; border-left: 2px solid #555; padding: 4px 8px; margin-bottom: 6px; border-radius: 4px; font-size: 0.8rem; color: #888; cursor: pointer; max-width: 280px; }
+        .reply-preview:hover { background: #303030; }
+        .reply-preview-name { color: #aaa; font-weight: 500; font-size: 0.75rem; }
+        .reply-preview-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; margin-top: 2px; }
+        
+        /* Reply bar above input */
+        .reply-bar { background: #1a1a1a; padding: 8px 12px; border-top: 1px solid #333; display: none; align-items: center; justify-content: space-between; gap: 12px; }
+        .reply-bar.active { display: flex; }
+        .reply-bar-info { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+        .reply-bar-label { font-size: 0.7rem; color: #666; }
+        .reply-bar-name { font-size: 0.75rem; color: #888; font-weight: 500; }
+        .reply-bar-text { font-size: 0.8rem; color: #aaa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .reply-bar-close { cursor: pointer; color: #555; padding: 4px; border-radius: 4px; transition: all 0.15s; }
+        .reply-bar-close:hover { color: #aaa; background: #333; }
+        
+        /* Message highlight when scrolled to */
+        .message-highlight { animation: highlightPulse 1.5s ease-out; }
+        @keyframes highlightPulse { 0%, 100% { background: transparent; } 30% { background: rgba(255,255,255,0.1); } }
         
         /* Date separator pill */
         .date-separator { display: flex; justify-content: center; margin: 1rem 0; }
@@ -197,21 +221,16 @@
                         id="quick-join-input"
                         placeholder="Join with channel ID..."
                         autocomplete="off"
-                        class="w-full bg-[#1a1a1a] border border-[#282828] text-white pl-7 pr-8 py-2 rounded-lg text-sm placeholder-[#555] focus:outline-none focus:border-[#444] transition"
+                        class="w-full bg-[#1a1a1a] border border-[#282828] text-white pl-7 pr-3 py-2 rounded-lg text-sm placeholder-[#555] focus:outline-none focus:border-[#444] transition"
                     />
-                    <button id="quick-join-btn" class="absolute right-2 top-1/2 -translate-y-1/2 text-[#555] hover:text-white transition" title="Join channel">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"/>
-                        </svg>
-                    </button>
                 </div>
                 
-                <!-- Explore button -->
+                <!-- Explore/Join button -->
                 <button id="browse-channels-btn" class="w-full bg-[#1a1a1a] hover:bg-[#252525] border border-[#282828] px-3 py-2 rounded-lg text-sm text-[#888] hover:text-white transition flex items-center justify-center gap-1.5">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg id="browse-btn-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418"/>
                     </svg>
-                    Explore
+                    <span id="browse-btn-text">Explore</span>
                 </button>
             </div>
 
@@ -303,6 +322,17 @@
                 <span class="typing-dot"></span>
             </div>
 
+            <!-- Reply Bar -->
+            <div id="reply-bar" class="reply-bar">
+                <div class="reply-bar-info">
+                    <span class="reply-bar-label">Replying to <span id="reply-to-name" class="reply-bar-name"></span></span>
+                    <span id="reply-to-text" class="reply-bar-text"></span>
+                </div>
+                <span id="reply-bar-close" class="reply-bar-close" title="Cancel reply">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </span>
+            </div>
+
             <!-- Message Input -->
             <div id="message-input-container" class="bg-[#1e1e1e] border-t border-gray-800 p-3 hidden">
                 <div class="relative flex items-center gap-2">
@@ -345,13 +375,13 @@
                     <input type="file" id="video-input" class="hidden" accept="video/mp4,video/webm,video/quicktime">
                     
                     <!-- Input -->
-                    <input
-                        type="text"
+                    <textarea
                         id="message-input"
                         placeholder="Type a message..."
                         autocomplete="off"
-                        class="flex-1 bg-[#1a1a1a] text-white px-4 py-2 rounded-full focus:outline-none focus:border-[#444] border border-[#282828] text-sm transition"
-                    />
+                        rows="1"
+                        class="flex-1 bg-[#1a1a1a] text-white px-4 py-2 rounded-2xl focus:outline-none focus:border-[#444] border border-[#282828] text-sm transition resize-none overflow-y-auto min-h-[38px] max-h-[120px] leading-5"
+                    ></textarea>
                     
                     <!-- Send Button: transparent, dark-orange arrow icon -->
                     <button id="send-message-btn" class="bg-transparent w-9 h-9 transition flex items-center justify-center p-0" aria-label="Send message">

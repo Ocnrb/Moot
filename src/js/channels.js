@@ -78,8 +78,17 @@ class ChannelManager {
         this.currentChannel = null;
         this.messageHandlers = [];
         
-        // Deduplication: track message IDs currently being processed
+        // Deduplication: track message IDs currently being processed (receive-side)
         this.processingMessages = new Set();
+        
+        // Deduplication: track messages currently being sent (send-side)
+        // Prevents duplicate sends on rapid clicks or retries
+        this.sendingMessages = new Set(); // streamId:messageId
+        
+        // Deduplication: track reactions currently being sent
+        // Prevents duplicate reaction sends on rapid clicks
+        this.pendingReactions = new Set(); // streamId:messageId:emoji:action
+        this.REACTION_DEBOUNCE_MS = 500; // Minimum time between same reaction sends
         
         // Online presence tracking
         this.onlineUsers = new Map(); // streamId -> Map(userId -> {lastActive, nickname, address})
@@ -108,10 +117,17 @@ class ChannelManager {
 
             if (channelsData && channelsData.length > 0) {
                 for (const channel of channelsData) {
+                    // Initialize empty arrays - messages loaded from LogStore on demand
+                    channel.messages = [];
+                    channel.reactions = {};
+                    channel.historyLoaded = false;  // Track if initial history was loaded
+                    channel.hasMoreHistory = true;  // Assume there's more until proven otherwise
+                    channel.loadingHistory = false; // Prevent concurrent loads
+                    channel.oldestTimestamp = null; // For pagination
                     this.channels.set(channel.streamId, channel);
                 }
 
-                Logger.debug(`Loaded ${channelsData.length} channels from secure storage`);
+                Logger.debug(`Loaded ${channelsData.length} channels from secure storage (metadata only)`);
                 Logger.debug('Channels in map:', Array.from(this.channels.keys()));
             } else {
                 Logger.debug('No saved channels found');
@@ -123,6 +139,7 @@ class ChannelManager {
 
     /**
      * Save channels to secure storage (encrypted)
+     * NOTE: messages and reactions are NOT persisted - they come from LogStore
      */
     async saveChannels() {
         try {
@@ -131,11 +148,24 @@ class ChannelManager {
                 return;
             }
             
-            const channelsData = Array.from(this.channels.values());
+            // Strip messages and reactions from persistence - only save metadata
+            // Messages are loaded from LogStore on demand (lazy loading)
+            const channelsData = Array.from(this.channels.values()).map(ch => ({
+                streamId: ch.streamId,
+                name: ch.name,
+                type: ch.type,
+                createdAt: ch.createdAt,
+                createdBy: ch.createdBy,
+                password: ch.password,
+                members: ch.members || [],
+                storageEnabled: ch.storageEnabled
+                // messages: excluded - loaded from LogStore
+                // reactions: excluded - loaded from LogStore
+            }));
             Logger.debug('Saving channels to secure storage:', channelsData.length);
 
             await secureStorage.setChannels(channelsData);
-            Logger.debug('Channels saved to secure storage');
+            Logger.debug('Channels saved to secure storage (metadata only)');
         } catch (error) {
             Logger.error('Failed to save channels:', error);
         }
@@ -150,6 +180,8 @@ class ChannelManager {
         this.onlineUsers.clear();
         this.processingMessages.clear();
         this.pendingMessages.clear();
+        this.sendingMessages.clear();
+        this.pendingReactions.clear();
         Logger.debug('Channels cleared from memory');
     }
 
@@ -207,12 +239,21 @@ class ChannelManager {
                 members: channelMembers,
                 messages: [],
                 reactions: {}, // messageId -> { emoji -> [users] }
-                storageEnabled: storageEnabled // Track if LogStore is enabled
+                storageEnabled: storageEnabled, // Track if LogStore is enabled
+                // Lazy loading state (not persisted)
+                historyLoaded: false,
+                hasMoreHistory: true,
+                loadingHistory: false,
+                oldestTimestamp: null
             };
 
             // Add to channels map and save
             this.channels.set(channel.streamId, channel);
             await this.saveChannels();
+            
+            // Add to channel order (new channels go to top)
+            await secureStorage.addToChannelOrder(channel.streamId);
+            
             Logger.debug('Channel saved to localStorage:', channel.streamId);
             Logger.debug('Total channels:', this.channels.size);
 
@@ -312,12 +353,20 @@ class ChannelManager {
                 password: password,
                 members: members,
                 messages: [],
-                reactions: {} // messageId -> { emoji -> [users] }
+                reactions: {}, // messageId -> { emoji -> [users] }
+                // Lazy loading state (not persisted)
+                historyLoaded: false,
+                hasMoreHistory: true,
+                loadingHistory: false,
+                oldestTimestamp: null
             };
 
             // Add to channels map
             this.channels.set(streamId, channel);
             await this.saveChannels();
+            
+            // Add to channel order (new channels go to top)
+            await secureStorage.addToChannelOrder(streamId);
 
             // Subscribe to real-time messages
             await this.subscribeToChannel(streamId, password);
@@ -1005,11 +1054,11 @@ class ChannelManager {
             // Handle presence update
             this.handlePresenceMessage(streamId, data);
         } else if (data.type === 'reaction') {
-            // Someone reacted to a message - store locally
+            // Someone reacted to a message - store in memory only
             const channel = this.channels.get(streamId);
             if (channel && data.messageId && data.emoji && data.user) {
                 this.storeReaction(channel, data.messageId, data.emoji, data.user, data.action || 'add');
-                await this.saveChannels();
+                // NOTE: No saveChannels() - reactions are not persisted, only in RAM
             }
             
             // Notify handlers to update UI
@@ -1148,10 +1197,16 @@ class ChannelManager {
         // Add to channel messages
         channel.messages.push(data);
         
+        // Update oldest timestamp for pagination
+        if (!channel.oldestTimestamp || data.timestamp < channel.oldestTimestamp) {
+            channel.oldestTimestamp = data.timestamp;
+        }
+        
         // Sort to maintain chronological order (in case of out-of-order delivery)
         this.sortMessagesByTimestamp(channel);
         
-        await this.saveChannels();
+        // NOTE: No saveChannels() - messages are not persisted, only in RAM
+        // They will be reloaded from LogStore on next session
 
         // Notify handlers
         this.notifyHandlers('message', { streamId, message: data });
@@ -1188,8 +1243,12 @@ class ChannelManager {
      * Send a text message
      * @param {string} streamId - Stream ID
      * @param {string} text - Message text
+     * @param {Object|null} replyTo - Reply context (optional)
      */
-    async sendMessage(streamId, text) {
+    async sendMessage(streamId, text, replyTo = null) {
+        let message = null;
+        let sendKey = null;
+        
         try {
             const channel = this.channels.get(streamId);
             if (!channel) {
@@ -1197,7 +1256,16 @@ class ChannelManager {
             }
 
             // Create signed message using identity manager
-            const message = await identityManager.createSignedMessage(text, streamId);
+            message = await identityManager.createSignedMessage(text, streamId, replyTo);
+            
+            // DEDUPLICATION: Check if this message is already being sent
+            // This prevents double-sends from rapid clicks or retry loops
+            sendKey = `${streamId}:${message.id}`;
+            if (this.sendingMessages.has(sendKey)) {
+                Logger.warn('Message already being sent, skipping duplicate:', message.id);
+                return; // Don't throw - just silently skip duplicate
+            }
+            this.sendingMessages.add(sendKey);
 
             // Add verification info for local display
             message.verified = {
@@ -1210,7 +1278,7 @@ class ChannelManager {
 
             // Add to local messages FIRST (before publishing)
             channel.messages.push(message);
-            await this.saveChannels();
+            // NOTE: No saveChannels() - messages are not persisted
 
             // Notify handlers to update UI immediately (with pending indicator)
             this.notifyHandlers('message', { streamId, message: message });
@@ -1220,7 +1288,7 @@ class ChannelManager {
             
             // Mark as sent (remove pending flag)
             message.pending = false;
-            await this.saveChannels();
+            // NOTE: No saveChannels() - messages are not persisted
             
             // Notify UI that message is confirmed
             this.notifyHandlers('message_confirmed', { streamId, messageId: message.id });
@@ -1232,6 +1300,11 @@ class ChannelManager {
             // User can see it failed and retry manually
             this.notifyHandlers('message_failed', { streamId, messageId: message?.id, error: error.message });
             throw error;
+        } finally {
+            // Always clean up the sending lock
+            if (sendKey) {
+                this.sendingMessages.delete(sendKey);
+            }
         }
     }
     
@@ -1274,7 +1347,7 @@ class ChannelManager {
         try {
             await this.publishWithRetry(streamId, message, channel.password);
             message.pending = false;
-            await this.saveChannels();
+            // NOTE: No saveChannels() - messages are not persisted
             this.notifyHandlers('message_confirmed', { streamId, messageId: message.id });
             Logger.debug('Pending message sent:', messageId);
         } catch (error) {
@@ -1290,6 +1363,103 @@ class ChannelManager {
     sortMessagesByTimestamp(channel) {
         if (!channel || !channel.messages) return;
         channel.messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    }
+
+    /**
+     * Load more (older) history from LogStore - for lazy loading / infinite scroll
+     * @param {string} streamId - Stream ID
+     * @returns {Promise<{loaded: number, hasMore: boolean}>} - Number of messages loaded and if more exist
+     */
+    async loadMoreHistory(streamId) {
+        const channel = this.channels.get(streamId);
+        if (!channel) {
+            Logger.warn('Channel not found for loadMoreHistory:', streamId);
+            return { loaded: 0, hasMore: false };
+        }
+        
+        // Prevent concurrent loads
+        if (channel.loadingHistory) {
+            Logger.debug('Already loading history, skipping');
+            return { loaded: 0, hasMore: channel.hasMoreHistory };
+        }
+        
+        // Check if there's more to load
+        if (!channel.hasMoreHistory) {
+            Logger.debug('No more history to load');
+            return { loaded: 0, hasMore: false };
+        }
+        
+        // Need a reference point (oldest message timestamp)
+        if (!channel.oldestTimestamp && channel.messages.length === 0) {
+            Logger.debug('No messages yet, cannot load more history');
+            return { loaded: 0, hasMore: true };
+        }
+        
+        const beforeTimestamp = channel.oldestTimestamp || Date.now();
+        
+        channel.loadingHistory = true;
+        this.notifyHandlers('history_loading', { streamId, loading: true });
+        
+        try {
+            Logger.debug('Loading more history before:', new Date(beforeTimestamp).toISOString());
+            
+            const result = await streamrController.fetchOlderHistory(
+                streamId,
+                LOGSTORE_CONFIG.PARTITIONS.MESSAGES,
+                beforeTimestamp,
+                LOGSTORE_CONFIG.LOAD_MORE_COUNT,
+                channel.password
+            );
+            
+            if (result.messages.length > 0) {
+                // Process and verify each message
+                for (const msg of result.messages) {
+                    // Skip if already exists
+                    if (channel.messages.some(m => m.id === msg.id)) {
+                        continue;
+                    }
+                    
+                    // Verify signature (skip timestamp check for historical)
+                    try {
+                        if (!msg.channelId) msg.channelId = streamId;
+                        const verification = await identityManager.verifyMessage(msg, streamId, {
+                            skipTimestampCheck: true
+                        });
+                        msg.verified = verification;
+                    } catch (error) {
+                        msg.verified = { valid: false, error: error.message, trustLevel: -1 };
+                    }
+                    
+                    channel.messages.push(msg);
+                    
+                    // Update oldest timestamp
+                    if (!channel.oldestTimestamp || msg.timestamp < channel.oldestTimestamp) {
+                        channel.oldestTimestamp = msg.timestamp;
+                    }
+                }
+                
+                // Sort messages
+                this.sortMessagesByTimestamp(channel);
+            }
+            
+            channel.hasMoreHistory = result.hasMore;
+            channel.loadingHistory = false;
+            
+            this.notifyHandlers('history_loaded', { 
+                streamId, 
+                loaded: result.messages.length, 
+                hasMore: result.hasMore 
+            });
+            
+            Logger.info(`Loaded ${result.messages.length} older messages, hasMore: ${result.hasMore}`);
+            
+            return { loaded: result.messages.length, hasMore: result.hasMore };
+        } catch (error) {
+            Logger.error('Failed to load more history:', error);
+            channel.loadingHistory = false;
+            this.notifyHandlers('history_loading', { streamId, loading: false });
+            return { loaded: 0, hasMore: channel.hasMoreHistory };
+        }
     }
 
     /**
@@ -1325,13 +1495,26 @@ class ChannelManager {
      * @param {boolean} isRemoving - True if removing reaction
      */
     async sendReaction(streamId, messageId, emoji, isRemoving = false) {
+        const action = isRemoving ? 'remove' : 'add';
+        
+        // DEDUPLICATION: Create unique key for this reaction operation
+        // Prevents duplicate sends on rapid clicks
+        const reactionKey = `${streamId}:${messageId}:${emoji}:${action}`;
+        
+        if (this.pendingReactions.has(reactionKey)) {
+            Logger.debug('Reaction already pending, skipping duplicate:', reactionKey);
+            return; // Silently skip duplicate
+        }
+        
+        this.pendingReactions.add(reactionKey);
+        
         try {
             const channel = this.channels.get(streamId);
             if (!channel) return;
 
             const reaction = {
                 type: 'reaction',
-                action: isRemoving ? 'remove' : 'add',
+                action: action,
                 messageId: messageId,
                 emoji: emoji,
                 user: authManager.getAddress(),
@@ -1345,9 +1528,14 @@ class ChannelManager {
                 channel.password
             );
             
-            Logger.debug('Reaction', isRemoving ? 'removed' : 'added', ':', emoji, 'to message:', messageId);
+            Logger.debug('Reaction', action, ':', emoji, 'to message:', messageId);
         } catch (error) {
             Logger.error('Failed to send reaction:', error);
+        } finally {
+            // Remove from pending after debounce period to prevent rapid re-sends
+            setTimeout(() => {
+                this.pendingReactions.delete(reactionKey);
+            }, this.REACTION_DEBOUNCE_MS);
         }
     }
 
@@ -1360,6 +1548,9 @@ class ChannelManager {
             await streamrController.unsubscribe(streamId);
             this.channels.delete(streamId);
             await this.saveChannels();
+            
+            // Remove from channel order
+            await secureStorage.removeFromChannelOrder(streamId);
 
             if (this.currentChannel === streamId) {
                 this.currentChannel = null;
@@ -1428,6 +1619,9 @@ class ChannelManager {
             // Remove from local storage
             this.channels.delete(streamId);
             await this.saveChannels();
+            
+            // Remove from channel order
+            await secureStorage.removeFromChannelOrder(streamId);
 
             if (this.currentChannel === streamId) {
                 this.currentChannel = null;

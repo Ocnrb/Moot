@@ -676,10 +676,6 @@ video {
   right: 0.375rem;
 }
 
-.right-2 {
-  right: 0.5rem;
-}
-
 .right-2\.5 {
   right: 0.625rem;
 }
@@ -992,6 +988,10 @@ video {
   min-height: 180px;
 }
 
+.min-h-\[38px\] {
+  min-height: 38px;
+}
+
 .min-h-\[420px\] {
   min-height: 420px;
 }
@@ -1207,6 +1207,10 @@ video {
 
 .animate-spin {
   animation: spin 1s linear infinite;
+}
+
+.cursor-grab {
+  cursor: grab;
 }
 
 .cursor-not-allowed {
@@ -1593,11 +1597,6 @@ video {
   background-color: rgb(42 42 42 / var(--tw-bg-opacity, 1));
 }
 
-.bg-\[\#333\] {
-  --tw-bg-opacity: 1;
-  background-color: rgb(51 51 51 / var(--tw-bg-opacity, 1));
-}
-
 .bg-\[\#444\] {
   --tw-bg-opacity: 1;
   background-color: rgb(68 68 68 / var(--tw-bg-opacity, 1));
@@ -1605,6 +1604,10 @@ video {
 
 .bg-\[\#F6851B\]\/10 {
   background-color: rgb(246 133 27 / 0.1);
+}
+
+.bg-\[\#F6851B\]\/20 {
+  background-color: rgb(246 133 27 / 0.2);
 }
 
 .bg-amber-400 {
@@ -1745,15 +1748,6 @@ video {
 
 .bg-yellow-500\/20 {
   background-color: rgb(234 179 8 / 0.2);
-}
-
-.bg-\[\#F6851B\] {
-  --tw-bg-opacity: 1;
-  background-color: rgb(246 133 27 / var(--tw-bg-opacity, 1));
-}
-
-.bg-\[\#F6851B\]\/20 {
-  background-color: rgb(246 133 27 / 0.2);
 }
 
 .object-contain {
@@ -1910,8 +1904,8 @@ video {
   padding-right: 0.25rem;
 }
 
-.pr-8 {
-  padding-right: 2rem;
+.pr-3 {
+  padding-right: 0.75rem;
 }
 
 .pt-2 {
@@ -2013,6 +2007,10 @@ video {
 
 .normal-case {
   text-transform: none;
+}
+
+.leading-5 {
+  line-height: 1.25rem;
 }
 
 .leading-none {
@@ -2320,6 +2318,12 @@ video {
   transition-duration: 150ms;
 }
 
+.transition-opacity {
+  transition-property: opacity;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
 .transition-transform {
   transition-property: transform;
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
@@ -2344,6 +2348,27 @@ video {
 
 .ease-out {
   transition-timing-function: cubic-bezier(0, 0, 0.2, 1);
+}
+
+/* Channel drag and drop styles */
+
+.channel-item.dragging {
+  opacity: 0.5;
+  border-color: #F6851B !important;
+}
+
+.channel-item.drag-over {
+  border-color: #F6851B !important;
+  background-color: #1a1a1a !important;
+  transform: scale(1.02);
+}
+
+.channel-item .drag-handle {
+  touch-action: none;
+}
+
+.channel-item .drag-handle:active {
+  cursor: grabbing;
 }
 
 .placeholder\:text-white\/20::-moz-placeholder {
@@ -2526,6 +2551,16 @@ video {
 
 .hover\:bg-white\/5:hover {
   background-color: rgb(255 255 255 / 0.05);
+}
+
+.hover\:text-\[\#888\]:hover {
+  --tw-text-opacity: 1;
+  color: rgb(136 136 136 / var(--tw-text-opacity, 1));
+}
+
+.hover\:text-\[\#ff9933\]:hover {
+  --tw-text-opacity: 1;
+  color: rgb(255 153 51 / var(--tw-text-opacity, 1));
 }
 
 .hover\:text-blue-300:hover {

@@ -98,14 +98,16 @@ class IdentityManager {
      * Create signed message payload
      * @param {string} text - Message text
      * @param {string} channelId - Channel ID for context
+     * @param {Object|null} replyTo - Reply context (optional)
      * @returns {Promise<Object>} - Signed message object
      */
-    async createSignedMessage(text, channelId) {
+    async createSignedMessage(text, channelId, replyTo = null) {
         const sender = authManager.getAddress();
         const timestamp = Date.now();
         const messageId = this.generateMessageId();
         
         // Create deterministic message hash for signing
+        // Note: replyTo is NOT included in hash (it's metadata, not signed content)
         const messageHash = this.createMessageHash(messageId, text, sender, timestamp, channelId);
         
         // Sign the hash
@@ -119,7 +121,8 @@ class IdentityManager {
             senderName: this.username || null,
             timestamp: timestamp,
             channelId: channelId,
-            signature: signature
+            signature: signature,
+            replyTo: replyTo // Reply context (null if not a reply)
         };
         
         return message;

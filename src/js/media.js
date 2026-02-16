@@ -26,7 +26,8 @@ const CONFIG = {
     ALLOWED_VIDEO_TYPES: ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-m4v', 'video/ogg'],
     // Browser-playable formats (for showing player vs download link)
     PLAYABLE_VIDEO_TYPES: ['video/mp4', 'video/webm', 'video/ogg', 'video/x-m4v', 'video/m4v'],
-    PIECE_SIZE: 128 * 1024, // 128KB chunks
+    PIECE_SIZE: 220 * 1024, // 220KB chunks
+    PIECE_SEND_DELAY: 5, // 5ms between piece sends (throttling) - Max theoretical: ~44 MB/s
     MAX_CONCURRENT_REQUESTS: 8,
     PIECE_REQUEST_TIMEOUT: 10000, // 10 seconds
     MAX_FILE_SIZE: 500 * 1024 * 1024, // 500MB max
@@ -91,6 +92,11 @@ class MediaController {
         
         // Current owner address (for filtering seed files)
         this.currentOwnerAddress = null;
+        
+        // Piece send queue for throttling
+        this.pieceSendQueue = [];
+        this.isSendingPieces = false;
+        this.lastPieceSentTime = 0;
     }
 
     /**
@@ -149,6 +155,11 @@ class MediaController {
         this.downloadedUrls.clear();
         this.incomingFiles.clear();
         this.fileSeeders.clear();
+        
+        // Clear piece send queue
+        this.pieceSendQueue = [];
+        this.isSendingPieces = false;
+        this.lastPieceSentTime = 0;
         
         // Reset owner
         this.currentOwnerAddress = null;
@@ -822,10 +833,49 @@ class MediaController {
     }
 
     /**
-     * Send a file piece
+     * Send a file piece (queued with throttling)
      * Piece data is encrypted with channel password for private channels
      */
     async sendPiece(streamId, fileId, pieceIndex) {
+        // Queue the piece send request
+        return new Promise((resolve) => {
+            this.pieceSendQueue.push({ streamId, fileId, pieceIndex, resolve });
+            this.processPieceQueue();
+        });
+    }
+
+    /**
+     * Process the piece send queue with throttling
+     * Ensures minimum PIECE_SEND_DELAY between sends (~44 MB/s max)
+     */
+    async processPieceQueue() {
+        if (this.isSendingPieces || this.pieceSendQueue.length === 0) return;
+        
+        this.isSendingPieces = true;
+        
+        while (this.pieceSendQueue.length > 0) {
+            const { streamId, fileId, pieceIndex, resolve } = this.pieceSendQueue.shift();
+            
+            // Throttle: wait for minimum delay since last send
+            const now = Date.now();
+            const elapsed = now - this.lastPieceSentTime;
+            if (elapsed < CONFIG.PIECE_SEND_DELAY) {
+                await new Promise(r => setTimeout(r, CONFIG.PIECE_SEND_DELAY - elapsed));
+            }
+            
+            // Send the piece
+            await this._sendPieceImmediate(streamId, fileId, pieceIndex);
+            this.lastPieceSentTime = Date.now();
+            resolve();
+        }
+        
+        this.isSendingPieces = false;
+    }
+
+    /**
+     * Actually send a file piece (internal, called by queue processor)
+     */
+    async _sendPieceImmediate(streamId, fileId, pieceIndex) {
         const localFile = this.localFiles.get(fileId);
         if (!localFile) return;
         

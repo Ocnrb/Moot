@@ -82,23 +82,8 @@ class SecureStorage {
             // Derive encryption key from wallet signature
             this.storageKey = await this.deriveStorageKey(signer, address);
             
-            // Check for migration from plaintext format
-            if (this.needsMigration(address)) {
-                // Initialize empty cache first
-                this.cache = {
-                    channels: [],
-                    trustedContacts: {},
-                    ensCache: {},
-                    username: null,
-                    graphApiKey: null,
-                    sessionData: null,
-                    version: 2
-                };
-                await this.migrateFromPlaintext(address);
-            } else {
-                // Try to load existing encrypted data
-                await this.loadFromStorage();
-            }
+            // Load existing encrypted data or initialize empty
+            await this.loadFromStorage();
             
             this.isUnlocked = true;
             Logger.info('🔓 Secure storage unlocked for:', this.address.slice(0, 8) + '...');
@@ -180,6 +165,9 @@ class SecureStorage {
                 username: null,
                 graphApiKey: null,
                 sessionData: null,
+                channelLastAccess: {}, // streamId -> timestamp
+                channelOrder: [], // Array of streamIds in user-defined order
+                lastOpenedChannel: null, // streamId of last opened channel (for session restore)
                 version: 2
             };
             Logger.info('📦 Initialized empty secure storage');
@@ -200,6 +188,9 @@ class SecureStorage {
                 username: null,
                 graphApiKey: null,
                 sessionData: null,
+                channelLastAccess: {},
+                channelOrder: [],
+                lastOpenedChannel: null,
                 version: 2
             };
         }
@@ -336,7 +327,111 @@ class SecureStorage {
         await this.saveToStorage();
     }
 
-    // ==================== Lifecycle ====================
+    // ==================== Channel Last Access ====================
+
+    /**
+     * Get last access timestamp for a channel
+     * @param {string} streamId - Channel stream ID
+     * @returns {number|null} - Timestamp or null if never accessed
+     */
+    getChannelLastAccess(streamId) {
+        if (!this.isUnlocked) return null;
+        return this.cache.channelLastAccess?.[streamId] || null;
+    }
+
+    /**
+     * Set last access timestamp for a channel (marks as read)
+     * @param {string} streamId - Channel stream ID
+     * @param {number} timestamp - Access timestamp (defaults to now)
+     */
+    async setChannelLastAccess(streamId, timestamp = Date.now()) {
+        if (!this.isUnlocked) return;
+        if (!this.cache.channelLastAccess) {
+            this.cache.channelLastAccess = {};
+        }
+        this.cache.channelLastAccess[streamId] = timestamp;
+        await this.saveToStorage();
+    }
+
+    /**
+     * Get all channel last access timestamps
+     * @returns {Object} - { streamId: timestamp }
+     */
+    getAllChannelLastAccess() {
+        if (!this.isUnlocked) return {};
+        return this.cache.channelLastAccess || {};
+    }
+
+    // ==================== Channel Order ====================
+
+    /**
+     * Get channel order (array of streamIds in user-defined order)
+     * @returns {string[]} - Array of streamIds
+     */
+    getChannelOrder() {
+        if (!this.isUnlocked) return [];
+        return this.cache.channelOrder || [];
+    }
+
+    /**
+     * Set channel order
+     * @param {string[]} order - Array of streamIds in desired order
+     */
+    async setChannelOrder(order) {
+        if (!this.isUnlocked) return;
+        this.cache.channelOrder = order;
+        await this.saveToStorage();
+    }
+
+    /**
+     * Remove a channel from the order (when leaving/deleting)
+     * @param {string} streamId - Channel to remove
+     */
+    async removeFromChannelOrder(streamId) {
+        if (!this.isUnlocked) return;
+        if (!this.cache.channelOrder) return;
+        this.cache.channelOrder = this.cache.channelOrder.filter(id => id !== streamId);
+        await this.saveToStorage();
+    }
+
+    /**
+     * Add a channel to the order (at the end by default)
+     * @param {string} streamId - Channel to add
+     */
+    async addToChannelOrder(streamId) {
+        if (!this.isUnlocked) return;
+        if (!this.cache.channelOrder) {
+            this.cache.channelOrder = [];
+        }
+        // Don't add duplicates
+        if (!this.cache.channelOrder.includes(streamId)) {
+            this.cache.channelOrder.push(streamId);
+            await this.saveToStorage();
+        }
+    }
+
+    // ==================== Last Opened Channel ====================
+
+    /**
+     * Get last opened channel (for session restore)
+     * @returns {string|null} - streamId or null
+     */
+    getLastOpenedChannel() {
+        if (!this.isUnlocked) return null;
+        return this.cache.lastOpenedChannel || null;
+    }
+
+    /**
+     * Set last opened channel
+     * @param {string|null} streamId - Channel streamId or null to clear
+     */
+    async setLastOpenedChannel(streamId) {
+        if (!this.isUnlocked) return;
+        this.cache.lastOpenedChannel = streamId;
+        await this.saveToStorage();
+    }
+
+    // ==================== Lifecycle ==
 
     /**
      * Lock storage (on disconnect)
@@ -361,135 +456,6 @@ class SecureStorage {
      */
     getCurrentAddress() {
         return this.address;
-    }
-
-    // ==================== Migration ====================
-
-    /**
-     * Migrate plaintext data to encrypted storage
-     * @param {string} address - Wallet address
-     */
-    async migrateFromPlaintext(address) {
-        const normalizedAddress = address.toLowerCase();
-        
-        // Check for existing plaintext data from different storage formats
-        const oldPlaintextKey = `moot_data_${normalizedAddress}`;
-        const oldChannelsKey = `moot_channels_${normalizedAddress}`;
-        const oldPlaintext = localStorage.getItem(oldPlaintextKey);
-        const oldChannels = localStorage.getItem(oldChannelsKey);
-        
-        const oldContactsKey = 'eth_chat_trusted_contacts';
-        const oldContacts = localStorage.getItem(oldContactsKey);
-        
-        const oldUsernameKey = 'eth_chat_username';
-        const oldUsername = localStorage.getItem(oldUsernameKey);
-        
-        const oldENSKey = 'eth_chat_ens_cache';
-        const oldENS = localStorage.getItem(oldENSKey);
-        
-        let migrated = false;
-        
-        // Migrate from previous plaintext storage (moot_data_)
-        if (oldPlaintext) {
-            try {
-                const data = JSON.parse(oldPlaintext);
-                if (data.channels && data.channels.length > 0) {
-                    this.cache.channels = data.channels;
-                    migrated = true;
-                }
-                if (data.trustedContacts) {
-                    this.cache.trustedContacts = data.trustedContacts;
-                    migrated = true;
-                }
-                if (data.ensCache) {
-                    this.cache.ensCache = data.ensCache;
-                    migrated = true;
-                }
-                if (data.username) {
-                    this.cache.username = data.username;
-                    migrated = true;
-                }
-                if (data.graphApiKey) {
-                    this.cache.graphApiKey = data.graphApiKey;
-                    migrated = true;
-                }
-                Logger.info('📦 Migrated data from plaintext storage');
-            } catch (e) {
-                Logger.warn('Failed to migrate plaintext storage:', e);
-            }
-        }
-        
-        // Migrate old format channels
-        if (oldChannels) {
-            try {
-                const channels = JSON.parse(oldChannels);
-                if (channels.length > 0) {
-                    this.cache.channels = channels;
-                    migrated = true;
-                    Logger.info(`📦 Migrated ${channels.length} channels`);
-                }
-            } catch (e) {
-                Logger.warn('Failed to migrate channels:', e);
-            }
-        }
-        
-        // Migrate contacts
-        if (oldContacts) {
-            try {
-                const contacts = JSON.parse(oldContacts);
-                this.cache.trustedContacts = contacts;
-                migrated = true;
-                Logger.info('📦 Migrated trusted contacts');
-            } catch (e) {
-                Logger.warn('Failed to migrate contacts:', e);
-            }
-        }
-        
-        // Migrate username
-        if (oldUsername) {
-            this.cache.username = oldUsername;
-            migrated = true;
-            Logger.info('📦 Migrated username');
-        }
-        
-        // Migrate ENS cache
-        if (oldENS) {
-            try {
-                const ensCache = JSON.parse(oldENS);
-                this.cache.ensCache = ensCache;
-                migrated = true;
-                Logger.info('📦 Migrated ENS cache');
-            } catch (e) {
-                Logger.warn('Failed to migrate ENS cache:', e);
-            }
-        }
-        
-        if (migrated) {
-            // Save as encrypted data
-            await this.saveToStorage();
-            
-            // Clean up old plaintext data
-            localStorage.removeItem(oldPlaintextKey);
-            localStorage.removeItem(oldChannelsKey);
-            localStorage.removeItem(oldContactsKey);
-            localStorage.removeItem(oldUsernameKey);
-            localStorage.removeItem(oldENSKey);
-            
-            Logger.info('✅ Migration complete - old plaintext data removed');
-        }
-        
-        return migrated;
-    }
-
-    /**
-     * Check if migration is needed (plaintext data exists)
-     */
-    needsMigration(address) {
-        const normalizedAddress = address.toLowerCase();
-        const oldPlaintextKey = `moot_data_${normalizedAddress}`;
-        const oldChannelsKey = `moot_channels_${normalizedAddress}`;
-        return localStorage.getItem(oldPlaintextKey) !== null || 
-               localStorage.getItem(oldChannelsKey) !== null;
     }
 
     // ==================== Encrypted Export/Import ====================
@@ -686,14 +652,9 @@ class SecureStorage {
         }
 
         const channels = this.cache.channels || [];
-        let totalMessages = 0;
-        for (const channel of channels) {
-            totalMessages += (channel.messages || []).length;
-        }
 
         return {
             channels: channels.length,
-            messages: totalMessages,
             contacts: Object.keys(this.cache.trustedContacts || {}).length,
             ensEntries: Object.keys(this.cache.ensCache || {}).length,
             hasUsername: !!this.cache.username,

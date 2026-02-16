@@ -12,6 +12,7 @@ import { secureStorage } from './secureStorage.js';
 import { Logger } from './logger.js';
 import { mediaController } from './media.js';
 import { streamrController } from './streamr.js';
+import { subscriptionManager } from './subscriptionManager.js';
 
 // Gas estimation for Polygon network
 const GasEstimator = {
@@ -127,7 +128,20 @@ const GasEstimator = {
 class UIController {
     constructor() {
         this.elements = {};
-        this.lastSeenCounts = new Map(); // Track last seen message count per channel
+        // Note: lastSeenCounts removed - using secureStorage.channelLastAccess timestamps instead
+        
+        // Lazy loading state
+        this.isLoadingMore = false;
+        this.scrollThreshold = 100; // pixels from top to trigger load
+        
+        // Reply state
+        this.replyingTo = null; // { id, text, sender, senderName }
+        
+        // Reaction picker state
+        this.reactionPickerTimeout = null;
+        
+        // Send button debounce - prevents duplicate sends on rapid clicks
+        this.isSending = false;
     }
 
     /**
@@ -228,18 +242,46 @@ class UIController {
 
             // Join/Browse channels
             quickJoinInput: document.getElementById('quick-join-input'),
-            quickJoinBtn: document.getElementById('quick-join-btn'),
             browseChannelsBtn: document.getElementById('browse-channels-btn'),
+            browseBtnIcon: document.getElementById('browse-btn-icon'),
+            browseBtnText: document.getElementById('browse-btn-text'),
             browseChannelsModal: document.getElementById('browse-channels-modal'),
             browseSearchInput: document.getElementById('browse-search-input'),
             browseChannelsList: document.getElementById('browse-channels-list'),
-            closeBrowseBtn: document.getElementById('close-browse-btn')
+            closeBrowseBtn: document.getElementById('close-browse-btn'),
+            
+            // Reply UI
+            replyBar: document.getElementById('reply-bar'),
+            replyToName: document.getElementById('reply-to-name'),
+            replyToText: document.getElementById('reply-to-text'),
+            replyBarClose: document.getElementById('reply-bar-close')
         };
 
         // Set up event listeners
         this.setupEventListeners();
+        
+        // Register activity handler for background channel updates
+        this.setupActivityHandler();
 
         Logger.info('UI Controller initialized');
+    }
+    
+    /**
+     * Setup handler for background channel activity updates
+     * Updates unread badges when new messages are detected in background channels
+     */
+    setupActivityHandler() {
+        subscriptionManager.onActivity((streamId, activity) => {
+            Logger.debug('Background activity update:', streamId, activity);
+            
+            // Update unread badge in sidebar
+            const countEl = document.querySelector(`[data-channel-count="${streamId}"]`);
+            if (countEl && activity.unreadCount > 0) {
+                countEl.textContent = activity.unreadCount >= 30 ? '+30' : activity.unreadCount;
+                countEl.classList.remove('hidden', 'text-[#666]', 'bg-[#252525]');
+                countEl.classList.add('text-white', 'bg-[#F6851B]/20');
+            }
+        });
     }
 
     /**
@@ -290,14 +332,19 @@ class UIController {
             }
         });
 
-        // Quick join button (sidebar) - Click to join
-        this.elements.quickJoinBtn?.addEventListener('click', () => {
-            this.handleQuickJoin();
+        // Quick join input - Toggle button state on input change
+        this.elements.quickJoinInput?.addEventListener('input', (e) => {
+            this.updateBrowseJoinButton();
         });
 
-        // Browse channels button (sidebar)
+        // Browse/Join channels button (sidebar) - Dynamic behavior
         this.elements.browseChannelsBtn?.addEventListener('click', () => {
-            this.showBrowseChannelsModal();
+            const hasInput = this.elements.quickJoinInput?.value.trim();
+            if (hasInput) {
+                this.handleQuickJoin();
+            } else {
+                this.showBrowseChannelsModal();
+            }
         });
 
         // Join channel (in modal)
@@ -341,11 +388,33 @@ class UIController {
             this.handleSendMessage();
         });
 
-        // Enter key to send message
-        this.elements.messageInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
+        // Enter key to send message (Shift+Enter for new line)
+        this.elements.messageInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
                 this.handleSendMessage();
             }
+            // Escape to cancel reply
+            if (e.key === 'Escape' && this.replyingTo) {
+                this.cancelReply();
+            }
+        });
+        
+        // Reply bar close button
+        this.elements.replyBarClose?.addEventListener('click', () => {
+            this.cancelReply();
+        });
+
+        // Lazy loading - scroll to top loads more history
+        this.elements.messagesArea?.addEventListener('scroll', () => {
+            this.handleMessagesScroll();
+        });
+        
+        // Auto-resize textarea as user types
+        this.elements.messageInput.addEventListener('input', () => {
+            const textarea = this.elements.messageInput;
+            textarea.style.height = 'auto';
+            textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
         });
 
         // Typing indicator - send signal while typing
@@ -418,8 +487,8 @@ class UIController {
 
         // Close channel button (X)
         if (this.elements.closeChannelBtn) {
-            this.elements.closeChannelBtn.addEventListener('click', () => {
-                this.deselectChannel();
+            this.elements.closeChannelBtn.addEventListener('click', async () => {
+                await this.deselectChannel();
             });
         }
 
@@ -683,7 +752,7 @@ class UIController {
      * Render channel list
      */
     renderChannelList() {
-        const channels = channelManager.getAllChannels();
+        let channels = channelManager.getAllChannels();
         Logger.debug('renderChannelList called - Total channels:', channels.length);
         Logger.debug('Channels:', channels);
 
@@ -697,33 +766,53 @@ class UIController {
             return;
         }
 
-        // Initialize lastSeenCounts for channels that haven't been tracked yet
-        // (on first load, existing messages are considered "seen")
-        for (const channel of channels) {
-            if (!this.lastSeenCounts.has(channel.streamId)) {
-                this.lastSeenCounts.set(channel.streamId, channel.messages.length);
-            }
+        // Sort channels by user-defined order
+        const channelOrder = secureStorage.getChannelOrder();
+        if (channelOrder.length > 0) {
+            channels = this.sortChannelsByOrder(channels, channelOrder);
         }
 
+        // Initialize lastSeenCounts for channels that haven't been tracked yet
+        // (on first load, existing messages are considered "seen")
+        // Using timestamp-based tracking now via secureStorage
+
         this.elements.channelList.innerHTML = channels.map(channel => {
-            const lastSeen = this.lastSeenCounts.get(channel.streamId) || 0;
-            const hasUnread = channel.messages.length > lastSeen;
+            // Calculate unread count based on timestamps
+            const lastAccess = secureStorage.getChannelLastAccess(channel.streamId) || 0;
+            const unreadMessages = channel.messages.filter(m => m.timestamp > lastAccess);
+            const unreadCount = unreadMessages.length;
+            const hasUnread = unreadCount > 0;
             const countClass = hasUnread 
                 ? 'text-white bg-[#F6851B]/20' 
                 : 'text-[#666] bg-[#252525]';
             
+            // Show "+30" if we hit the initial load limit (may have more unread)
+            const displayCount = hasUnread ? (unreadCount >= 30 ? '+30' : unreadCount) : '';
+            
             return `
             <div
-                class="channel-item px-3 py-2.5 mx-2 my-1 rounded-lg cursor-pointer bg-[#151515] border border-[#222] hover:bg-[#1e1e1e] hover:border-[#333] transition"
+                class="channel-item px-3 py-2.5 mx-2 my-1 rounded-lg cursor-pointer bg-[#151515] border border-[#222] hover:bg-[#1e1e1e] hover:border-[#333] transition group"
                 data-stream-id="${channel.streamId}"
+                draggable="true"
             >
                 <div class="flex items-center justify-between">
+                    <!-- Drag handle (6 dots) - visible on hover -->
+                    <div class="drag-handle flex-shrink-0 mr-2 cursor-grab opacity-0 group-hover:opacity-100 transition-opacity text-[#555] hover:text-[#888]" title="Drag to reorder">
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                            <circle cx="8" cy="6" r="1.5"/>
+                            <circle cx="16" cy="6" r="1.5"/>
+                            <circle cx="8" cy="12" r="1.5"/>
+                            <circle cx="16" cy="12" r="1.5"/>
+                            <circle cx="8" cy="18" r="1.5"/>
+                            <circle cx="16" cy="18" r="1.5"/>
+                        </svg>
+                    </div>
                     <div class="flex-1 min-w-0">
                         <h3 class="text-[13px] font-medium text-white truncate">${this.escapeHtml(channel.name)}</h3>
                         <p class="text-[11px] text-[#666]">${this.getChannelTypeLabel(channel.type)}</p>
                     </div>
                     <div class="flex items-center gap-1.5 ml-2">
-                        ${channel.messages.length > 0 ? `<span class="channel-msg-count text-[10px] ${countClass} px-1.5 py-0.5 rounded" data-channel-count="${channel.streamId}">${channel.messages.length}</span>` : `<span class="channel-msg-count text-[10px] text-[#666] bg-[#252525] px-1.5 py-0.5 rounded hidden" data-channel-count="${channel.streamId}">0</span>`}
+                        ${hasUnread ? `<span class="channel-msg-count text-[10px] ${countClass} px-1.5 py-0.5 rounded" data-channel-count="${channel.streamId}">${unreadCount}</span>` : `<span class="channel-msg-count text-[10px] text-[#666] bg-[#252525] px-1.5 py-0.5 rounded hidden" data-channel-count="${channel.streamId}">0</span>`}
                         <svg class="w-3.5 h-3.5 text-[#444]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.25 4.5l7.5 7.5-7.5 7.5"></path>
                         </svg>
@@ -737,13 +826,134 @@ class UIController {
         // Add click listeners
         document.querySelectorAll('.channel-item').forEach(item => {
             item.addEventListener('click', (e) => {
+                // Ignore clicks on drag handle
+                if (e.target.closest('.drag-handle')) return;
+                
                 const streamId = e.currentTarget.dataset.streamId;
                 Logger.debug('Channel clicked:', streamId);
                 this.selectChannel(streamId);
             });
         });
 
+        // Setup drag and drop for channel reordering
+        this.setupChannelDragAndDrop();
+
         Logger.debug('Channel list rendering complete');
+    }
+
+    /**
+     * Sort channels by user-defined order
+     * Channels not in the order array appear at the end
+     * @param {Array} channels - Array of channel objects
+     * @param {Array} order - Array of streamIds in desired order
+     * @returns {Array} - Sorted channels
+     */
+    sortChannelsByOrder(channels, order) {
+        const orderMap = new Map(order.map((id, index) => [id, index]));
+        return [...channels].sort((a, b) => {
+            const indexA = orderMap.has(a.streamId) ? orderMap.get(a.streamId) : Infinity;
+            const indexB = orderMap.has(b.streamId) ? orderMap.get(b.streamId) : Infinity;
+            return indexA - indexB;
+        });
+    }
+
+    /**
+     * Setup drag and drop for channel list reordering
+     */
+    setupChannelDragAndDrop() {
+        const channelItems = document.querySelectorAll('.channel-item');
+        let draggedItem = null;
+        let draggedStreamId = null;
+
+        channelItems.forEach(item => {
+            // Drag start
+            item.addEventListener('dragstart', (e) => {
+                draggedItem = item;
+                draggedStreamId = item.dataset.streamId;
+                item.classList.add('dragging');
+                
+                // Required for Firefox
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', draggedStreamId);
+                
+                // Make it slightly transparent
+                setTimeout(() => {
+                    item.style.opacity = '0.5';
+                }, 0);
+            });
+
+            // Drag end
+            item.addEventListener('dragend', (e) => {
+                item.classList.remove('dragging');
+                item.style.opacity = '';
+                draggedItem = null;
+                draggedStreamId = null;
+                
+                // Remove all drag-over styles
+                document.querySelectorAll('.channel-item').forEach(el => {
+                    el.classList.remove('drag-over');
+                });
+            });
+
+            // Drag over
+            item.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                
+                if (item !== draggedItem) {
+                    item.classList.add('drag-over');
+                }
+            });
+
+            // Drag leave
+            item.addEventListener('dragleave', (e) => {
+                item.classList.remove('drag-over');
+            });
+
+            // Drop
+            item.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                item.classList.remove('drag-over');
+                
+                if (!draggedItem || item === draggedItem) return;
+                
+                const targetStreamId = item.dataset.streamId;
+                
+                // Get current order or create from current channel list
+                let currentOrder = secureStorage.getChannelOrder();
+                const channels = channelManager.getAllChannels();
+                
+                // If no saved order, create from current channels
+                if (currentOrder.length === 0) {
+                    currentOrder = channels.map(ch => ch.streamId);
+                }
+                
+                // Ensure all current channels are in the order
+                channels.forEach(ch => {
+                    if (!currentOrder.includes(ch.streamId)) {
+                        currentOrder.push(ch.streamId);
+                    }
+                });
+                
+                // Find positions
+                const draggedIndex = currentOrder.indexOf(draggedStreamId);
+                const targetIndex = currentOrder.indexOf(targetStreamId);
+                
+                if (draggedIndex === -1 || targetIndex === -1) return;
+                
+                // Remove dragged item and insert at new position
+                currentOrder.splice(draggedIndex, 1);
+                currentOrder.splice(targetIndex, 0, draggedStreamId);
+                
+                // Save the new order
+                await secureStorage.setChannelOrder(currentOrder);
+                
+                // Re-render the list
+                this.renderChannelList();
+                
+                Logger.debug('Channel order updated');
+            });
+        });
     }
 
     /**
@@ -754,16 +964,25 @@ class UIController {
         // Clear typing indicator from previous channel
         this.hideTypingIndicator();
         
+        // Clear any pending reply from previous channel
+        this.cancelReply();
+        
         channelManager.setCurrentChannel(streamId);
         const channel = channelManager.getCurrentChannel();
 
         if (channel) {
-            // Ensure we're subscribed to this channel
+            // Use subscriptionManager for dynamic subscription (only active channel is fully subscribed)
             try {
-                await channelManager.subscribeToChannel(streamId, channel.password);
+                await subscriptionManager.setActiveChannel(streamId, channel.password);
             } catch (e) {
                 Logger.warn('Subscribe error (may already be subscribed):', e.message);
             }
+            
+            // Save as last opened channel for session restore
+            await secureStorage.setLastOpenedChannel(streamId);
+            
+            // Clear unread count since user is now viewing this channel
+            subscriptionManager.clearUnreadCount(streamId);
             
             this.elements.currentChannelName.textContent = channel.name;
             this.elements.currentChannelInfo.innerHTML = this.getChannelTypeLabel(channel.type);
@@ -792,9 +1011,11 @@ class UIController {
 
             this.renderMessages(channel.messages);
             
-            // Mark channel as seen (update lastSeenCount)
-            this.lastSeenCounts.set(streamId, channel.messages.length);
-            this.updateChannelMessageCount(streamId, channel.messages.length);
+            // Mark channel as read - save current timestamp
+            await secureStorage.setChannelLastAccess(streamId, Date.now());
+            
+            // Update sidebar to clear unread indicator
+            this.renderChannelList();
             
             // Start presence tracking
             channelManager.startPresenceTracking(streamId);
@@ -810,12 +1031,18 @@ class UIController {
     /**
      * Deselect current channel (close it)
      */
-    deselectChannel() {
+    async deselectChannel() {
         // Clear typing indicator
         this.hideTypingIndicator();
         
+        // Clear any pending reply
+        this.cancelReply();
+        
         // Stop presence tracking
         channelManager.stopPresenceTracking();
+        
+        // Clear active channel in subscription manager (downgrades to background)
+        await subscriptionManager.clearActiveChannel();
         
         // Clear current channel
         channelManager.setCurrentChannel(null);
@@ -863,6 +1090,15 @@ class UIController {
     resetToDisconnectedState() {
         // Clear typing indicator
         this.hideTypingIndicator();
+        
+        // Reset sending state
+        this.isSending = false;
+        
+        // Clear quick join input and reset button
+        if (this.elements.quickJoinInput) {
+            this.elements.quickJoinInput.value = '';
+        }
+        this.updateBrowseJoinButton();
         
         // Close any open modals first
         this.elements.channelSettingsModal?.classList.add('hidden');
@@ -1235,10 +1471,95 @@ class UIController {
     }
 
     /**
+     * Handle scroll in messages area - lazy load older messages
+     */
+    async handleMessagesScroll() {
+        const messagesArea = this.elements.messagesArea;
+        if (!messagesArea) return;
+        
+        // Check if scrolled near the top
+        if (messagesArea.scrollTop > this.scrollThreshold) {
+            return; // Not near top, do nothing
+        }
+        
+        // Prevent concurrent loads
+        if (this.isLoadingMore) return;
+        
+        const channel = channelManager.getCurrentChannel();
+        if (!channel || !channel.hasMoreHistory) return;
+        
+        this.isLoadingMore = true;
+        
+        // Show loading indicator at top
+        this.showLoadingMoreIndicator();
+        
+        // Save current scroll position and first message
+        const previousScrollHeight = messagesArea.scrollHeight;
+        const previousScrollTop = messagesArea.scrollTop;
+        
+        try {
+            const result = await channelManager.loadMoreHistory(channel.streamId);
+            
+            if (result.loaded > 0) {
+                // Re-render all messages
+                this.renderMessages(channel.messages);
+                
+                // Restore scroll position (keep viewing same content)
+                const newScrollHeight = messagesArea.scrollHeight;
+                const heightDiff = newScrollHeight - previousScrollHeight;
+                messagesArea.scrollTop = previousScrollTop + heightDiff;
+            }
+            
+            this.hideLoadingMoreIndicator();
+        } catch (error) {
+            Logger.error('Failed to load more messages:', error);
+            this.hideLoadingMoreIndicator();
+        }
+        
+        this.isLoadingMore = false;
+    }
+
+    /**
+     * Show loading indicator at top of messages
+     */
+    showLoadingMoreIndicator() {
+        // Remove existing if any
+        this.hideLoadingMoreIndicator();
+        
+        const indicator = document.createElement('div');
+        indicator.id = 'loading-more-indicator';
+        indicator.className = 'flex justify-center py-3';
+        indicator.innerHTML = `
+            <div class="flex items-center gap-2 text-gray-400 text-sm">
+                <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>Loading older messages...</span>
+            </div>
+        `;
+        this.elements.messagesArea?.prepend(indicator);
+    }
+
+    /**
+     * Hide loading indicator
+     */
+    hideLoadingMoreIndicator() {
+        const indicator = document.getElementById('loading-more-indicator');
+        if (indicator) {
+            indicator.remove();
+        }
+    }
+
+    /**
      * Render messages in the chat area (bubble style like CHATtest.html)
      * @param {Array} messages - Array of message objects
      */
     renderMessages(messages) {
+        // Get channel info for "no more history" indicator
+        const channel = channelManager.getCurrentChannel();
+        const hasMoreHistory = channel?.hasMoreHistory !== false;
+        
         if (messages.length === 0) {
             this.elements.messagesArea.innerHTML = `
                 <div class="flex items-center justify-center h-full text-gray-500">
@@ -1250,6 +1571,18 @@ class UIController {
 
         const currentAddress = authManager.getAddress();
         let lastDateStr = null;
+        
+        // Add "beginning of history" indicator if no more to load
+        let historyStartIndicator = '';
+        if (!hasMoreHistory) {
+            historyStartIndicator = `
+                <div class="flex justify-center py-4">
+                    <div class="text-[#444] text-xs">
+                        — beginning of conversation —
+                    </div>
+                </div>
+            `;
+        }
 
         this.elements.messagesArea.innerHTML = messages.map((msg, index) => {
             const isOwn = msg.sender?.toLowerCase() === currentAddress?.toLowerCase();
@@ -1284,6 +1617,9 @@ class UIController {
             // Render message content based on type
             const contentHtml = this.renderMessageContent(msg);
             
+            // Render reply preview if this is a reply
+            const replyPreviewHtml = this.renderReplyPreview(msg.replyTo);
+            
             // Check for emoji-only messages (only for text type)
             const msgType = msg.type || 'text';
             const emojiOnly = msgType === 'text' ? this.isEmojiOnly(msg.text) : false;
@@ -1297,22 +1633,27 @@ class UIController {
                             ${badge.html}
                             <span class="text-xs font-medium ${badge.textColor}">${this.escapeHtml(displayName)}</span>
                         </div>
+                        ${replyPreviewHtml}
                         <div class="message-content">${contentHtml}</div>
                         <div class="message-footer">
                             ${reactionsHtml}
                             <span class="message-time text-xs text-gray-500">${time}</span>
                         </div>
                         ${!msg.verified?.valid && msg.signature ? '<div class="text-xs text-red-400 mt-1">⚠️ Invalid signature</div>' : ''}
-                        <div class="message-actions">
-                            <span class="action-btn react-btn" data-msg-id="${msgId}" title="React">😀</span>
-                        </div>
+                        <span class="reply-trigger reply-btn" data-msg-id="${msgId}" title="Reply"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17l-5-5 5-5"/><path d="M4 12h11a4 4 0 0 1 4 4v4"/></svg></span>
+                        <span class="react-trigger react-btn" data-msg-id="${msgId}" title="React"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg></span>
                     </div>
                 </div>
             `;
         }).join('');
 
-        // Scroll to bottom
-        this.elements.messagesArea.scrollTop = this.elements.messagesArea.scrollHeight;
+        // Prepend history start indicator if no more history
+        this.elements.messagesArea.innerHTML = historyStartIndicator + this.elements.messagesArea.innerHTML;
+
+        // Scroll to bottom (only on initial render, not on load more)
+        if (!this.isLoadingMore) {
+            this.elements.messagesArea.scrollTop = this.elements.messagesArea.scrollHeight;
+        }
         
         // Attach reaction button listeners
         this.attachReactionListeners();
@@ -1372,6 +1713,81 @@ class UIController {
         
         html += '</div>';
         return html;
+    }
+
+    /**
+     * Render reply preview for a message
+     */
+    renderReplyPreview(replyTo) {
+        if (!replyTo) return '';
+        
+        const displayName = replyTo.senderName || this.formatAddress(replyTo.sender);
+        const previewText = replyTo.text ? this.escapeHtml(replyTo.text.substring(0, 50)) + (replyTo.text.length > 50 ? '...' : '') : '[Message]';
+        
+        return `
+            <div class="reply-preview" data-reply-to-id="${replyTo.id}">
+                <span class="reply-preview-name">${this.escapeHtml(displayName)}</span>
+                <span class="reply-preview-text">${previewText}</span>
+            </div>
+        `;
+    }
+
+    /**
+     * Start replying to a message
+     */
+    startReply(msgId) {
+        const channel = channelManager.getCurrentChannel();
+        if (!channel) return;
+        
+        const msg = channel.messages.find(m => (m.id || m.timestamp) === msgId);
+        if (!msg) return;
+        
+        const displayName = msg.senderName || msg.verified?.ensName || this.formatAddress(msg.sender);
+        
+        this.replyingTo = {
+            id: msgId,
+            text: msg.text ? msg.text.substring(0, 100) : '',
+            sender: msg.sender,
+            senderName: displayName
+        };
+        
+        // Update reply bar UI
+        if (this.elements.replyToName) {
+            this.elements.replyToName.textContent = displayName;
+        }
+        if (this.elements.replyToText) {
+            this.elements.replyToText.textContent = msg.text ? msg.text.substring(0, 100) + (msg.text.length > 100 ? '...' : '') : '[Media]';
+        }
+        if (this.elements.replyBar) {
+            this.elements.replyBar.classList.add('active');
+        }
+        
+        // Focus input
+        this.elements.messageInput?.focus();
+    }
+
+    /**
+     * Cancel reply
+     */
+    cancelReply() {
+        this.replyingTo = null;
+        if (this.elements.replyBar) {
+            this.elements.replyBar.classList.remove('active');
+        }
+    }
+
+    /**
+     * Scroll to a specific message
+     */
+    scrollToMessage(msgId) {
+        const msgElement = document.querySelector(`[data-msg-id="${msgId}"]`);
+        if (msgElement) {
+            msgElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            msgElement.classList.add('message-highlight');
+            setTimeout(() => {
+                msgElement.classList.remove('message-highlight');
+            }, 1500);
+        }
     }
 
     /**
@@ -1504,10 +1920,35 @@ class UIController {
      */
     attachReactionListeners() {
         document.querySelectorAll('.react-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
+            // Remove old listeners by cloning
+            const newBtn = btn.cloneNode(true);
+            btn.parentNode.replaceChild(newBtn, btn);
+            
+            newBtn.addEventListener('mouseenter', (e) => {
+                const msgId = newBtn.dataset.msgId;
+                this.showReactionPicker(e, msgId, newBtn);
+            });
+        });
+        
+        // Reply buttons
+        document.querySelectorAll('.reply-btn').forEach(btn => {
+            const newBtn = btn.cloneNode(true);
+            btn.parentNode.replaceChild(newBtn, btn);
+            
+            newBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                const msgId = btn.dataset.msgId;
-                this.showReactionPicker(e, msgId);
+                const msgId = newBtn.dataset.msgId;
+                this.startReply(msgId);
+            });
+        });
+        
+        // Reply preview click - scroll to original message
+        document.querySelectorAll('.reply-preview').forEach(preview => {
+            preview.addEventListener('click', (e) => {
+                const replyToId = preview.dataset.replyToId;
+                if (replyToId) {
+                    this.scrollToMessage(replyToId);
+                }
             });
         });
         
@@ -1621,9 +2062,15 @@ class UIController {
     /**
      * Show reaction picker
      */
-    showReactionPicker(e, msgId) {
+    showReactionPicker(e, msgId, triggerBtn) {
         const picker = document.getElementById('reaction-picker');
         if (!picker) return;
+        
+        // Clear any pending hide timeout
+        if (this.reactionPickerTimeout) {
+            clearTimeout(this.reactionPickerTimeout);
+            this.reactionPickerTimeout = null;
+        }
         
         // Position near the button
         const rect = e.target.getBoundingClientRect();
@@ -1668,6 +2115,28 @@ class UIController {
                 picker.style.display = 'none';
             };
         });
+        
+        // Setup mouse leave handlers
+        const hidePickerWithDelay = () => {
+            this.reactionPickerTimeout = setTimeout(() => {
+                picker.style.display = 'none';
+            }, 150);
+        };
+        
+        const cancelHide = () => {
+            if (this.reactionPickerTimeout) {
+                clearTimeout(this.reactionPickerTimeout);
+                this.reactionPickerTimeout = null;
+            }
+        };
+        
+        // Remove old listeners
+        picker.onmouseleave = hidePickerWithDelay;
+        picker.onmouseenter = cancelHide;
+        
+        if (triggerBtn) {
+            triggerBtn.onmouseleave = hidePickerWithDelay;
+        }
     }
 
     /**
@@ -2347,9 +2816,10 @@ class UIController {
                 `;
                 
             default:
-                // For text messages, wrap emojis for inline styling
+                // For text messages, escape HTML, convert newlines to <br>, and wrap emojis
                 const escapedText = this.escapeHtml(msg.text || '');
-                return this.wrapInlineEmojis(escapedText);
+                const withLineBreaks = escapedText.replace(/\n/g, '<br>');
+                return this.wrapInlineEmojis(withLineBreaks);
         }
     }
     
@@ -2461,42 +2931,50 @@ class UIController {
         const channel = channelManager.getCurrentChannel();
         if (channel) {
             this.renderMessages(channel.messages);
-            // Update message count in sidebar
-            this.updateChannelMessageCount(channel.streamId, channel.messages.length);
+            // Update unread count in sidebar for all channels
+            this.updateUnreadCount(channel.streamId);
         }
     }
 
     /**
-     * Update message count badge for a channel in the sidebar
+     * Update unread count badge for a channel in the sidebar
+     * Uses timestamp-based tracking - compares last access time with message timestamps
      * @param {string} streamId - Channel stream ID
-     * @param {number} count - Message count
      */
-    updateChannelMessageCount(streamId, count) {
+    updateUnreadCount(streamId) {
         const countEl = document.querySelector(`[data-channel-count="${streamId}"]`);
-        if (countEl) {
-            countEl.textContent = count;
-            if (count > 0) {
-                countEl.classList.remove('hidden');
-            }
-            
-            // If user is currently viewing this channel, mark as seen automatically
-            const currentChannel = channelManager.getCurrentChannel();
-            if (currentChannel?.streamId === streamId) {
-                this.lastSeenCounts.set(streamId, count);
-            }
-            
-            // Check if channel has unread messages
-            const lastSeen = this.lastSeenCounts.get(streamId) || 0;
-            const hasUnread = count > lastSeen;
-            
-            // Update styling based on unread state
-            if (hasUnread) {
-                countEl.classList.remove('text-[#666]', 'bg-[#252525]');
-                countEl.classList.add('text-white', 'bg-[#F6851B]/20');
-            } else {
-                countEl.classList.remove('text-white', 'bg-[#F6851B]/20');
-                countEl.classList.add('text-[#666]', 'bg-[#252525]');
-            }
+        if (!countEl) return;
+        
+        const channel = channelManager.getChannel(streamId);
+        if (!channel) return;
+        
+        // Get last access timestamp
+        const lastAccess = secureStorage.getChannelLastAccess(streamId) || 0;
+        
+        // If user is currently viewing this channel, update access timestamp
+        const currentChannel = channelManager.getCurrentChannel();
+        const isCurrentChannel = currentChannel?.streamId === streamId;
+        
+        if (isCurrentChannel) {
+            // User is viewing this channel - mark as read
+            secureStorage.setChannelLastAccess(streamId, Date.now());
+            countEl.classList.add('hidden');
+            return;
+        }
+        
+        // Calculate unread count (messages newer than last access)
+        const unreadCount = channel.messages.filter(m => m.timestamp > lastAccess).length;
+        const hasUnread = unreadCount > 0;
+        
+        if (hasUnread) {
+            // Show "+30" if we hit the initial load limit (may have more unread)
+            countEl.textContent = unreadCount >= 30 ? '+30' : unreadCount;
+            countEl.classList.remove('hidden', 'text-[#666]', 'bg-[#252525]');
+            countEl.classList.add('text-white', 'bg-[#F6851B]/20');
+        } else {
+            countEl.classList.add('hidden');
+            countEl.classList.remove('text-white', 'bg-[#F6851B]/20');
+            countEl.classList.add('text-[#666]', 'bg-[#252525]');
         }
     }
 
@@ -2556,18 +3034,36 @@ class UIController {
      * Handle send message
      */
     async handleSendMessage() {
+        // DEBOUNCE: Prevent rapid double-clicks from sending duplicates
+        if (this.isSending) {
+            return;
+        }
+        
         const text = this.elements.messageInput.value.trim();
         if (!text) return;
 
         const currentChannel = channelManager.getCurrentChannel();
         if (!currentChannel) return;
 
+        // Lock sending state
+        this.isSending = true;
+        
         try {
+            // Capture reply context before clearing
+            const replyTo = this.replyingTo;
+            
+            // Clear input and reply bar
             this.elements.messageInput.value = '';
-            await channelManager.sendMessage(currentChannel.streamId, text);
+            this.elements.messageInput.style.height = 'auto'; // Reset textarea height
+            this.cancelReply(); // Clear reply state
+            
+            await channelManager.sendMessage(currentChannel.streamId, text, replyTo);
             // UI update happens via notifyHandlers -> addMessage
         } catch (error) {
             this.showNotification('Failed to send message: ' + error.message, 'error');
+        } finally {
+            // Always unlock sending state
+            this.isSending = false;
         }
     }
 
@@ -2681,6 +3177,35 @@ class UIController {
     }
 
     /**
+     * Update browse/join button state based on input content
+     * Shows "Join" when there's input, "Explore" when empty
+     */
+    updateBrowseJoinButton() {
+        const hasInput = this.elements.quickJoinInput?.value.trim();
+        const btn = this.elements.browseChannelsBtn;
+        const icon = this.elements.browseBtnIcon;
+        const text = this.elements.browseBtnText;
+        
+        if (!btn || !icon || !text) return;
+        
+        if (hasInput) {
+            // Show "Join" mode with orange styling
+            btn.classList.remove('text-[#888]', 'hover:text-white');
+            btn.classList.add('text-[#F6851B]', 'hover:text-[#ff9933]', 'border-[#F6851B]/30');
+            text.textContent = 'Join';
+            // Change icon to chat bubble (message balloon)
+            icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>';
+        } else {
+            // Show "Explore" mode with default styling
+            btn.classList.remove('text-[#F6851B]', 'hover:text-[#ff9933]', 'border-[#F6851B]/30');
+            btn.classList.add('text-[#888]', 'hover:text-white');
+            text.textContent = 'Explore';
+            // Restore globe icon
+            icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418"/>';
+        }
+    }
+
+    /**
      * Handle quick join from sidebar input
      */
     async handleQuickJoin() {
@@ -2725,13 +3250,14 @@ class UIController {
                 // Clear the input
                 if (this.elements.quickJoinInput) {
                     this.elements.quickJoinInput.value = '';
+                    this.updateBrowseJoinButton();
                 }
                 
                 this.renderChannelList();
                 this.showNotification('Joined channel successfully!', 'success');
             } catch (error) {
                 this.hideLoading();
-                this.showNotification('Failed to join: ' + error.message, 'error');
+                this.showNotification('Failed to join: ' + error.message, 'error');;
             }
             return;
         }
@@ -2748,6 +3274,7 @@ class UIController {
             // Clear the input
             if (this.elements.quickJoinInput) {
                 this.elements.quickJoinInput.value = '';
+                this.updateBrowseJoinButton();
             }
             
             this.renderChannelList();
@@ -2774,6 +3301,7 @@ class UIController {
                 // Clear quick join input
                 if (this.elements.quickJoinInput) {
                     this.elements.quickJoinInput.value = '';
+                    this.updateBrowseJoinButton();
                 }
             } else {
                 this.showNotification('Failed to join: ' + error.message, 'error');
@@ -3544,6 +4072,9 @@ class UIController {
             this.hideDeleteChannelModal();
             this.hideChannelSettingsModal();
 
+            // Remove from subscription manager tracking first
+            await subscriptionManager.removeChannel(streamId);
+
             await channelManager.deleteChannel(streamId);
 
             this.hideLoading();
@@ -3556,8 +4087,7 @@ class UIController {
                 await this.selectChannel(channels[0].streamId);
             } else {
                 this.renderChannelList();
-                this.elements.messagesArea.innerHTML = '<div class="text-center text-gray-500 py-8">No channels. Create one to start chatting!</div>';
-                this.elements.channelNameDisplay.textContent = 'No channel selected';
+                this.showConnectedNoChannelState();
             }
         } catch (error) {
             this.hideLoading();
@@ -3635,6 +4165,9 @@ class UIController {
         this.hideChannelSettingsModal();
         
         try {
+            // Remove from subscription manager tracking first
+            await subscriptionManager.removeChannel(streamId);
+            
             await channelManager.leaveChannel(streamId);
             this.showNotification(`Left "${channelName}"`, 'info');
             
@@ -3645,8 +4178,7 @@ class UIController {
                 await this.selectChannel(channels[0].streamId);
             } else {
                 this.renderChannelList();
-                this.elements.messagesArea.innerHTML = '<div class="text-center text-gray-500 py-8">No channels. Create one to start chatting!</div>';
-                this.elements.channelNameDisplay.textContent = 'No channel selected';
+                this.showConnectedNoChannelState();
             }
         } catch (error) {
             this.showNotification('Failed to leave channel: ' + error.message, 'error');
@@ -4430,9 +4962,9 @@ class UIController {
                     const confirmed = confirm(
                         'Export encrypted backup?\n\n' +
                         `📁 Channels: ${stats.channels}\n` +
-                        `💬 Messages: ${stats.messages}\n` +
-                        `👥 Contacts: ${stats.contacts}\n\n` +
-                        'Your data will be encrypted with the password you provided.'
+                        `� Contacts: ${stats.contacts}\n\n` +
+                        'Your data will be encrypted with the password you provided.\n' +
+                        'Note: Messages are stored on Streamr and will be loaded on demand.'
                     );
                     if (!confirmed) return;
 
@@ -4494,10 +5026,6 @@ class UIController {
                     // Handle keystores only
                     else if (data.format === 'moot-keystores') {
                         await this.handleKeystoresImport(data);
-                    }
-                    // Handle legacy format
-                    else if (data.version === 1 && data.keystores) {
-                        await this.handleLegacyImport(data);
                     }
                     else {
                         throw new Error('Unknown backup format');
@@ -4744,25 +5272,6 @@ class UIController {
 
         const summary = authManager.importKeystores(data, true);
         this.showNotification(`Imported ${summary.keystoresImported} wallets`, 'success');
-    }
-
-    /**
-     * Handle legacy plaintext import
-     */
-    async handleLegacyImport(data) {
-        const confirmed = confirm(
-            'Import legacy backup?\n\n' +
-            `Keystores: ${Object.keys(data.keystores || {}).length}\n` +
-            `Wallet data: ${Object.keys(data.walletData || {}).length}\n\n` +
-            '⚠️ This is an old format. Data will be merged.'
-        );
-        if (!confirmed) return;
-
-        const summary = authManager.importAllData(data, true);
-        this.showNotification(
-            `Imported: ${summary.keystoresImported} wallets, ${summary.walletDataImported} data sets`,
-            'success'
-        );
     }
 
     /**

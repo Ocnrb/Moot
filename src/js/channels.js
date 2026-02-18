@@ -172,7 +172,10 @@ class ChannelManager {
                 exposure: ch.exposure || 'hidden',
                 description: ch.description || '',
                 language: ch.language || '',
-                category: ch.category || ''
+                category: ch.category || '',
+                // Channel options
+                readOnly: ch.readOnly || false,
+                classification: ch.classification || null
                 // messages: excluded - loaded from storage
                 // reactions: excluded - loaded from storage
             }));
@@ -1291,7 +1294,7 @@ class ChannelManager {
             return;
         }
         
-        // Skip control messages (presence, typing, reactions) - these shouldn't be on partition 2
+        // Skip control messages (presence, typing, reactions) - these belong on control partition
         if (data?.type === 'presence' || data?.type === 'typing' || data?.type === 'reaction') {
             return;
         }

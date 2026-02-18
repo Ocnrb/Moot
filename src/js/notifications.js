@@ -157,11 +157,9 @@ class NotificationManager {
         try {
             this.notificationStream = settings.streamId;
 
-            await streamrController.subscribe(
+            await streamrController.subscribeSimple(
                 settings.streamId,
-                {
-                    onMessage: (data) => this.handleNotification(data)
-                },
+                (data) => this.handleNotification(data),
                 null
             );
 

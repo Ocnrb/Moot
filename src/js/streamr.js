@@ -252,14 +252,14 @@ class StreamrController {
             // Note: Parallel creation causes REPLACEMENT_UNDERPRICED error due to nonce conflicts
             
             // Helper function to create stream with retry
-            const createStreamWithRetry = async (streamId, streamMetadata, streamDescription, maxRetries = 7) => {
+            const createStreamWithRetry = async (streamId, streamMetadata, streamDescription, partitionCount, maxRetries = 7) => {
                 for (let attempt = 1; attempt <= maxRetries; attempt++) {
                     try {
                         Logger.info(`Creating stream (attempt ${attempt}/${maxRetries})...`);
                         const stream = await this.client.createStream({
                             id: streamId,
                             description: streamMetadata,
-                            partitions: STREAM_CONFIG.MESSAGE_STREAM.PARTITIONS
+                            partitions: partitionCount
                         });
                         Logger.info(`✓ Stream created: ${stream.id}`);
                         return stream;
@@ -293,11 +293,11 @@ class StreamrController {
             Logger.info('Creating message stream...');
             const startTime = Date.now();
             
-            const messageStream = await createStreamWithRetry(messageStreamId, metadata, 'message');
+            const messageStream = await createStreamWithRetry(messageStreamId, metadata, 'message', STREAM_CONFIG.MESSAGE_STREAM.PARTITIONS);
             
-            // Step 2: Create EPHEMERAL STREAM
+            // Step 2: Create EPHEMERAL STREAM (2 partitions: control + media)
             Logger.info('Creating ephemeral stream...');
-            const ephemeralStream = await createStreamWithRetry(ephemeralStreamId, ephemeralMetadata, 'ephemeral');
+            const ephemeralStream = await createStreamWithRetry(ephemeralStreamId, ephemeralMetadata, 'ephemeral', STREAM_CONFIG.EPHEMERAL_STREAM.PARTITIONS);
             
             const createTime = ((Date.now() - startTime) / 1000).toFixed(1);
             Logger.info(`✓ Both streams created in ${createTime}s`);
@@ -950,109 +950,25 @@ class StreamrController {
     }
 
     /**
-     * Subscribe to all partitions of a stream
+     * Subscribe to a simple single-partition stream (e.g., notifications)
+     * For dual-stream channels, use subscribeToDualStream() instead
      * @param {string} streamId - Stream ID
-     * @param {Object} handlers - Event handlers for each partition
+     * @param {Function} handler - Message handler function
      * @param {string} password - Password for encrypted channels (optional)
      */
-    async subscribe(streamId, handlers, password = null) {
+    async subscribeSimple(streamId, handler, password = null) {
         if (!this.client) {
             throw new Error('Streamr client not initialized');
         }
 
-        try {
-            // Get existing subscriptions or create new object
-            // This allows subscribing to individual partitions without blocking others
-            const partitionSubs = this.subscriptions.get(streamId) || {};
-
-            // Subscribe to partition 0 (Control/Metadata) - only if not already subscribed
-            if (handlers.onControl && !partitionSubs[0]) {
-                Logger.debug('Subscribing to partition 0 (control) for:', streamId);
-                partitionSubs[0] = await this.client.subscribe({
-                    streamId: streamId,
-                    partition: 0
-                }, async (message) => {
-                    try {
-                        let data = message;
-
-                        // Decrypt if password provided
-                        if (password && typeof message === 'string') {
-                            data = await cryptoManager.decryptJSON(message, password);
-                        }
-
-                        handlers.onControl(data);
-                    } catch (error) {
-                        Logger.error('Failed to process control message:', error);
-                    }
-                });
-            }
-
-            // Subscribe to partition 1 (Text Messages) - only if not already subscribed
-            if (handlers.onMessage && !partitionSubs[1]) {
-                Logger.debug('Subscribing to partition 1 (messages) for:', streamId);
-                partitionSubs[1] = await this.client.subscribe({
-                    streamId: streamId,
-                    partition: 1
-                }, async (message) => {
-                    Logger.debug('RAW message received on partition 1:', message);
-                    try {
-                        let data = message;
-
-                        // Decrypt if password provided
-                        if (password && typeof message === 'string') {
-                            data = await cryptoManager.decryptJSON(message, password);
-                        }
-
-                        Logger.debug('Processed message, calling handler:', data);
-                        handlers.onMessage(data);
-                    } catch (error) {
-                        Logger.error('Failed to process message:', error);
-                    }
-                });
-                Logger.debug('Subscribed to partition 1');
-            }
-
-            // Subscribe to partition 2 (Media) - only if not already subscribed
-            if (handlers.onMedia && !partitionSubs[2]) {
-                Logger.debug('Subscribing to partition 2 (media) for:', streamId);
-                partitionSubs[2] = await this.client.subscribe({
-                    streamId: streamId,
-                    partition: 2
-                }, async (message, metadata) => {
-                    try {
-                        let data = message;
-
-                        // Decrypt if password provided
-                        if (password && typeof message === 'string') {
-                            data = await cryptoManager.decryptJSON(message, password);
-                        }
-                        
-                        // Add sender info from metadata
-                        if (metadata?.publisherId) {
-                            data.senderId = metadata.publisherId;
-                        }
-
-                        handlers.onMedia(data);
-                    } catch (error) {
-                        Logger.error('Failed to process media:', error);
-                    }
-                });
-            }
-
-            this.subscriptions.set(streamId, partitionSubs);
-            Logger.info('Subscribed to stream:', streamId);
-
-            return true;
-        } catch (error) {
-            Logger.error('Failed to subscribe to stream:', error);
-            throw error;
-        }
+        // Use partition 0 for simple streams
+        return await this.subscribeToPartition(streamId, 0, handler, password);
     }
 
     /**
      * Publish message to a specific partition
      * @param {string} streamId - Stream ID
-     * @param {number} partition - Partition number (0, 1, or 2)
+     * @param {number} partition - Partition number
      * @param {Object} data - Data to publish
      * @param {string} password - Password for encrypted channels (optional)
      */
@@ -1147,7 +1063,7 @@ class StreamrController {
     /**
      * Subscribe to a specific partition only (lazy/on-demand loading)
      * @param {string} streamId - Stream ID
-     * @param {number} partition - Partition number (0=Messages, 1=Control, 2=Media)
+     * @param {number} partition - Partition number
      * @param {Function} handler - Message handler
      * @param {string} password - Optional password for encrypted channels
      * @returns {Promise<Object>} - Subscription object
@@ -1170,15 +1086,20 @@ class StreamrController {
             return partitionSubs[partition];
         }
 
-        const messageHandler = async (message, metadata) => {
+        const messageHandler = async (content, streamMessage) => {
             try {
-                let data = message;
-                if (password && typeof message === 'string') {
-                    data = await cryptoManager.decryptJSON(message, password);
+                let data = content;
+                if (password && typeof content === 'string') {
+                    data = await cryptoManager.decryptJSON(content, password);
                 }
-                // Add sender info from metadata if available
-                if (metadata?.publisherId && typeof data === 'object') {
-                    data.senderId = metadata.publisherId;
+                // Add sender info from StreamMessage (v103+ uses getPublisherId())
+                if (streamMessage && typeof data === 'object') {
+                    const publisherId = typeof streamMessage.getPublisherId === 'function' 
+                        ? streamMessage.getPublisherId() 
+                        : streamMessage.publisherId;
+                    if (publisherId) {
+                        data.senderId = publisherId;
+                    }
                 }
                 handler(data);
             } catch (error) {
@@ -1461,18 +1382,24 @@ class StreamrController {
             throw new Error('Client not initialized');
         }
         
-        const messageHandler = async (message, metadata) => {
+        const messageHandler = async (content, streamMessage) => {
             try {
-                let data = message;
+                let data = content;
                 
                 // Decrypt if password provided
-                if (password && typeof message === 'string') {
-                    data = await cryptoManager.decryptJSON(message, password);
+                if (password && typeof content === 'string') {
+                    data = await cryptoManager.decryptJSON(content, password);
                 }
                 
-                // Add sender info from metadata (for media partition)
-                if (metadata?.publisherId && typeof data === 'object') {
-                    data.senderId = metadata.publisherId;
+                // Add sender info from StreamMessage (for media partition)
+                // StreamMessage has getPublisherId() method in Streamr SDK v103+
+                if (streamMessage && typeof data === 'object') {
+                    const publisherId = typeof streamMessage.getPublisherId === 'function' 
+                        ? streamMessage.getPublisherId() 
+                        : streamMessage.publisherId;
+                    if (publisherId) {
+                        data.senderId = publisherId;
+                    }
                 }
                 
                 handler(data);

@@ -26,8 +26,10 @@ const CONFIG = {
     ALLOWED_VIDEO_TYPES: ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-m4v', 'video/ogg'],
     // Browser-playable formats (for showing player vs download link)
     PLAYABLE_VIDEO_TYPES: ['video/mp4', 'video/webm', 'video/ogg', 'video/x-m4v', 'video/m4v'],
-    PIECE_SIZE: 220 * 1024, // 220KB chunks
-    PIECE_SEND_DELAY: 5, // 5ms between piece sends (throttling) - Max theoretical: ~44 MB/s
+    // Note: WebRTC DataChannel has ~256KB limit. Base64 adds 33% overhead.
+    // 64KB raw = ~85KB base64, well under limit
+    PIECE_SIZE: 64 * 1024, // 64KB chunks (safe for WebRTC)
+    PIECE_SEND_DELAY: 5, // 5ms between piece sends 
     MAX_CONCURRENT_REQUESTS: 8,
     PIECE_REQUEST_TIMEOUT: 10000, // 10 seconds
     MAX_FILE_SIZE: 500 * 1024 * 1024, // 500MB max
@@ -47,9 +49,6 @@ const CONFIG = {
     PERSIST_PUBLIC_CHANNELS: true,         // Persist files from public channels
     PERSIST_PRIVATE_CHANNELS: false        // Don't persist files from private channels (privacy)
     
-    // Note: Partitions removed - now using dual-stream architecture
-    // - messageStreamId: for persistent content (images, video announcements)
-    // - ephemeralStreamId: for P2P data (chunks, requests, seeder announcements)
 };
 
 class MediaController {
@@ -830,12 +829,18 @@ class MediaController {
         const myAddress = authManager.getAddress()?.toLowerCase();
         const targetAddress = data.targetSeederId?.toLowerCase();
         
-        if (!myAddress || targetAddress !== myAddress) return;
+        if (!myAddress || targetAddress !== myAddress) {
+            // Not for us - ignore silently
+            return;
+        }
         
         const localFile = this.localFiles.get(data.fileId);
-        if (!localFile) return;
+        if (!localFile) {
+            Logger.warn('piece_request for unknown file:', data.fileId?.slice(0, 8));
+            return;
+        }
         
-        Logger.debug('Responding to piece request:', data.pieceIndex, 'for file:', data.fileId);
+        Logger.debug('Sending piece', data.pieceIndex, 'of', data.fileId?.slice(0, 8));
         await this.sendPiece(messageStreamId, data.fileId, data.pieceIndex);
     }
 
@@ -923,10 +928,16 @@ class MediaController {
     async handleFilePiece(messageStreamId, data) {
         // Skip our own pieces (self-filtering)
         const myAddress = authManager.getAddress()?.toLowerCase();
-        if (data.senderId?.toLowerCase() === myAddress) return;
+        const senderAddress = data.senderId?.toLowerCase();
+        
+        if (senderAddress === myAddress) {
+            return;
+        }
         
         const transfer = this.incomingFiles.get(data.fileId);
-        if (!transfer) return;
+        if (!transfer) {
+            return;
+        }
         
         const { fileId, pieceIndex } = data;
         

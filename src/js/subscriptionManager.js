@@ -5,10 +5,9 @@
  * DUAL-STREAM ARCHITECTURE:
  * - Active channel: Full subscription to BOTH streams (message + ephemeral)
  * - Background channels: Lightweight polling for activity detection (message stream only)
- * - Lazy partition loading: Media partition only subscribed when needed
  * 
- * This reduces WebSocket connections and network traffic significantly
- * when users have many channels but only actively use one at a time.
+ * This reduces network traffic significantly when users have many channels
+ * but only actively use one at a time.
  */
 
 import { streamrController, STREAM_CONFIG, deriveEphemeralId } from './streamr.js';
@@ -20,7 +19,6 @@ class SubscriptionManager {
     constructor() {
         // Active channel state (keyed by messageStreamId)
         this.activeChannelId = null;  // messageStreamId of active channel
-        this.activeSubscriptionHandlers = null;
         
         // Background activity tracking (keyed by messageStreamId)
         this.backgroundPoller = null;
@@ -45,14 +43,13 @@ class SubscriptionManager {
     }
 
     /**
-     * Set the active channel - full subscription with all partitions and history
+     * Set the active channel - full subscription with history
      * Downgrades previous active channel to background mode
      * In dual-stream architecture, subscribes to BOTH message and ephemeral streams
      * @param {string} messageStreamId - Message Stream ID to activate (channel key)
      * @param {string} password - Optional password for encrypted channels
-     * @param {Object} handlers - Message handlers { onControl, onMessage, onMedia }
      */
-    async setActiveChannel(messageStreamId, password = null, handlers = null) {
+    async setActiveChannel(messageStreamId, password = null) {
         if (!messageStreamId) {
             Logger.warn('setActiveChannel called with null streamId');
             return;
@@ -72,7 +69,6 @@ class SubscriptionManager {
         }
 
         this.activeChannelId = messageStreamId;
-        this.activeSubscriptionHandlers = handlers;
 
         // Full subscription with history for active channel (BOTH streams)
         try {
@@ -121,7 +117,6 @@ class SubscriptionManager {
         if (this.activeChannelId) {
             await this.downgradeToBackground(this.activeChannelId);
             this.activeChannelId = null;
-            this.activeSubscriptionHandlers = null;
         }
     }
 
@@ -187,7 +182,11 @@ class SubscriptionManager {
 
         try {
             const channels = channelManager.getAllChannels();
-            const backgroundChannels = channels.filter(c => c.streamId !== this.activeChannelId);
+            // Filter out the active channel (compare using messageStreamId)
+            const backgroundChannels = channels.filter(c => {
+                const channelMsgId = c.messageStreamId || c.streamId;
+                return channelMsgId !== this.activeChannelId;
+            });
 
             if (backgroundChannels.length === 0) {
                 Logger.debug('No background channels to poll');
@@ -378,7 +377,6 @@ class SubscriptionManager {
         // If this was the active channel, clear it
         if (this.activeChannelId === messageStreamId) {
             this.activeChannelId = null;
-            this.activeSubscriptionHandlers = null;
         }
         
         // Clear lastOpenedChannel if it points to this channel
@@ -410,7 +408,6 @@ class SubscriptionManager {
         
         // Clear active channel
         this.activeChannelId = null;
-        this.activeSubscriptionHandlers = null;
         
         // Clear activity state
         this.channelActivity.clear();

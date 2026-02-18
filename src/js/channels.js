@@ -328,6 +328,16 @@ class ChannelManager {
                 return this.channels.get(messageStreamId);
             }
 
+            // Check permissions via Streamr SDK FIRST (real-time on-chain check)
+            Logger.debug('Checking channel permissions via SDK...');
+            const permissions = await streamrController.checkPermissions(messageStreamId);
+            Logger.debug('Permissions result:', permissions);
+
+            // If user has no subscribe permission at all, they cannot join
+            if (!permissions.canSubscribe) {
+                throw new Error('You do not have permission to access this channel. This is a private channel and you are not a member.');
+            }
+
             // Determine type: use provided, detect via Graph API, or infer from password
             let channelType = options.type;
             let members = [];
@@ -401,6 +411,16 @@ class ChannelManager {
                 oldestTimestamp: null
             };
 
+            // Cache permissions from SDK check (done earlier)
+            const currentAddress = authManager.getAddress();
+            if (currentAddress) {
+                channel._publishPermCache = {
+                    address: currentAddress,
+                    canPublish: permissions.canPublish,
+                    timestamp: Date.now()
+                };
+            }
+
             // Add to channels map (keyed by messageStreamId)
             this.channels.set(messageStreamId, channel);
             await this.saveChannels();
@@ -412,13 +432,24 @@ class ChannelManager {
             await this.subscribeToChannel(messageStreamId, password);
 
             // Notify handlers about channel join (for media seeding re-announcement)
+            // Include permissions info so UI can show appropriate feedback
             this.notifyHandlers('channelJoined', { 
                 streamId: messageStreamId, 
                 messageStreamId,
                 ephemeralStreamId,
                 password, 
-                channel 
+                channel,
+                permissions: {
+                    canPublish: permissions.canPublish,
+                    canSubscribe: permissions.canSubscribe,
+                    isOwner: permissions.isOwner
+                }
             });
+
+            // Log a warning if user only has read access
+            if (!permissions.canPublish) {
+                Logger.warn('Joined channel with read-only access (no publish permission)');
+            }
 
             Logger.info('Joined dual-stream channel:', messageStreamId);
             return channel;
@@ -437,28 +468,28 @@ class ChannelManager {
     async syncChannelFromGraph(messageStreamId) {
         const channel = this.channels.get(messageStreamId);
         if (!channel) {
-            Logger.warn('Channel not found for sync:', streamId);
+            Logger.warn('Channel not found for sync:', messageStreamId);
             return null;
         }
 
         try {
-            Logger.debug('Syncing channel from The Graph:', streamId);
+            Logger.debug('Syncing channel from The Graph:', messageStreamId);
             
             // Get stream data from The Graph
-            const streamData = await graphAPI.getStream(streamId);
+            const streamData = await graphAPI.getStream(messageStreamId);
             if (!streamData) {
                 Logger.warn('Stream not found in The Graph');
                 return channel;
             }
 
             // Update type based on permissions
-            const type = await graphAPI.detectStreamType(streamId);
+            const type = await graphAPI.detectStreamType(messageStreamId);
             if (type !== 'unknown') {
                 channel.type = type;
             }
 
             // Get members
-            const members = await graphAPI.getStreamMembers(streamId);
+            const members = await graphAPI.getStreamMembers(messageStreamId);
             channel.members = members.map(m => m.address);
 
             // Get owner
@@ -481,20 +512,6 @@ class ChannelManager {
             Logger.warn('Failed to sync channel from Graph:', error);
             return channel;
         }
-    }
-
-    /**
-     * Check if current user has access to a stream (before joining)
-     * @param {string} streamId - Stream ID
-     * @returns {Promise<Object>} - Access info { hasAccess, canPublish, canSubscribe, isOwner }
-     */
-    async checkChannelAccess(streamId) {
-        const userAddress = authManager.getAddress();
-        if (!userAddress) {
-            return { hasAccess: false, error: 'Not authenticated' };
-        }
-
-        return await graphAPI.checkUserAccess(streamId, userAddress);
     }
 
     /**
@@ -1326,13 +1343,41 @@ class ChannelManager {
                 throw new Error('Channel not found');
             }
 
-            // Check if channel is read-only and user is not the creator
-            if (channel.readOnly) {
-                const currentAddress = identityManager.getAddress()?.toLowerCase();
-                const creatorAddress = channel.createdBy?.toLowerCase();
-                if (currentAddress !== creatorAddress) {
-                    throw new Error('This channel is read-only. Only the creator can send messages.');
+            // Check publish permission using Streamr SDK (real-time on-chain check)
+            // This applies to ALL channel types - the SDK handles public permissions correctly
+            const currentAddress = authManager.getAddress();
+            if (!currentAddress) {
+                throw new Error('Not authenticated');
+            }
+
+            // Check cached permission first (set by UI or previous check)
+            let canPublish = false;
+            const cacheValid = channel._publishPermCache?.address?.toLowerCase() === currentAddress.toLowerCase() &&
+                              channel._publishPermCache?.timestamp && 
+                              (Date.now() - channel._publishPermCache.timestamp) < 60000; // 1 min cache
+            
+            if (cacheValid) {
+                canPublish = channel._publishPermCache.canPublish;
+            } else {
+                // Check via Streamr SDK (real-time on-chain)
+                try {
+                    canPublish = await streamrController.hasPublishPermission(messageStreamId, true);
+                    // Cache the result
+                    channel._publishPermCache = {
+                        address: currentAddress,
+                        canPublish: canPublish,
+                        timestamp: Date.now()
+                    };
+                    Logger.debug('Publish permission check via SDK:', { streamId: messageStreamId, canPublish });
+                } catch (error) {
+                    Logger.warn('Failed to check publish permission via SDK:', error);
+                    // On error, try to publish anyway - the network will reject if no permission
+                    canPublish = true;
                 }
+            }
+
+            if (!canPublish) {
+                throw new Error('You do not have permission to send messages in this channel.');
             }
 
             // Create signed message using identity manager

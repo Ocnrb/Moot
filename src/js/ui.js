@@ -1150,8 +1150,8 @@ class UIController {
             this.elements.currentChannelInfo.innerHTML = this.getChannelTypeLabel(channel.type, channel.readOnly);
             this.elements.messageInputContainer.classList.remove('hidden');
 
-            // Handle read-only channels
-            this.updateReadOnlyUI(channel);
+            // Handle read-only channels (async - checks actual publish permission)
+            await this.updateReadOnlyUI(channel);
 
             // Show invite button
             this.elements.inviteUsersBtn.classList.remove('hidden');
@@ -3532,44 +3532,73 @@ class UIController {
 
     /**
      * Update UI for read-only channel state
+     * Checks actual publish permission from blockchain via Streamr SDK
      * @param {Object} channel - Channel object
      */
-    updateReadOnlyUI(channel) {
+    async updateReadOnlyUI(channel) {
         const messageInput = this.elements.messageInput;
         const sendBtn = document.querySelector('#send-btn');
         
-        if (!channel.readOnly) {
-            // Not read-only - enable input
-            if (messageInput) {
-                messageInput.disabled = false;
-                messageInput.placeholder = 'Type a message...';
-                messageInput.classList.remove('cursor-not-allowed', 'opacity-50');
-            }
-            if (sendBtn) {
-                sendBtn.disabled = false;
-                sendBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-            }
+        // Get current user address
+        const currentAddress = authManager.getAddress();
+        
+        if (!currentAddress) {
+            // No address - disable input
+            this.setReadOnlyInputState(true);
             return;
         }
+
+        // Check if we have cached permission for current user (valid for 1 min)
+        const cacheValid = channel._publishPermCache?.address?.toLowerCase() === currentAddress.toLowerCase() &&
+                          channel._publishPermCache?.timestamp && 
+                          (Date.now() - channel._publishPermCache.timestamp) < 60000;
         
-        // Check if current user is the creator
-        const currentAddress = window.identityManager?.getAddress()?.toLowerCase();
-        const creatorAddress = channel.createdBy?.toLowerCase();
-        const isCreator = currentAddress === creatorAddress;
+        if (cacheValid) {
+            const canPublish = channel._publishPermCache.canPublish;
+            this.setReadOnlyInputState(!canPublish, canPublish && channel.readOnly);
+            return;
+        }
+
+        // Default to disabled while checking permission
+        this.setReadOnlyInputState(true);
+
+        // Check actual permission from blockchain via Streamr SDK
+        try {
+            const canPublish = await streamrController.hasPublishPermission(channel.messageStreamId, true);
+            
+            // Cache the result
+            channel._publishPermCache = {
+                address: currentAddress,
+                canPublish: canPublish,
+                timestamp: Date.now()
+            };
+
+            // Update UI based on actual permission
+            // If channel is read-only and user can publish, show "broadcast" placeholder
+            this.setReadOnlyInputState(!canPublish, canPublish && channel.readOnly);
+            
+            Logger.debug('Permission check via SDK:', {
+                channel: channel.name,
+                canPublish: canPublish,
+                readOnly: channel.readOnly
+            });
+        } catch (error) {
+            Logger.warn('Failed to check publish permission:', error);
+            // On error, disable input for safety
+            this.setReadOnlyInputState(true);
+        }
+    }
+
+    /**
+     * Helper to set input state for read-only channels
+     * @param {boolean} disabled - Whether input should be disabled
+     * @param {boolean} canBroadcast - Whether user can broadcast (has publish permission)
+     */
+    setReadOnlyInputState(disabled, canBroadcast = false) {
+        const messageInput = this.elements.messageInput;
+        const sendBtn = document.querySelector('#send-btn');
         
-        if (isCreator) {
-            // Creator can still send
-            if (messageInput) {
-                messageInput.disabled = false;
-                messageInput.placeholder = 'Type a message (broadcast)...';
-                messageInput.classList.remove('cursor-not-allowed', 'opacity-50');
-            }
-            if (sendBtn) {
-                sendBtn.disabled = false;
-                sendBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-            }
-        } else {
-            // Non-creator - disable input
+        if (disabled) {
             if (messageInput) {
                 messageInput.disabled = true;
                 messageInput.placeholder = 'This channel is read-only';
@@ -3578,6 +3607,16 @@ class UIController {
             if (sendBtn) {
                 sendBtn.disabled = true;
                 sendBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            }
+        } else {
+            if (messageInput) {
+                messageInput.disabled = false;
+                messageInput.placeholder = canBroadcast ? 'Type a message (broadcast)...' : 'Type a message...';
+                messageInput.classList.remove('cursor-not-allowed', 'opacity-50');
+            }
+            if (sendBtn) {
+                sendBtn.disabled = false;
+                sendBtn.classList.remove('opacity-50', 'cursor-not-allowed');
             }
         }
     }

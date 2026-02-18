@@ -876,6 +876,132 @@ class StreamrController {
     }
 
     /**
+     * Check if current user has PUBLISH permission on a stream
+     * Uses Streamr SDK hasPermission for real-time on-chain check
+     * @param {string} streamId - Stream ID
+     * @param {boolean} allowPublic - Whether to include public permissions (default: true)
+     * @returns {Promise<boolean>}
+     */
+    async hasPublishPermission(streamId, allowPublic = true) {
+        if (!this.client) {
+            return false;
+        }
+
+        try {
+            const stream = await this.client.getStream(streamId);
+            const StreamPermission = window.StreamPermission;
+            
+            if (!StreamPermission) {
+                Logger.warn('StreamPermission not available');
+                return false;
+            }
+
+            const currentAddress = await this.client.getAddress();
+            if (!currentAddress) {
+                return false;
+            }
+
+            const hasPublish = await stream.hasPermission({
+                permission: StreamPermission.PUBLISH,
+                userId: currentAddress,
+                allowPublic: allowPublic
+            });
+            
+            Logger.debug('hasPublishPermission check:', { streamId, currentAddress: currentAddress.slice(0,10), hasPublish, allowPublic });
+            return hasPublish;
+        } catch (error) {
+            Logger.error('Failed to check PUBLISH permission:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Check if current user has SUBSCRIBE permission on a stream
+     * Uses Streamr SDK hasPermission for real-time on-chain check
+     * @param {string} streamId - Stream ID
+     * @param {boolean} allowPublic - Whether to include public permissions (default: true)
+     * @returns {Promise<boolean>}
+     */
+    async hasSubscribePermission(streamId, allowPublic = true) {
+        if (!this.client) {
+            return false;
+        }
+
+        try {
+            const stream = await this.client.getStream(streamId);
+            const StreamPermission = window.StreamPermission;
+            
+            if (!StreamPermission) {
+                Logger.warn('StreamPermission not available');
+                return false;
+            }
+
+            const currentAddress = await this.client.getAddress();
+            if (!currentAddress) {
+                return false;
+            }
+
+            const hasSubscribe = await stream.hasPermission({
+                permission: StreamPermission.SUBSCRIBE,
+                userId: currentAddress,
+                allowPublic: allowPublic
+            });
+            
+            Logger.debug('hasSubscribePermission check:', { streamId, currentAddress: currentAddress.slice(0,10), hasSubscribe, allowPublic });
+            return hasSubscribe;
+        } catch (error) {
+            Logger.error('Failed to check SUBSCRIBE permission:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Check all permissions for current user on a stream
+     * Uses Streamr SDK hasPermission for real-time on-chain checks
+     * @param {string} streamId - Stream ID
+     * @returns {Promise<Object>} - { canPublish, canSubscribe, canGrant, canEdit, canDelete, isOwner }
+     */
+    async checkPermissions(streamId) {
+        if (!this.client) {
+            return { canPublish: false, canSubscribe: false, canGrant: false, canEdit: false, canDelete: false, isOwner: false };
+        }
+
+        try {
+            const stream = await this.client.getStream(streamId);
+            const StreamPermission = window.StreamPermission;
+            const currentAddress = await this.client.getAddress();
+            
+            if (!StreamPermission || !currentAddress) {
+                Logger.warn('StreamPermission or address not available');
+                return { canPublish: false, canSubscribe: false, canGrant: false, canEdit: false, canDelete: false, isOwner: false };
+            }
+
+            // Check all permissions in parallel
+            const [canPublish, canSubscribe, canGrant, canEdit, canDelete] = await Promise.all([
+                stream.hasPermission({ permission: StreamPermission.PUBLISH, userId: currentAddress, allowPublic: true }),
+                stream.hasPermission({ permission: StreamPermission.SUBSCRIBE, userId: currentAddress, allowPublic: true }),
+                stream.hasPermission({ permission: StreamPermission.GRANT, userId: currentAddress, allowPublic: false }),
+                stream.hasPermission({ permission: StreamPermission.EDIT, userId: currentAddress, allowPublic: false }),
+                stream.hasPermission({ permission: StreamPermission.DELETE, userId: currentAddress, allowPublic: false })
+            ]);
+
+            // Owner has all admin permissions
+            const isOwner = canGrant && canEdit && canDelete;
+
+            Logger.debug('checkPermissions result:', { 
+                streamId, 
+                currentAddress: currentAddress.slice(0,10), 
+                canPublish, canSubscribe, canGrant, canEdit, canDelete, isOwner 
+            });
+
+            return { canPublish, canSubscribe, canGrant, canEdit, canDelete, isOwner };
+        } catch (error) {
+            Logger.error('Failed to check permissions:', error);
+            return { canPublish: false, canSubscribe: false, canGrant: false, canEdit: false, canDelete: false, isOwner: false };
+        }
+    }
+
+    /**
      * Delete a stream (only owner can delete)
      * For dual-stream architecture, deletes BOTH messageStream and ephemeralStream
      * @param {string} streamId - Stream ID (can be either messageStreamId or ephemeralStreamId)

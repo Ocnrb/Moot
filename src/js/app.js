@@ -1287,6 +1287,15 @@ class App {
             } else if (event === 'channelJoined') {
                 // Re-announce as seeder for any persisted files in this channel
                 mediaController.reannounceForChannel(data.streamId, data.password);
+                
+                // Show notification if user only has read access
+                if (data.permissions && !data.permissions.canPublish && data.permissions.canSubscribe) {
+                    uiController.showNotification(
+                        'You have read-only access to this channel. You cannot send messages.',
+                        'warning',
+                        5000
+                    );
+                }
             } else if (event === 'history_loaded') {
                 // History was loaded via lazy loading - re-render if current channel
                 if (data.streamId === currentStreamId) {

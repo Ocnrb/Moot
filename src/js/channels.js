@@ -249,6 +249,9 @@ class ChannelManager {
             // Extract exposure and metadata from options
             const exposure = options.exposure || (type === 'native' ? 'hidden' : 'hidden');
             
+            // Classification for Closed channels (stored locally only)
+            const classification = type === 'native' ? (options.classification || 'personal') : null;
+            
             const channel = {
                 messageStreamId: streamInfo.messageStreamId,
                 ephemeralStreamId: streamInfo.ephemeralStreamId,
@@ -267,6 +270,7 @@ class ChannelManager {
                 description: exposure === 'visible' ? (options.description || '') : '',
                 language: exposure === 'visible' ? (options.language || 'en') : '',
                 category: exposure === 'visible' ? (options.category || 'general') : '',
+                classification: classification,
                 readOnly: options.readOnly || false,
                 // Lazy loading state (not persisted)
                 historyLoaded: false,
@@ -367,7 +371,11 @@ class ChannelManager {
             }
             
             // Extract name from streamId if not provided (simplified ID format)
-            let channelName = options.name || messageStreamId.split('/')[1]?.replace(/-\d$/, '') || messageStreamId;
+            // For Closed channels, use localName from options (user-provided)
+            let channelName = options.localName || options.name || messageStreamId.split('/')[1]?.replace(/-\d$/, '') || messageStreamId;
+            
+            // Classification for Closed channels (stored locally only)
+            const classification = channelType === 'native' ? (options.classification || 'personal') : null;
 
             const channel = {
                 messageStreamId: messageStreamId,
@@ -381,6 +389,7 @@ class ChannelManager {
                 members: members,
                 messages: [],
                 reactions: {}, // messageId -> { emoji -> [users] }
+                classification: classification,
                 readOnly: options.readOnly || false,
                 // Lazy loading state (not persisted)
                 historyLoaded: false,

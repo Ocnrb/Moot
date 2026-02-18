@@ -236,7 +236,7 @@ class App {
                                     </svg>
                                 </div>
                                 <div class="flex-1 min-w-0">
-                                    <div class="text-[13px] font-medium text-white truncate">${getDisplayName(wallet, 0)}</div>
+                                    <div class="text-[13px] font-medium text-white truncate">${uiController.escapeAttr(getDisplayName(wallet, 0))}</div>
                                     <div class="text-[11px] text-[#888] font-mono">${wallet.address.slice(0, 6)}...${wallet.address.slice(-4)}</div>
                                 </div>
                             </div>
@@ -247,7 +247,7 @@ class App {
                     <div class="px-5 pb-4">
                         <div class="space-y-2 max-h-40 overflow-y-auto scrollbar-thin">
                             ${wallets.map((w, i) => `
-                                <button class="wallet-item w-full bg-[#1a1a1a] hover:bg-[#202020] rounded-lg p-3 border border-[#282828] hover:border-[#444] transition-all text-left ${i === 0 ? 'selected border-[#444]' : ''}" data-address="${w.address}" data-name="${w.name}">
+                                <button class="wallet-item w-full bg-[#1a1a1a] hover:bg-[#202020] rounded-lg p-3 border border-[#282828] hover:border-[#444] transition-all text-left ${i === 0 ? 'selected border-[#444]' : ''}" data-address="${uiController.escapeAttr(w.address)}" data-name="${uiController.escapeAttr(w.name)}">
                                     <div class="flex items-center gap-3">
                                         <div class="w-8 h-8 rounded-lg bg-[#252525] flex items-center justify-center flex-shrink-0">
                                             <svg class="w-4 h-4 text-[#888]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -255,7 +255,7 @@ class App {
                                             </svg>
                                         </div>
                                         <div class="flex-1 min-w-0">
-                                            <div class="text-[13px] font-medium text-white truncate">${getDisplayName(w, i)}</div>
+                                            <div class="text-[13px] font-medium text-white truncate">${uiController.escapeAttr(getDisplayName(w, i))}</div>
                                             <div class="text-[11px] text-[#888] font-mono">${w.address.slice(0, 6)}...${w.address.slice(-4)}</div>
                                         </div>
                                         <div class="w-4 h-4 rounded-full border border-[#444] group-[.selected]:bg-white flex items-center justify-center">
@@ -996,7 +996,7 @@ class App {
                     <div class="px-5 pb-5">
                         <div class="space-y-2 max-h-60 overflow-y-auto scrollbar-thin">
                             ${wallets.map((w, i) => `
-                                <button class="account-option w-full bg-[#1a1a1a] hover:bg-[#202020] rounded-lg p-3 border border-[#282828] hover:border-[#444] transition-all text-left" data-address="${w.address}">
+                                <button class="account-option w-full bg-[#1a1a1a] hover:bg-[#202020] rounded-lg p-3 border border-[#282828] hover:border-[#444] transition-all text-left" data-address="${uiController.escapeAttr(w.address)}">
                                     <div class="flex items-center gap-3">
                                         <div class="w-9 h-9 rounded-lg bg-[#252525] flex items-center justify-center flex-shrink-0">
                                             <svg class="w-4 h-4 text-[#888]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1004,7 +1004,7 @@ class App {
                                             </svg>
                                         </div>
                                         <div class="flex-1 min-w-0">
-                                            <div class="text-[13px] font-medium text-white truncate">${getDisplayName(w, i)}</div>
+                                            <div class="text-[13px] font-medium text-white truncate">${uiController.escapeAttr(getDisplayName(w, i))}</div>
                                             <div class="text-[11px] text-[#888] font-mono">${w.address.slice(0, 6)}...${w.address.slice(-4)}</div>
                                         </div>
                                     </div>

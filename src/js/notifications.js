@@ -7,6 +7,7 @@
 import { streamrController } from './streamr.js';
 import { authManager } from './auth.js';
 import { channelManager } from './channels.js';
+import { uiController } from './ui.js';
 import { Logger } from './logger.js';
 
 class NotificationManager {
@@ -278,47 +279,62 @@ class NotificationManager {
             return;
         }
 
+        const duration = 15000;
         const toast = document.createElement('div');
         toast.className = 'toast invite';
         toast.dataset.inviteId = invite.inviteId;
+        toast.style.setProperty('--toast-duration', `${duration}ms`);
         toast.innerHTML = `
-            <div class="flex-1">
-                <div class="font-bold mb-1">📨 Channel Invite</div>
-                <div class="text-xs opacity-90">From: ${this.formatAddress(invite.from)}</div>
-                <div class="text-sm font-medium">${invite.channel.name}</div>
-                <div class="mt-2 flex space-x-2">
-                    <button class="accept-btn bg-white text-cyan-700 px-2 py-0.5 rounded text-xs font-medium hover:bg-gray-100">
+            <svg class="toast-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+            </svg>
+            <div class="toast-content">
+                <div class="text-[13px] font-medium text-white/90 mb-1">Channel Invite</div>
+                <div class="text-[11px] text-white/50 mb-0.5">From: ${this.formatAddress(invite.from)}</div>
+                <div class="text-[12px] text-white/80 font-medium">${uiController.escapeHtml(invite.channel.name)}</div>
+                <div class="mt-2.5 flex gap-2">
+                    <button class="accept-btn bg-white/90 hover:bg-white text-[#0a0a0a] px-3 py-1 rounded-md text-[11px] font-medium transition">
                         Accept
                     </button>
-                    <button class="dismiss-btn bg-transparent border border-white px-2 py-0.5 rounded text-xs hover:bg-cyan-700">
+                    <button class="dismiss-btn bg-white/10 hover:bg-white/20 text-white/70 px-3 py-1 rounded-md text-[11px] font-medium transition">
                         Dismiss
                     </button>
                 </div>
             </div>
+            <span class="toast-close" title="Dismiss">
+                <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </span>
+            <div class="toast-progress"></div>
         `;
 
         // Add event listeners
         toast.querySelector('.accept-btn').addEventListener('click', () => {
             this.acceptInvite(invite.inviteId);
             toast.classList.add('toast-exit');
-            setTimeout(() => toast.remove(), 300);
+            setTimeout(() => toast.remove(), 250);
         });
         
         toast.querySelector('.dismiss-btn').addEventListener('click', () => {
             this.dismissInvite(invite.inviteId);
             toast.classList.add('toast-exit');
-            setTimeout(() => toast.remove(), 300);
+            setTimeout(() => toast.remove(), 250);
+        });
+        
+        toast.querySelector('.toast-close')?.addEventListener('click', () => {
+            this.dismissInvite(invite.inviteId);
+            toast.classList.add('toast-exit');
+            setTimeout(() => toast.remove(), 250);
         });
 
         container.appendChild(toast);
 
-        // Auto-dismiss after 15 seconds
+        // Auto-dismiss after duration
         setTimeout(() => {
             if (toast.parentElement) {
                 toast.classList.add('toast-exit');
-                setTimeout(() => toast.remove(), 300);
+                setTimeout(() => toast.remove(), 250);
             }
-        }, 15000);
+        }, duration);
 
         // Play notification sound
         this.playNotificationSound();

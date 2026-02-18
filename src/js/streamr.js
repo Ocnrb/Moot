@@ -114,6 +114,21 @@ class StreamrController {
             this.client = new StreamrClient({
                 auth: {
                     privateKey: signer.privateKey
+                },
+                // Custom RPC endpoints for Polygon (avoid polygon-rpc.com 401 errors)
+                contracts: {
+                    ethereumNetwork: {
+                        chainId: 137,
+                        // Disable highGasPriceStrategy to avoid gasstation.polygon.technology errors
+                        highGasPriceStrategy: false
+                    },
+                    rpcs: [
+                        { url: 'https://rpc.ankr.com/polygon' },
+                        { url: 'https://polygon.drpc.org' },
+                        { url: 'https://polygon-bor-rpc.publicnode.com' }
+                    ],
+                    // Use first RPC that responds (faster, less reliable for consensus)
+                    rpcQuorum: 1
                 }
             });
             
@@ -237,7 +252,7 @@ class StreamrController {
             // Note: Parallel creation causes REPLACEMENT_UNDERPRICED error due to nonce conflicts
             
             // Helper function to create stream with retry
-            const createStreamWithRetry = async (streamId, streamMetadata, streamDescription, maxRetries = 3) => {
+            const createStreamWithRetry = async (streamId, streamMetadata, streamDescription, maxRetries = 7) => {
                 for (let attempt = 1; attempt <= maxRetries; attempt++) {
                     try {
                         Logger.info(`Creating stream (attempt ${attempt}/${maxRetries})...`);
@@ -274,7 +289,7 @@ class StreamrController {
                 }
             };
             
-            // Step 1: Create MESSAGE STREAM first
+            // Step 1: Create MESSAGE STREAM first (sequential to avoid nonce conflicts)
             Logger.info('Creating message stream...');
             const startTime = Date.now();
             
@@ -449,8 +464,9 @@ class StreamrController {
      * @param {Object} options - Permission options
      * @param {boolean} options.public - Whether to grant public permissions
      * @param {string[]} options.members - Array of member addresses
+     * @param {number} retries - Number of retry attempts
      */
-    async setStreamPermissions(streamId, options = {}) {
+    async setStreamPermissions(streamId, options = {}, retries = 7) {
         if (!this.client) {
             throw new Error('Streamr client not initialized');
         }
@@ -489,13 +505,32 @@ class StreamrController {
             return;
         }
 
-        // Use setPermissions for batch update (single transaction)
-        await this.client.setPermissions({
-            streamId: streamId,
-            assignments: assignments
-        });
+        // Retry loop for RPC reliability
+        for (let attempt = 1; attempt <= retries; attempt++) {
+            try {
+                Logger.debug(`Setting permissions (attempt ${attempt}/${retries})...`);
+                
+                await this.client.setPermissions({
+                    streamId: streamId,
+                    assignments: assignments
+                });
 
-        Logger.debug('Permissions set successfully (batch)');
+                Logger.debug('Permissions set successfully (batch)');
+                return; // Success
+                
+            } catch (error) {
+                Logger.warn(`Permission attempt ${attempt} failed:`, error.message);
+                
+                if (attempt < retries) {
+                    const delay = attempt * 3000;
+                    Logger.debug(`Retrying in ${delay/1000}s...`);
+                    await new Promise(r => setTimeout(r, delay));
+                } else {
+                    Logger.error('All permission attempts failed for:', streamId);
+                    throw error;
+                }
+            }
+        }
     }
 
     /**
@@ -503,7 +538,7 @@ class StreamrController {
      * Uses setPermissions for single transaction
      * @param {Object} stream - Stream object (or streamId string)
      */
-    async grantPublicPermissions(stream, retries = 2) {
+    async grantPublicPermissions(stream, retries = 7) {
         // If string passed, get the stream object
         const streamId = typeof stream === 'string' ? stream : stream.id;
 
@@ -543,7 +578,7 @@ class StreamrController {
      * Grant public SUBSCRIBE only permissions (read-only channel)
      * @param {Object} stream - Stream object (or streamId string)
      */
-    async grantPublicReadOnlyPermissions(stream, retries = 2) {
+    async grantPublicReadOnlyPermissions(stream, retries = 7) {
         const streamId = typeof stream === 'string' ? stream : stream.id;
 
         for (let attempt = 1; attempt <= retries; attempt++) {
@@ -577,33 +612,13 @@ class StreamrController {
     }
 
     /**
-     * Revoke public permissions from a stream (make it private)
-     * @param {Object} stream - Stream object (or streamId string)
-     */
-    async revokePublicPermissions(stream) {
-        // If string passed, get the stream object
-        if (typeof stream === 'string') {
-            stream = await this.client.getStream(stream);
-        }
-
-        try {
-            await stream.revokePermissions({
-                public: true,
-                permissions: ['subscribe', 'publish']
-            });
-            Logger.debug('Public permissions revoked');
-        } catch (error) {
-            Logger.warn('Failed to revoke public permissions:', error.message);
-        }
-    }
-
-    /**
      * Grant permissions to specific addresses (for native private channels)
      * Uses client.setPermissions for batch operation (single transaction)
      * @param {string} streamId - Stream ID
      * @param {string[]} addresses - Array of Ethereum addresses
+     * @param {number} retries - Number of retry attempts
      */
-    async grantPermissionsToAddresses(streamId, addresses) {
+    async grantPermissionsToAddresses(streamId, addresses, retries = 7) {
         if (!this.client) {
             throw new Error('Streamr client not initialized');
         }
@@ -613,30 +628,42 @@ class StreamrController {
             return;
         }
 
-        try {
-            Logger.debug('Granting permissions to addresses:', addresses);
-
-            // Build assignments array for batch update
-            const assignments = [];
-            for (const address of addresses) {
-                // Normalize to lowercase (Streamr uses lowercase internally)
-                const normalizedAddress = address.toLowerCase();
-                assignments.push({
-                    userId: normalizedAddress,
-                    permissions: ['subscribe', 'publish']
-                });
-            }
-
-            // Use setPermissions for batch update (single transaction)
-            await this.client.setPermissions({
-                streamId: streamId,
-                assignments: assignments
+        // Build assignments array for batch update
+        const assignments = [];
+        for (const address of addresses) {
+            // Normalize to lowercase (Streamr uses lowercase internally)
+            const normalizedAddress = address.toLowerCase();
+            assignments.push({
+                userId: normalizedAddress,
+                permissions: ['subscribe', 'publish']
             });
+        }
 
-            Logger.info('All permissions granted to addresses:', addresses);
-        } catch (error) {
-            Logger.error('Failed to grant permissions:', error);
-            throw error;
+        // Retry loop for RPC reliability
+        for (let attempt = 1; attempt <= retries; attempt++) {
+            try {
+                Logger.debug(`Granting permissions to addresses (attempt ${attempt}/${retries}):`, addresses);
+
+                await this.client.setPermissions({
+                    streamId: streamId,
+                    assignments: assignments
+                });
+
+                Logger.info('All permissions granted to addresses:', addresses);
+                return; // Success
+                
+            } catch (error) {
+                Logger.warn(`Grant permissions attempt ${attempt} failed:`, error.message);
+                
+                if (attempt < retries) {
+                    const delay = attempt * 3000;
+                    Logger.debug(`Retrying in ${delay/1000}s...`);
+                    await new Promise(r => setTimeout(r, delay));
+                } else {
+                    Logger.error('All grant permission attempts failed for:', streamId);
+                    throw error;
+                }
+            }
         }
     }
 
@@ -645,41 +672,54 @@ class StreamrController {
      * Uses client.setPermissions with empty permissions array
      * @param {string} streamId - Stream ID
      * @param {string[]} addresses - Array of Ethereum addresses
+     * @param {number} retries - Number of retry attempts
      */
-    async revokePermissionsFromAddresses(streamId, addresses) {
+    async revokePermissionsFromAddresses(streamId, addresses, retries = 7) {
         if (!this.client) {
             throw new Error('Streamr client not initialized');
         }
 
-        try {
-            Logger.debug('Revoking permissions from addresses:', addresses);
+        if (!addresses || addresses.length === 0) {
+            Logger.debug('No addresses to revoke permissions from');
+            return;
+        }
 
-            // Build assignments array with empty permissions (revoke all)
-            const assignments = [];
-            for (const address of addresses) {
-                // Normalize to lowercase
-                const normalizedAddress = address.toLowerCase();
-                assignments.push({
-                    userId: normalizedAddress,
-                    permissions: [] // Empty array revokes all permissions
-                });
-            }
-
-            if (assignments.length === 0) {
-                Logger.debug('No addresses to revoke permissions from');
-                return;
-            }
-
-            // Use setPermissions with empty permissions to revoke
-            await this.client.setPermissions({
-                streamId: streamId,
-                assignments: assignments
+        // Build assignments array with empty permissions (revoke all)
+        const assignments = [];
+        for (const address of addresses) {
+            // Normalize to lowercase
+            const normalizedAddress = address.toLowerCase();
+            assignments.push({
+                userId: normalizedAddress,
+                permissions: [] // Empty array revokes all permissions
             });
+        }
 
-            Logger.debug('Permissions revoked from addresses:', addresses);
-        } catch (error) {
-            Logger.error('Failed to revoke permissions:', error);
-            throw error;
+        // Retry loop for RPC reliability
+        for (let attempt = 1; attempt <= retries; attempt++) {
+            try {
+                Logger.debug(`Revoking permissions from addresses (attempt ${attempt}/${retries}):`, addresses);
+
+                await this.client.setPermissions({
+                    streamId: streamId,
+                    assignments: assignments
+                });
+
+                Logger.debug('Permissions revoked from addresses:', addresses);
+                return; // Success
+                
+            } catch (error) {
+                Logger.warn(`Revoke permissions attempt ${attempt} failed:`, error.message);
+                
+                if (attempt < retries) {
+                    const delay = attempt * 3000;
+                    Logger.debug(`Retrying in ${delay/1000}s...`);
+                    await new Promise(r => setTimeout(r, delay));
+                } else {
+                    Logger.error('All revoke permission attempts failed for:', streamId);
+                    throw error;
+                }
+            }
         }
     }
 
@@ -688,8 +728,9 @@ class StreamrController {
      * @param {string} streamId - Stream ID
      * @param {string} address - User address
      * @param {Object} permissions - { canGrant: boolean }
+     * @param {number} retries - Number of retry attempts
      */
-    async updatePermissions(streamId, address, permissionsToSet) {
+    async updatePermissions(streamId, address, permissionsToSet, retries = 7) {
         if (!this.client) {
             throw new Error('Streamr client not initialized');
         }
@@ -703,38 +744,38 @@ class StreamrController {
         const normalizedAddress = address.toLowerCase();
         Logger.debug('Updating permissions for:', normalizedAddress, 'canGrant:', permissionsToSet.canGrant);
 
-        try {
-            const stream = await this.client.getStream(streamId);
-            
-            if (permissionsToSet.canGrant) {
-                // Grant the GRANT permission using setPermissions
-                // First get current permissions, then add grant
-                Logger.debug(`Granting GRANT permission to ${normalizedAddress}...`);
+        const newPermissions = permissionsToSet.canGrant 
+            ? ['subscribe', 'publish', 'grant']
+            : ['subscribe', 'publish'];
+
+        // Retry loop for RPC reliability
+        for (let attempt = 1; attempt <= retries; attempt++) {
+            try {
+                Logger.debug(`Updating permissions (attempt ${attempt}/${retries})...`);
                 
                 await this.client.setPermissions({
                     streamId: streamId,
                     assignments: [{
                         userId: normalizedAddress,
-                        permissions: ['subscribe', 'publish', 'grant']
+                        permissions: newPermissions
                     }]
                 });
-                Logger.debug(`GRANT permission added to ${normalizedAddress}`);
-            } else {
-                // Revoke only the GRANT permission, keep subscribe/publish
-                Logger.debug(`Revoking GRANT permission from ${normalizedAddress}...`);
                 
-                await this.client.setPermissions({
-                    streamId: streamId,
-                    assignments: [{
-                        userId: normalizedAddress,
-                        permissions: ['subscribe', 'publish'] // Remove grant by not including it
-                    }]
-                });
-                Logger.debug(`GRANT permission removed from ${normalizedAddress}`);
+                Logger.debug(`Permissions updated for ${normalizedAddress}`);
+                return; // Success
+                
+            } catch (error) {
+                Logger.warn(`Update permissions attempt ${attempt} failed:`, error.message);
+                
+                if (attempt < retries) {
+                    const delay = attempt * 3000;
+                    Logger.debug(`Retrying in ${delay/1000}s...`);
+                    await new Promise(r => setTimeout(r, delay));
+                } else {
+                    Logger.error('All update permission attempts failed for:', streamId);
+                    throw error;
+                }
             }
-        } catch (error) {
-            Logger.error('Failed to update permissions:', error);
-            throw error;
         }
     }
 
@@ -838,9 +879,10 @@ class StreamrController {
      * Delete a stream (only owner can delete)
      * For dual-stream architecture, deletes BOTH messageStream and ephemeralStream
      * @param {string} streamId - Stream ID (can be either messageStreamId or ephemeralStreamId)
+     * @param {number} retries - Number of retry attempts per stream
      * @returns {Promise<void>}
      */
-    async deleteStream(streamId) {
+    async deleteStream(streamId, retries = 7) {
         if (!this.client) {
             throw new Error('Streamr client not initialized');
         }
@@ -858,6 +900,29 @@ class StreamrController {
             throw new Error('Invalid stream ID format - must end with -1 or -2');
         }
 
+        // Helper function to delete a single stream with retries
+        const deleteWithRetry = async (sid, description) => {
+            for (let attempt = 1; attempt <= retries; attempt++) {
+                try {
+                    Logger.debug(`Deleting ${description} (attempt ${attempt}/${retries})...`);
+                    await this.client.deleteStream(sid);
+                    Logger.info(`✓ ${description} deleted:`, sid);
+                    return { success: true };
+                } catch (error) {
+                    Logger.warn(`Delete ${description} attempt ${attempt} failed:`, error.message);
+                    
+                    if (attempt < retries) {
+                        const delay = attempt * 3000;
+                        Logger.debug(`Retrying in ${delay/1000}s...`);
+                        await new Promise(r => setTimeout(r, delay));
+                    } else {
+                        Logger.error(`All delete attempts failed for ${description}:`, sid);
+                        return { success: false, error };
+                    }
+                }
+            }
+        };
+
         try {
             Logger.info('Deleting channel streams...', { messageStreamId, ephemeralStreamId });
             
@@ -866,28 +931,16 @@ class StreamrController {
                 Logger.warn('Unsubscribe warning:', e.message)
             );
             
-            // Delete both streams in parallel
-            const deleteResults = await Promise.allSettled([
-                this.client.deleteStream(messageStreamId),
-                ephemeralStreamId ? this.client.deleteStream(ephemeralStreamId) : Promise.resolve()
-            ]);
+            // Delete message stream first (primary), then ephemeral (sequential for nonce)
+            const msgResult = await deleteWithRetry(messageStreamId, 'message stream');
             
-            // Log results
-            if (deleteResults[0].status === 'fulfilled') {
-                Logger.info('✓ Message stream deleted:', messageStreamId);
-            } else {
-                Logger.error('✗ Failed to delete message stream:', deleteResults[0].reason?.message);
-            }
-            
-            if (ephemeralStreamId && deleteResults[1].status === 'fulfilled') {
-                Logger.info('✓ Ephemeral stream deleted:', ephemeralStreamId);
-            } else if (ephemeralStreamId) {
-                Logger.error('✗ Failed to delete ephemeral stream:', deleteResults[1].reason?.message);
+            if (ephemeralStreamId) {
+                await deleteWithRetry(ephemeralStreamId, 'ephemeral stream');
             }
             
             // Throw if message stream failed (primary stream)
-            if (deleteResults[0].status === 'rejected') {
-                throw deleteResults[0].reason;
+            if (!msgResult.success) {
+                throw msgResult.error;
             }
             
         } catch (error) {
@@ -1218,9 +1271,10 @@ class StreamrController {
      * The ephemeralStream (-2) is intentionally NOT stored for privacy
      * 
      * @param {string} messageStreamId - Message Stream ID (must end with -1)
+     * @param {number} retries - Number of retry attempts
      * @returns {Promise<boolean>} - Success status
      */
-    async enableStorage(messageStreamId) {
+    async enableStorage(messageStreamId, retries = 7) {
         if (!this.client) {
             throw new Error('Client not initialized');
         }
@@ -1234,15 +1288,27 @@ class StreamrController {
         // Ensure NODE_ADDRESS is set
         const nodeAddress = STREAM_CONFIG.NODE_ADDRESS || STREAM_CONFIG.LOGSTORE_NODE;
         
-        try {
-            const stream = await this.client.getStream(messageStreamId);
-            await stream.addToStorageNode(nodeAddress);
-            Logger.info('Storage enabled for message stream:', messageStreamId, '(node:', nodeAddress.slice(0, 10) + '...)');
-            return true;
-        } catch (error) {
-            Logger.warn('Failed to enable storage:', error.message);
-            return false;
+        for (let attempt = 1; attempt <= retries; attempt++) {
+            try {
+                Logger.debug(`Adding to storage node (attempt ${attempt}/${retries})...`);
+                const stream = await this.client.getStream(messageStreamId);
+                await stream.addToStorageNode(nodeAddress);
+                Logger.info('Storage enabled for message stream:', messageStreamId, '(node:', nodeAddress.slice(0, 10) + '...)');
+                return true;
+            } catch (error) {
+                Logger.warn(`Storage attempt ${attempt} failed:`, error.message);
+                
+                if (attempt < retries) {
+                    const delay = attempt * 3000;
+                    Logger.debug(`Retrying in ${delay/1000}s...`);
+                    await new Promise(r => setTimeout(r, delay));
+                } else {
+                    Logger.error('All storage attempts failed for:', messageStreamId);
+                    return false;
+                }
+            }
         }
+        return false;
     }
 
     /**

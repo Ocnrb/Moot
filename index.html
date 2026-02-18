@@ -119,23 +119,88 @@
         .input-button { background-color: #374151; color: white; width: 2.25rem; height: 2.25rem; border-radius: 9999px; display: flex; align-items: center; justify-content: center; transition: background-color 0.2s; cursor: pointer; }
         .input-button:hover { background-color: #4b5563; }
 
-        /* Send button (icon-only, dark orange) */
+        /* Send button */
             #send-message-btn { background-color: transparent; color: #FF5C00; width: 2.25rem; height: 2.25rem; border-radius: 9999px; display: inline-flex; align-items: center; justify-content: center; padding: 0; transition: background-color 0.12s, color 0.12s, transform 0.08s; }
             #send-message-btn svg { display: block; }
             #send-message-btn:hover { color: #FF7A33; background-color: rgba(255,92,0,0.08); }
         #send-message-btn:active { transform: translateY(1px); }
         
-        /* Toast Notifications */
-        .toast-container { position: fixed; bottom: 1rem; left: 1rem; z-index: 9999; display: flex; flex-direction: column-reverse; gap: 0.5rem; max-width: 350px; }
-        .toast { padding: 0.75rem 1rem; border-radius: 0.5rem; color: white; font-size: 0.875rem; display: flex; align-items: center; gap: 0.5rem; animation: slideIn 0.3s ease-out; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
-        .toast.success { background-color: #059669; }
-        .toast.error { background-color: #dc2626; }
-        .toast.info { background-color: #2563eb; }
-        .toast.warning { background-color: #d97706; }
-        .toast.invite { background-color: #0891b2; }
-        .toast-exit { animation: slideOut 0.3s ease-in forwards; }
-        @keyframes slideIn { from { opacity: 0; transform: translateX(-100%); } to { opacity: 1; transform: translateX(0); } }
-        @keyframes slideOut { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(-100%); } }
+        /* Toast Notifications -  */
+        .toast-container { position: fixed; top: 1.8rem; left: 50%; transform: translateX(-50%); z-index: 9999; display: flex; flex-direction: column; gap: 0.75rem; max-width: 380px; width: calc(100% - 2rem); pointer-events: none; }
+        .toast { 
+            position: relative;
+            padding: 0.875rem 1rem;
+            border-radius: 0.75rem;
+            color: #e5e5e5;
+            font-size: 0.8125rem;
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            animation: toastSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            background-color: #1a1a1a;
+            border: 1px solid rgba(255,255,255,0.08);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.2);
+            overflow: hidden;
+            pointer-events: auto;
+        }
+        .toast-icon {
+            width: 18px;
+            height: 18px;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+        .toast-content {
+            flex: 1;
+            min-width: 0;
+        }
+        .toast-message {
+            line-height: 1.4;
+            word-break: break-word;
+        }
+        .toast-close {
+            position: absolute;
+            top: 0.5rem;
+            right: 0.5rem;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: rgba(255,255,255,0.3);
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.15s;
+            opacity: 0;
+        }
+        .toast:hover .toast-close { opacity: 1; }
+        .toast-close:hover { color: rgba(255,255,255,0.7); background: rgba(255,255,255,0.1); }
+        .toast-progress {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            height: 2px;
+            background: rgba(255,255,255,0.15);
+            animation: toastProgress var(--toast-duration, 3000ms) linear forwards;
+        }
+        .toast.success .toast-icon { color: #4ade80; }
+        .toast.success .toast-progress { background: #4ade80; }
+        .toast.error .toast-icon { color: #f87171; }
+        .toast.error .toast-progress { background: #f87171; }
+        .toast.info .toast-icon { color: #60a5fa; }
+        .toast.info .toast-progress { background: #60a5fa; }
+        .toast.warning .toast-icon { color: #fbbf24; }
+        .toast.warning .toast-progress { background: #fbbf24; }
+        .toast.invite { border-color: rgba(6,182,212,0.3); }
+        .toast.invite .toast-icon { color: #22d3ee; }
+        .toast.invite .toast-progress { background: #22d3ee; }
+        .toast.loading { border-color: rgba(255,92,0,0.2); }
+        .toast.loading .toast-icon { color: #ff5c00; }
+        .toast.loading .toast-progress { background: linear-gradient(90deg, transparent, #ff5c00, transparent); width: 100% !important; animation: toastLoadingProgress 1.5s ease-in-out infinite; }
+        .toast-exit { animation: toastSlideOut 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        @keyframes toastSlideIn { from { opacity: 0; transform: translateY(-16px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes toastSlideOut { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-16px); } }
+        @keyframes toastProgress { from { width: 100%; } to { width: 0%; } }
+        @keyframes toastLoadingProgress { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
         
         /* Loading Spinner Overlay */
         .loading-overlay { position: fixed; inset: 0; background-color: rgba(0,0,0,0.7); z-index: 9998; display: none; align-items: center; justify-content: center; flex-direction: column; gap: 1rem; }
@@ -185,8 +250,6 @@
                     <div id="network-dot" class="w-2.5 h-2.5 rounded-full bg-[#444] transition-colors"></div>
                     <span class="text-[17px] font-extrabold text-white tracking-tight leading-tight ml-1">Pombo</span>
                 </div>
-                <!-- Hidden textual status preserved so JS can update it without errors -->
-                <span id="network-status" class="hidden text-[10px] text-[#555] uppercase tracking-wider" aria-hidden="true">offline</span>
             </div>
         </div>
         <div class="flex items-center gap-3">
@@ -218,7 +281,7 @@
         <!-- Sidebar - Channel List -->
         <aside class="w-80 bg-[#1b1b1b] border-r border-gray-800 flex flex-col">
             <!-- Sidebar Header -->
-            <div class="p-3 border-b border-[#282828] space-y-2.5">
+            <div class="px-3 pt-3 space-y-2.5">
                 <!-- Header with title and + button -->
                 <div class="flex items-center justify-between">
                     <span class="text-xs font-medium text-[#666] uppercase tracking-wider">Channels</span>
@@ -229,29 +292,52 @@
                     </button>
                 </div>
                 
-                <!-- Quick join input -->
-                <div class="relative">
-                    <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm font-medium text-[#555]">#</span>
-                    <input
-                        type="text"
-                        id="quick-join-input"
-                        placeholder="Join with channel ID..."
-                        autocomplete="off"
-                        class="w-full bg-[#1a1a1a] border border-[#282828] text-white pl-7 pr-3 py-2 rounded-lg text-sm placeholder-[#555] focus:outline-none focus:border-[#444] transition"
-                    />
+                <!-- Quick join + Explore row -->
+                <div class="flex items-center gap-2">
+                    <!-- Channel ID input -->
+                    <div class="relative w-[42%] flex-shrink-0">
+                        <span id="quick-join-hash" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm font-medium text-[#555] hidden">#</span>
+                        <input
+                            type="text"
+                            id="quick-join-input"
+                            placeholder="Join with #ID..."
+                            autocomplete="off"
+                            style="text-overflow: ellipsis;"
+                            class="w-full bg-[#1a1a1a] border border-[#282828] text-white px-3 py-2 rounded-lg text-sm placeholder-[#555] focus:outline-none focus:border-[#444] transition overflow-hidden quick-join-field"
+                        />
+                    </div>
+                    
+                    <!-- Explore/Join button (60-65%) -->
+                    <button id="browse-channels-btn" class="flex-1 bg-[#1a1a1a] hover:bg-[#252525] border border-[#282828] px-3 py-2 rounded-lg text-sm text-[#888] hover:text-white transition flex items-center justify-center gap-1.5">
+                        <svg id="browse-btn-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418"/>
+                        </svg>
+                        <span id="browse-btn-text">Explore</span>
+                    </button>
                 </div>
                 
-                <!-- Explore/Join button -->
-                <button id="browse-channels-btn" class="w-full bg-[#1a1a1a] hover:bg-[#252525] border border-[#282828] px-3 py-2 rounded-lg text-sm text-[#888] hover:text-white transition flex items-center justify-center gap-1.5">
-                    <svg id="browse-btn-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418"/>
-                    </svg>
-                    <span id="browse-btn-text">Explore</span>
-                </button>
+                <!-- Channel Filter Tabs -->
+                <div class="flex items-center mt-3 -mx-3 border-b border-[#282828]">
+                    <button data-channel-filter="all" class="channel-filter-tab px-3 py-2.5 text-xs transition-all text-[#F6851B] border-b-2 border-[#F6851B] -mb-px">
+                        All
+                    </button>
+                    <button data-channel-filter="personal" class="channel-filter-tab flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs transition-all text-white/40 hover:text-white/60 border-b-2 border-transparent -mb-px">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/>
+                        </svg>
+                        <span>Personal</span>
+                    </button>
+                    <button data-channel-filter="community" class="channel-filter-tab flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs transition-all text-white/40 hover:text-white/60 border-b-2 border-transparent -mb-px">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z"/>
+                        </svg>
+                        <span>Communities</span>
+                    </button>
+                </div>
             </div>
 
             <!-- Channel List -->
-            <div id="channel-list" class="flex-1 overflow-y-auto">
+            <div id="channel-list" class="flex-1 overflow-y-auto space-y-1.5 py-2">
                 <!-- Channels will be dynamically added here -->
                 <div class="p-4 text-center text-[#555] text-sm">
                     No channels yet
@@ -412,7 +498,7 @@
 
     <!-- Modal: New Channel -->
     <div id="new-channel-modal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-        <div class="bg-[#141414] rounded-2xl w-[560px] max-w-[95vw] shadow-2xl border border-white/5 overflow-hidden">
+        <div class="bg-[#141414] rounded-2xl w-[640px] max-w-[95vw] shadow-2xl border border-white/5 overflow-hidden">
             <!-- Header -->
             <div class="flex items-center justify-between px-6 py-4 border-b border-white/5">
                 <h3 class="text-lg font-medium text-white/90">Create Channel</h3>
@@ -432,15 +518,15 @@
                     <nav class="space-y-1 px-2 flex-1">
                         <button type="button" data-tab="public" class="channel-tab w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm text-left transition-all bg-white/10 text-white">
                             <svg class="w-4 h-4 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-                            <span>Public</span>
+                            <span>Open</span>
                         </button>
                         <button type="button" data-tab="password" class="channel-tab w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm text-left transition-all text-white/60 hover:text-white/90 hover:bg-white/5">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>
-                            <span>Password</span>
+                            <span>Protected</span>
                         </button>
                         <button type="button" data-tab="native" class="channel-tab w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm text-left transition-all text-white/60 hover:text-white/90 hover:bg-white/5">
                             <svg class="w-4 h-4" viewBox="0 0 320 512" fill="currentColor"><path d="M311.9 260.8L160 353.6 8 260.8 160 0l151.9 260.8zM160 383.4L8 290.6 160 512l152-221.4-152 92.8z"/></svg>
-                            <span>Verified</span>
+                            <span>Closed</span>
                         </button>
                     </nav>
                     <!-- Learn More Button -->
@@ -470,7 +556,7 @@
                         <div id="tab-public" class="channel-tab-content space-y-4">
                             <div class="p-4 bg-white/5 rounded-xl border border-white/5">
                                 <p class="text-sm text-white/50 leading-relaxed">
-                                    Open channel that anyone can discover and join. Messages are visible to all participants.
+                                    Open channel that anyone can discover and join. Messages are visible to all participants
                                 </p>
                             </div>
                             <input type="hidden" name="channel-type" value="public" class="channel-type-input">
@@ -480,7 +566,7 @@
                         <div id="tab-password" class="channel-tab-content hidden space-y-4">
                             <div class="p-4 bg-white/5 rounded-xl border border-white/5">
                                 <p class="text-sm text-white/50 leading-relaxed">
-                                    Only users with the correct password can join and read messages.
+                                    Password protected channel. Only users with the correct password can join and read messages.
                                 </p>
                             </div>
                             <div>
@@ -496,14 +582,14 @@
                             <input type="hidden" name="channel-type" value="password" class="channel-type-input">
                         </div>
 
-                        <!-- Tab Content: Native (Verified) -->
+                        <!-- Tab Content: Native (Closed) -->
                         <div id="tab-native" class="channel-tab-content hidden space-y-4">
                             <div class="p-4 bg-white/5 rounded-xl border border-white/5">
                                 <div class="flex items-center gap-2 mb-2">
                                     <span class="text-[10px] bg-white/10 text-white/60 px-1.5 py-0.5 rounded uppercase tracking-wider">Most Secure</span>
                                 </div>
                                 <p class="text-sm text-white/50 leading-relaxed">
-                                    On-chain verified membership. Each member is authorized by Account address.
+                                    Private channel with on-chain verified membership. Each member is authorized by account address.
                                 </p>
                             </div>
                             <div>
@@ -515,6 +601,19 @@
                                     class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-white/30 transition resize-none font-mono placeholder:text-white/20"
                                 ></textarea>
                             </div>
+                            <!-- Classification for Closed channels -->
+                            <div>
+                                <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Classification</label>
+                                <div class="flex gap-2">
+                                    <button type="button" data-classification="personal" class="classification-tab flex-1 px-3 py-2 rounded-lg text-xs font-medium transition bg-white/10 text-white border border-white/10">
+                                        Personal
+                                    </button>
+                                    <button type="button" data-classification="community" class="classification-tab flex-1 px-3 py-2 rounded-lg text-xs font-medium transition bg-white/5 text-white/50 border border-white/5 hover:bg-white/10 hover:text-white/70">
+                                        Community
+                                    </button>
+                                </div>
+                                <p class="text-xs text-white/30 mt-2">For organizing your channels locally.</p>
+                            </div>
                             <input type="hidden" name="channel-type" value="native" class="channel-type-input">
                         </div>
 
@@ -523,28 +622,28 @@
 
                         <!-- Visibility Selection -->
                         <div id="exposure-section">
-                            <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-3">Visibility</label>
-                            <div class="flex gap-3">
-                                <button type="button" data-exposure="hidden" class="exposure-tab flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl border-2 border-white/20 bg-white/5 text-white text-sm font-medium transition">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2 2l20 20"/></svg>
-                                    Hidden
-                                </button>
-                                <button type="button" data-exposure="visible" class="exposure-tab flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl border-2 border-white/10 text-white/50 text-sm font-medium transition">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418"/></svg>
-                                    Visible
-                                </button>
+                            <div class="flex items-center justify-between">
+                                <label class="text-xs font-medium text-white/30 uppercase tracking-wider">Visibility</label>
+                                <div class="flex gap-1">
+                                    <button type="button" data-exposure="hidden" class="exposure-tab px-2.5 py-1 rounded text-xs transition-all bg-[#F6851B]/20 text-[#F6851B]">
+                                        Hidden
+                                    </button>
+                                    <button type="button" data-exposure="visible" class="exposure-tab px-2.5 py-1 rounded text-xs transition-all text-white/30 hover:text-white/50 hover:bg-white/5">
+                                        Visible
+                                    </button>
+                                </div>
                             </div>
-                            <p class="text-xs text-white/30 mt-2">Visible channels appear in the public explorer.</p>
+                            <p class="text-xs text-white/20 mt-1.5">Visible channels appear in Explore.</p>
                         </div>
 
                         <!-- Read-Only Toggle -->
-                        <div class="flex items-center justify-between p-4 bg-white/5 rounded-xl border border-white/5">
+                        <div class="flex items-center justify-between">
                             <div>
-                                <span class="text-sm text-white font-medium">Read-Only</span>
-                                <p class="text-xs text-white/40 mt-0.5">Only you can send messages</p>
+                                <label class="text-xs font-medium text-white/30 uppercase tracking-wider">Read-Only</label>
+                                <p class="text-xs text-white/20 mt-0.5">Only you can send messages</p>
                             </div>
-                            <button type="button" id="read-only-toggle" class="relative w-11 h-6 rounded-full transition-colors bg-white/10" data-enabled="false">
-                                <span class="absolute left-1 top-1 w-4 h-4 rounded-full bg-white/40 transition-all"></span>
+                            <button type="button" id="read-only-toggle" class="relative w-9 h-5 rounded-full transition-colors bg-white/10" data-enabled="false">
+                                <span class="absolute left-0.5 top-0.5 w-4 h-4 rounded-full bg-white/30 transition-all"></span>
                             </button>
                         </div>
 
@@ -581,18 +680,18 @@
                                 <div class="flex-1">
                                     <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Category</label>
                                     <select id="channel-category-input" class="w-full bg-[#1a1a1a] border border-white/10 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-white/30 transition cursor-pointer">
-                                        <option value="general">General</option>
-                                        <option value="crypto">Crypto</option>
-                                        <option value="tech">Technology</option>
-                                        <option value="gaming">Gaming</option>
-                                        <option value="music">Music</option>
-                                        <option value="art">Art</option>
-                                        <option value="sports">Sports</option>
+                                        <option value="politics">Politics</option>
                                         <option value="news">News</option>
-                                        <option value="finance">Finance</option>
+                                        <option value="tech">Tech & AI</option>
+                                        <option value="crypto">Crypto & Web3</option>
+                                        <option value="finance">Business & Finance</option>
+                                        <option value="science">Science</option>
+                                        <option value="gaming">Gaming</option>
+                                        <option value="entertainment">Entertainment</option>
+                                        <option value="sports">Sports</option>
                                         <option value="education">Education</option>
-                                        <option value="community">Community</option>
-                                        <option value="other">Other</option>
+                                        <option value="comedy">Comedy & Memes</option>
+                                        <option value="general">General</option>
                                     </select>
                                 </div>
                             </div>
@@ -761,55 +860,169 @@
                     Join
                 </button>
             </div>
+            
+            <div class="mt-4 pt-3 border-t border-[#222] text-center">
+                <button type="button" id="switch-to-closed-join-btn" class="text-xs text-white/40 hover:text-white/60 transition">
+                    Joining a Closed channel? <span class="underline">Click here</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Join Closed Channel (with name + classification) -->
+    <div id="join-closed-channel-modal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+        <div class="bg-[#111111] rounded-xl p-5 w-[340px] max-w-full mx-4 border border-[#222]">
+            <h3 class="text-base font-medium mb-4 text-white">Join Closed Channel</h3>
+
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm text-[#666] mb-1.5 uppercase tracking-wide">Channel ID</label>
+                    <input
+                        type="text"
+                        id="join-closed-stream-id-input"
+                        placeholder="0x.../channel_abc123"
+                        autocomplete="off"
+                        class="w-full bg-[#1a1a1a] border border-[#282828] text-white px-3 py-2 rounded-lg text-sm focus:outline-none focus:border-[#444] transition"
+                    />
+                </div>
+
+                <div>
+                    <label class="block text-sm text-[#666] mb-1.5 uppercase tracking-wide">Channel Name</label>
+                    <input
+                        type="text"
+                        id="join-closed-name-input"
+                        placeholder="Give this channel a name..."
+                        autocomplete="off"
+                        class="w-full bg-[#1a1a1a] border border-[#282828] text-white px-3 py-2 rounded-lg text-sm focus:outline-none focus:border-[#444] transition"
+                    />
+                    <p class="text-xs text-[#555] mt-1">This name is stored locally only</p>
+                </div>
+
+                <div>
+                    <label class="block text-sm text-[#666] mb-2 uppercase tracking-wide">Classification</label>
+                    <div class="flex gap-2">
+                        <button type="button" data-join-classification="personal" class="join-classification-tab flex-1 px-3 py-2 rounded-lg text-xs font-medium transition bg-white/10 text-white border border-white/10">
+                            Personal
+                        </button>
+                        <button type="button" data-join-classification="community" class="join-classification-tab flex-1 px-3 py-2 rounded-lg text-xs font-medium transition bg-white/5 text-white/50 border border-white/5 hover:bg-white/10 hover:text-white/70">
+                            Community
+                        </button>
+                    </div>
+                    <p class="text-xs text-[#555] mt-1.5">Helps organize your channels locally</p>
+                </div>
+            </div>
+
+            <div class="flex gap-2 mt-5">
+                <button id="cancel-join-closed-btn" class="flex-1 bg-[#1a1a1a] hover:bg-[#252525] border border-[#282828] text-[#888] text-sm font-medium px-3 py-2.5 rounded-lg transition">
+                    Cancel
+                </button>
+                <button id="join-closed-btn" class="flex-1 bg-white hover:bg-[#f0f0f0] text-black text-sm font-medium px-3 py-2.5 rounded-lg transition">
+                    Join
+                </button>
+            </div>
         </div>
     </div>
 
     <!-- Modal: Browse Public Channels -->
-    <div id="browse-channels-modal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-        <div class="bg-[#111111] rounded-xl p-5 w-[420px] max-w-full mx-4 max-h-[80vh] flex flex-col border border-[#222]">
-            <div class="flex items-center justify-between mb-4">
-                <h3 class="text-base font-medium text-white flex items-center gap-2">
-                    <svg class="w-4 h-4 text-[#888]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418"/>
+    <div id="browse-channels-modal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div class="bg-[#141414] rounded-2xl w-[640px] max-w-[95vw] max-h-[85vh] flex flex-col shadow-2xl border border-white/5 overflow-hidden">
+            <!-- Header -->
+            <div class="flex items-center justify-between px-6 py-4 border-b border-white/5">
+                <h3 class="text-lg font-medium text-white/90">Explore Channels</h3>
+                <button id="close-browse-btn" class="text-white/40 hover:text-white/80 transition p-1">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
                     </svg>
-                    Explore Channels
-                </h3>
-            </div>
-
-            <!-- Type Filter Tabs -->
-            <div class="flex bg-[#1a1a1a] rounded-lg p-1 gap-1 mb-3">
-                <button type="button" data-browse-filter="public" class="browse-filter-tab flex-1 text-[11px] py-1.5 px-2 rounded-md transition bg-white text-black font-medium flex items-center justify-center gap-1">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418"/></svg>
-                    Public
-                </button>
-                <button type="button" data-browse-filter="password" class="browse-filter-tab flex-1 text-[11px] py-1.5 px-2 rounded-md transition text-[#888] hover:text-white hover:bg-[#252525] flex items-center justify-center gap-1">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>
-                    Private
                 </button>
             </div>
 
-            <!-- Search -->
-            <div class="mb-3">
-                <input
-                    type="text"
-                    id="browse-search-input"
-                    placeholder="Search channels..."
-                    class="w-full bg-[#1a1a1a] border border-[#282828] text-white px-3 py-2 rounded-lg text-sm focus:outline-none focus:border-[#444] transition"
-                />
-            </div>
-
-            <!-- Channel List -->
-            <div id="browse-channels-list" class="flex-1 overflow-y-auto space-y-2 min-h-[180px] max-h-[350px]">
-                <div class="text-center text-[#555] py-8 text-sm">
-                    <div class="spinner mx-auto mb-2" style="width: 24px; height: 24px;"></div>
-                    Loading channels...
+            <div class="flex flex-1 min-h-[460px] overflow-hidden">
+                <!-- Sidebar: Channel Type -->
+                <div class="w-36 bg-[#0a0a0a] border-r border-white/5 py-3 flex flex-col flex-shrink-0">
+                    <div class="px-3 mb-2">
+                        <span class="text-[10px] font-medium text-white/30 uppercase tracking-wider">Type</span>
+                    </div>
+                    <nav class="space-y-1 px-2">
+                        <button type="button" data-browse-filter="public" class="browse-filter-tab w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm text-left transition-all bg-white/10 text-white">
+                            <svg class="w-4 h-4 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418"/></svg>
+                            <span>Public</span>
+                        </button>
+                        <button type="button" data-browse-filter="password" class="browse-filter-tab w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm text-left transition-all text-white/60 hover:text-white/90 hover:bg-white/5">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>
+                            <span>Private</span>
+                        </button>
+                    </nav>
                 </div>
-            </div>
 
-            <div class="flex justify-end mt-4">
-                <button id="close-browse-btn" class="bg-[#1a1a1a] hover:bg-[#252525] border border-[#282828] text-[#888] text-sm font-medium px-4 py-2 rounded-lg transition">
-                    Close
-                </button>
+                <!-- Content Panel -->
+                <div class="flex-1 flex flex-col overflow-hidden">
+                    <!-- Filters Section -->
+                    <div class="px-5 pt-4 pb-3 space-y-3">
+                        <!-- Search + Language Filter -->
+                        <div class="flex gap-3">
+                            <div class="flex-1 relative">
+                                <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
+                                </svg>
+                                <input
+                                    type="text"
+                                    id="browse-search-input"
+                                    placeholder="Search channels..."
+                                    class="w-full bg-white/5 border border-white/10 text-white pl-10 pr-4 py-2.5 rounded-xl text-sm focus:outline-none focus:border-white/30 transition placeholder:text-white/30"
+                                />
+                            </div>
+                            <select id="browse-language-filter" class="bg-white/5 border border-white/10 text-white/80 px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-white/30 transition cursor-pointer">
+                                <option value="en" selected>English</option>
+                                <option value="pt">Português</option>
+                                <option value="es">Español</option>
+                                <option value="fr">Français</option>
+                                <option value="de">Deutsch</option>
+                                <option value="it">Italiano</option>
+                                <option value="zh">中文</option>
+                                <option value="ja">日本語</option>
+                                <option value="ko">한국어</option>
+                                <option value="ru">Русский</option>
+                                <option value="ar">العربية</option>
+                                <option value="other">Other</option>
+                            </select>
+                        </div>
+
+                        <!-- Category Chips (collapsible) -->
+                        <div class="relative">
+                            <div id="browse-category-chips" class="flex flex-wrap gap-1.5 overflow-hidden max-h-[26px] transition-all duration-200" data-expanded="false">
+                                <button type="button" data-category="" class="browse-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white text-black">All</button>
+                                <button type="button" data-category="politics" class="browse-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Politics</button>
+                                <button type="button" data-category="news" class="browse-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">News</button>
+                                <button type="button" data-category="tech" class="browse-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Tech & AI</button>
+                                <button type="button" data-category="crypto" class="browse-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Crypto</button>
+                                <button type="button" data-category="finance" class="browse-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Finance</button>
+                                <button type="button" data-category="science" class="browse-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Science</button>
+                                <button type="button" data-category="gaming" class="browse-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Gaming</button>
+                                <button type="button" data-category="entertainment" class="browse-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Entertainment</button>
+                                <button type="button" data-category="sports" class="browse-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Sports</button>
+                                <button type="button" data-category="health" class="browse-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Health</button>
+                                <button type="button" data-category="education" class="browse-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Education</button>
+                                <button type="button" data-category="comedy" class="browse-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Comedy</button>
+                            </div>
+                            <button id="toggle-categories-btn" type="button" class="absolute right-0 top-0 h-[26px] px-2 flex items-center bg-gradient-to-l from-[#141414] via-[#141414] to-transparent pl-6 text-white/40 hover:text-white/60 transition">
+                                <svg id="toggle-categories-icon" class="w-4 h-4 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 9l-7 7-7-7"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Subtle separator -->
+                    <div class="mx-5 border-t border-white/5"></div>
+
+                    <!-- Channel List -->
+                    <div id="browse-channels-list" class="flex-1 overflow-y-auto px-5 py-3 space-y-2">
+                        <div class="flex flex-col items-center justify-center py-12 text-white/40">
+                            <div class="spinner mb-3" style="width: 28px; height: 28px;"></div>
+                            <p class="text-sm">Loading channels...</p>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

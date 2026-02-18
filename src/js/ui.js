@@ -16,7 +16,13 @@ import { subscriptionManager } from './subscriptionManager.js';
 
 // Gas estimation for Polygon network
 const GasEstimator = {
-    RPC_URL: 'https://polygon-rpc.com',
+    // Multiple RPC endpoints for fallback (ordered by reliability)
+    RPC_URLS: [
+        'https://rpc.ankr.com/polygon',
+        'https://polygon.drpc.org',
+        'https://polygon-bor-rpc.publicnode.com'
+    ],
+    currentRpcIndex: 0,
     
     // Approximate gas units for Streamr operations (based on real tx data)
     GAS_UNITS: {
@@ -30,6 +36,56 @@ const GasEstimator = {
     cacheTime: 0,
     CACHE_DURATION: 60000, // 1 minute
     
+    async rpcCall(method, params = []) {
+        let lastError = null;
+        const startIndex = this.currentRpcIndex;
+        
+        // Try each RPC in sequence, starting from the last successful one
+        for (let i = 0; i < this.RPC_URLS.length; i++) {
+            const index = (startIndex + i) % this.RPC_URLS.length;
+            const rpcUrl = this.RPC_URLS[index];
+            
+            try {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 5000); // 5s timeout
+                
+                const response = await fetch(rpcUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        method: method,
+                        params: params,
+                        id: 1
+                    }),
+                    signal: controller.signal
+                });
+                
+                clearTimeout(timeout);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error.message || 'RPC error');
+                }
+                
+                // Success - remember this RPC for next time
+                this.currentRpcIndex = index;
+                return data;
+            } catch (error) {
+                lastError = error;
+                Logger.debug(`RPC ${rpcUrl} failed: ${error.message}`);
+                continue;
+            }
+        }
+        
+        throw lastError || new Error('All RPCs failed');
+    },
+    
     async getGasPrice() {
         const now = Date.now();
         if (this.cachedGasPrice && (now - this.cacheTime) < this.CACHE_DURATION) {
@@ -37,24 +93,14 @@ const GasEstimator = {
         }
         
         try {
-            const response = await fetch(this.RPC_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    jsonrpc: '2.0',
-                    method: 'eth_gasPrice',
-                    params: [],
-                    id: 1
-                })
-            });
-            const data = await response.json();
+            const data = await this.rpcCall('eth_gasPrice');
             const gasPriceWei = parseInt(data.result, 16);
             this.cachedGasPrice = gasPriceWei;
             this.cacheTime = now;
             return gasPriceWei;
         } catch (error) {
             Logger.warn('Failed to fetch gas price:', error);
-            // Fallback to 30 gwei if fetch fails
+            // Fallback to 30 gwei if all RPCs fail
             return 30 * 1e9;
         }
     },
@@ -95,17 +141,7 @@ const GasEstimator = {
 
     async getBalance(address) {
         try {
-            const response = await fetch(this.RPC_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    jsonrpc: '2.0',
-                    method: 'eth_getBalance',
-                    params: [address, 'latest'],
-                    id: 1
-                })
-            });
-            const data = await response.json();
+            const data = await this.rpcCall('eth_getBalance', [address, 'latest']);
             const balanceWei = parseInt(data.result, 16);
             return balanceWei;
         } catch (error) {
@@ -141,6 +177,42 @@ class UIController {
         
         // Send button debounce - prevents duplicate sends on rapid clicks
         this.isSending = false;
+        
+        // Channel filter state (sidebar tabs: all/personal/community)
+        this.currentChannelFilter = 'all';
+        
+        // Media cache for safe lightbox handling (prevents XSS via onclick)
+        // Maps mediaId -> { url, type }
+        this.mediaCache = new Map();
+        this.mediaIdCounter = 0;
+    }
+    
+    /**
+     * Register media URL and get a safe ID for onclick handlers
+     * @param {string} url - Media URL (base64, blob, or http)
+     * @param {string} type - 'image' or 'video'
+     * @returns {string} - Safe media ID
+     */
+    registerMedia(url, type = 'image') {
+        // Validate URL before registering
+        if (!this.isValidMediaUrl(url)) {
+            Logger.warn('Invalid media URL rejected:', url?.substring(0, 50));
+            return null;
+        }
+        const mediaId = `media_${++this.mediaIdCounter}`;
+        this.mediaCache.set(mediaId, { url, type });
+        return mediaId;
+    }
+    
+    /**
+     * Open lightbox by media ID (safe method)
+     * @param {string} mediaId - Registered media ID
+     */
+    openLightboxById(mediaId) {
+        const media = this.mediaCache.get(mediaId);
+        if (media) {
+            this.openLightbox(media.url, media.type);
+        }
     }
 
     /**
@@ -155,7 +227,6 @@ class UIController {
             disconnectWalletBtn: document.getElementById('disconnect-wallet'),
             walletControls: document.getElementById('wallet-controls'),
             switchWalletBtn: document.getElementById('switch-wallet'),
-            networkStatus: document.getElementById('network-status'),
             contactsBtn: document.getElementById('contacts-btn'),
 
             // Sidebar
@@ -247,11 +318,13 @@ class UIController {
 
             // Join/Browse channels
             quickJoinInput: document.getElementById('quick-join-input'),
+            quickJoinHash: document.getElementById('quick-join-hash'),
             browseChannelsBtn: document.getElementById('browse-channels-btn'),
             browseBtnIcon: document.getElementById('browse-btn-icon'),
             browseBtnText: document.getElementById('browse-btn-text'),
             browseChannelsModal: document.getElementById('browse-channels-modal'),
             browseSearchInput: document.getElementById('browse-search-input'),
+            browseLanguageFilter: document.getElementById('browse-language-filter'),
             browseChannelsList: document.getElementById('browse-channels-list'),
             closeBrowseBtn: document.getElementById('close-browse-btn'),
             
@@ -314,6 +387,27 @@ class UIController {
             });
         });
 
+        // Classification tabs (for Closed channels) - switch between personal/community
+        document.querySelectorAll('.classification-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                this.switchClassificationTab(tab.dataset.classification);
+            });
+        });
+
+        // Join classification tabs (in join-closed-channel modal)
+        document.querySelectorAll('.join-classification-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                this.switchJoinClassificationTab(tab.dataset.joinClassification);
+            });
+        });
+
+        // Channel filter tabs (sidebar: All/Personal/Communities)
+        document.querySelectorAll('.channel-filter-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                this.switchChannelFilterTab(tab.dataset.channelFilter);
+            });
+        });
+
         // Read-only toggle
         const readOnlyToggle = document.getElementById('read-only-toggle');
         readOnlyToggle?.addEventListener('click', () => {
@@ -367,9 +461,10 @@ class UIController {
             }
         });
 
-        // Quick join input - Toggle button state on input change
+        // Quick join input - Toggle button state and hash visibility on input change
         this.elements.quickJoinInput?.addEventListener('input', (e) => {
             this.updateBrowseJoinButton();
+            this.updateQuickJoinHash();
         });
 
         // Browse/Join channels button (sidebar) - Dynamic behavior
@@ -392,6 +487,21 @@ class UIController {
             this.hideJoinChannelModal();
         });
 
+        // Join Closed Channel modal buttons
+        document.getElementById('join-closed-btn')?.addEventListener('click', () => {
+            this.handleJoinClosedChannel();
+        });
+        document.getElementById('cancel-join-closed-btn')?.addEventListener('click', () => {
+            this.hideJoinClosedChannelModal();
+        });
+        
+        // Switch from normal join to closed join modal
+        document.getElementById('switch-to-closed-join-btn')?.addEventListener('click', () => {
+            const streamId = this.elements.joinStreamIdInput?.value.trim() || '';
+            this.hideJoinChannelModal();
+            this.showJoinClosedChannelModal(streamId);
+        });
+
         // Join password toggle
         const joinHasPassword = document.getElementById('join-has-password');
         joinHasPassword?.addEventListener('change', (e) => {
@@ -410,12 +520,35 @@ class UIController {
 
         // Browse type filter tabs
         this.browseTypeFilter = 'public';
+        this.browseCategoryFilter = '';
+        this.browseLanguageFilterValue = 'en';
+        
         document.querySelectorAll('.browse-filter-tab').forEach(tab => {
             tab.addEventListener('click', () => {
                 this.browseTypeFilter = tab.dataset.browseFilter;
                 this.updateBrowseFilterTabs();
                 this.filterBrowseChannels(this.elements.browseSearchInput?.value || '');
             });
+        });
+        
+        // Browse category chips
+        document.querySelectorAll('.browse-category-chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                this.browseCategoryFilter = chip.dataset.category;
+                this.updateBrowseCategoryChips();
+                this.filterBrowseChannels(this.elements.browseSearchInput?.value || '');
+            });
+        });
+        
+        // Toggle categories expand/collapse
+        document.getElementById('toggle-categories-btn')?.addEventListener('click', () => {
+            this.toggleCategoriesExpand();
+        });
+        
+        // Browse language filter
+        this.elements.browseLanguageFilter?.addEventListener('change', (e) => {
+            this.browseLanguageFilterValue = e.target.value;
+            this.filterBrowseChannels(this.elements.browseSearchInput?.value || '');
         });
 
         // Send message
@@ -746,40 +879,17 @@ class UIController {
      */
     updateNetworkStatus(status, connected = false) {
         const dot = document.getElementById('network-dot');
+        if (!dot) return;
         
-        // Normalize status text to be minimal
-        let displayStatus = 'offline';
         if (connected) {
-            displayStatus = 'online';
+            dot.classList.remove('bg-[#444]', 'bg-amber-400');
+            dot.classList.add('bg-emerald-400');
         } else if (status.toLowerCase().includes('connecting')) {
-            displayStatus = 'connecting';
-        } else if (status.toLowerCase().includes('ready')) {
-            displayStatus = 'ready';
-        }
-        
-        this.elements.networkStatus.textContent = displayStatus;
-        
-        if (connected) {
-            this.elements.networkStatus.classList.add('text-emerald-400');
-            this.elements.networkStatus.classList.remove('text-[#555]', 'text-amber-400');
-            if (dot) {
-                dot.classList.remove('bg-[#444]', 'bg-amber-400');
-                dot.classList.add('bg-emerald-400');
-            }
-        } else if (displayStatus === 'connecting') {
-            this.elements.networkStatus.classList.add('text-amber-400');
-            this.elements.networkStatus.classList.remove('text-[#555]', 'text-emerald-400');
-            if (dot) {
-                dot.classList.remove('bg-[#444]', 'bg-emerald-400');
-                dot.classList.add('bg-amber-400');
-            }
+            dot.classList.remove('bg-[#444]', 'bg-emerald-400');
+            dot.classList.add('bg-amber-400');
         } else {
-            this.elements.networkStatus.classList.remove('text-emerald-400', 'text-amber-400');
-            this.elements.networkStatus.classList.add('text-[#555]');
-            if (dot) {
-                dot.classList.remove('bg-emerald-400', 'bg-amber-400');
-                dot.classList.add('bg-[#444]');
-            }
+            dot.classList.remove('bg-emerald-400', 'bg-amber-400');
+            dot.classList.add('bg-[#444]');
         }
     }
 
@@ -790,11 +900,28 @@ class UIController {
         let channels = channelManager.getAllChannels();
         Logger.debug('renderChannelList called - Total channels:', channels.length);
         Logger.debug('Channels:', channels);
+        
+        // Apply channel filter (All/Personal/Communities)
+        if (this.currentChannelFilter === 'personal') {
+            // Personal: Closed channels with classification 'personal'
+            channels = channels.filter(ch => 
+                ch.type === 'native' && ch.classification === 'personal'
+            );
+        } else if (this.currentChannelFilter === 'community') {
+            // Communities: Open + Protected + Closed with classification 'community'
+            channels = channels.filter(ch => 
+                ch.type !== 'native' || ch.classification === 'community'
+            );
+        }
+        // 'all' - no filtering
 
         if (channels.length === 0) {
+            const filterMsg = this.currentChannelFilter === 'all' 
+                ? 'No channels yet' 
+                : `No ${this.currentChannelFilter} channels`;
             this.elements.channelList.innerHTML = `
                 <div class="p-4 text-center text-[#555] text-[13px]">
-                    No channels yet
+                    ${filterMsg}
                 </div>
             `;
             Logger.debug('No channels to render');
@@ -826,7 +953,7 @@ class UIController {
             
             return `
             <div
-                class="channel-item px-3 py-2.5 mx-2 my-1 rounded-lg cursor-pointer bg-[#151515] border border-[#222] hover:bg-[#1e1e1e] hover:border-[#333] transition group"
+                class="channel-item px-3 py-2.5 mx-2 rounded-lg cursor-pointer bg-[#151515] border border-[#222] hover:bg-[#1e1e1e] hover:border-[#333] transition group"
                 data-stream-id="${channel.streamId}"
                 draggable="true"
             >
@@ -1137,6 +1264,7 @@ class UIController {
             this.elements.quickJoinInput.value = '';
         }
         this.updateBrowseJoinButton();
+        this.updateQuickJoinHash();
         
         // Close any open modals first
         this.elements.channelSettingsModal?.classList.add('hidden');
@@ -1274,15 +1402,19 @@ class UIController {
                 const dropdown = document.createElement('div');
                 dropdown.id = 'user-dropdown-menu';
                 dropdown.className = 'fixed bg-[#1e1e1e] border border-gray-700 rounded-lg shadow-xl py-1 z-[9999] min-w-[160px]';
+                
+                // Sanitize address for safe attribute insertion
+                const safeAddress = this.escapeAttr(address);
+                
                 dropdown.innerHTML = `
-                    <button class="user-action w-full text-left px-3 py-2 hover:bg-[#2a2a2a] text-sm text-gray-300" data-action="copy-address" data-address="${address}">
+                    <button class="user-action w-full text-left px-3 py-2 hover:bg-[#2a2a2a] text-sm text-gray-300" data-action="copy-address" data-address="${safeAddress}">
                         📋 Copy Address
                     </button>
                     ${!isMe ? `
-                    <button class="user-action w-full text-left px-3 py-2 hover:bg-[#2a2a2a] text-sm text-gray-300" data-action="add-contact" data-address="${address}">
+                    <button class="user-action w-full text-left px-3 py-2 hover:bg-[#2a2a2a] text-sm text-gray-300" data-action="add-contact" data-address="${safeAddress}">
                         ➕ Add to Contacts
                     </button>
-                    <button class="user-action w-full text-left px-3 py-2 hover:bg-[#2a2a2a] text-sm text-red-400" data-action="start-dm" data-address="${address}">
+                    <button class="user-action w-full text-left px-3 py-2 hover:bg-[#2a2a2a] text-sm text-red-400" data-action="start-dm" data-address="${safeAddress}">
                         💬 Start DM
                     </button>
                     ` : ''}
@@ -1488,7 +1620,39 @@ class UIController {
      */
     escapeHtml(str) {
         if (!str) return '';
-        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        return str.replace(/&/g, '&amp;')
+                  .replace(/</g, '&lt;')
+                  .replace(/>/g, '&gt;')
+                  .replace(/"/g, '&quot;')
+                  .replace(/'/g, '&#39;');
+    }
+
+    /**
+     * Escape string for use in HTML attributes (alias for escapeHtml)
+     * @param {string} str - String to escape
+     * @returns {string} - Escaped string safe for attributes
+     */
+    escapeAttr(str) {
+        return this.escapeHtml(str);
+    }
+
+    /**
+     * Validate URL for safe use in src/href attributes
+     * Prevents javascript: and other dangerous protocols
+     * @param {string} url - URL to validate
+     * @returns {boolean} - True if URL is safe
+     */
+    isValidMediaUrl(url) {
+        if (!url || typeof url !== 'string') return false;
+        // Allow data URIs (base64 images), blob URLs, and http(s)
+        if (url.startsWith('data:image/') || url.startsWith('data:video/')) return true;
+        if (url.startsWith('blob:')) return true;
+        try {
+            const parsed = new URL(url);
+            return ['http:', 'https:'].includes(parsed.protocol);
+        } catch {
+            return false;
+        }
     }
 
     /**
@@ -1695,6 +1859,9 @@ class UIController {
         
         // Attach reaction button listeners
         this.attachReactionListeners();
+        
+        // Attach lightbox listeners for safe media handling
+        this.attachLightboxListeners();
     }
 
     /**
@@ -2369,14 +2536,18 @@ class UIController {
         mediaController.onImageReceived((imageId, base64Data) => {
             const placeholder = document.querySelector(`[data-image-id="${imageId}"]`);
             if (placeholder) {
+                // Register media for safe onclick handling
+                const mediaId = this.registerMedia(base64Data, 'image');
+                if (!mediaId) return; // Invalid URL rejected
+                
                 placeholder.outerHTML = `
                     <div class="relative inline-block max-w-xs group">
                         <img src="${base64Data}" 
-                             class="max-w-full max-h-60 rounded-lg cursor-pointer object-contain" 
-                             onclick="window.uiController.openLightbox('${base64Data}', 'image')"
+                             class="max-w-full max-h-60 rounded-lg cursor-pointer object-contain lightbox-trigger" 
+                             data-media-id="${mediaId}"
                              alt="Image"/>
-                        <button class="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white p-1 rounded transition opacity-0 group-hover:opacity-100"
-                                onclick="event.stopPropagation(); window.uiController.openLightbox('${base64Data}', 'image')"
+                        <button class="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white p-1 rounded transition opacity-0 group-hover:opacity-100 lightbox-trigger"
+                                data-media-id="${mediaId}"
                                 title="Maximize">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>
@@ -2384,6 +2555,8 @@ class UIController {
                         </button>
                     </div>
                 `;
+                // Attach click handlers
+                this.attachLightboxListeners();
             }
         });
         
@@ -2433,26 +2606,32 @@ class UIController {
             if (container) {
                 const isSeeding = mediaController.isSeeding(fileId);
                 
+                // Escape filename for safe HTML insertion
+                const safeFileName = this.escapeHtml(metadata.fileName);
+                const safeFileType = this.escapeHtml(metadata.fileType);
+                
                 if (metadata.fileType.startsWith('video/')) {
                     // Check if video format is playable in browser
                     const isPlayable = mediaController.isVideoPlayable(metadata.fileType);
                     
-                    if (isPlayable) {
+                    // Register media for safe lightbox handling
+                    const mediaId = this.registerMedia(url, 'video');
+                    
+                    if (isPlayable && mediaId) {
                         // Show video player
                         container.outerHTML = `
-                            <div data-file-id="${fileId}" class="max-w-xs">
+                            <div data-file-id="${this.escapeAttr(fileId)}" class="max-w-xs">
                                 <div class="relative rounded-lg overflow-hidden bg-black">
                                     <video src="${url}" 
-                                           class="max-w-full max-h-60 cursor-pointer video-player-${fileId}" 
+                                           class="max-w-full max-h-60 cursor-pointer video-player-${this.escapeAttr(fileId)}" 
                                            controls
                                            preload="metadata"
-                                           playsinline
-                                           onclick="event.stopPropagation()">
-                                        <source src="${url}" type="${metadata.fileType}">
+                                           playsinline>
+                                        <source src="${url}" type="${safeFileType}">
                                         Your browser does not support this video format.
                                     </video>
-                                    <button class="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white p-1 rounded transition"
-                                            onclick="event.stopPropagation(); window.uiController.openLightbox('${url}', 'video')"
+                                    <button class="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white p-1 rounded transition lightbox-trigger"
+                                            data-media-id="${mediaId}"
                                             title="Fullscreen">
                                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>
@@ -2468,14 +2647,17 @@ class UIController {
                                     ` : ''}
                                 </div>
                                 <div class="flex items-center justify-between mt-1 text-xs text-gray-500">
-                                    <span class="truncate flex-1">${this.escapeHtml(metadata.fileName)}</span>
+                                    <span class="truncate flex-1">${safeFileName}</span>
                                     <div class="flex items-center gap-2 ml-2">
                                         <span>${this.formatFileSize(metadata.fileSize)}</span>
-                                        <a href="${url}" download="${this.escapeHtml(metadata.fileName)}" class="text-blue-400 hover:underline">Save</a>
+                                        <a href="${url}" download="${safeFileName}" class="text-blue-400 hover:underline">Save</a>
                                     </div>
                                 </div>
                             </div>
                         `;
+                        
+                        // Attach lightbox click handlers
+                        this.attachLightboxListeners();
                         
                         // Add error handler to video element
                         setTimeout(() => {
@@ -2494,8 +2676,8 @@ class UIController {
                                                     </svg>
                                                     <span class="text-sm text-gray-300">Format not supported</span>
                                                 </div>
-                                                <a href="${url}" download="${metadata.fileName}" class="block w-full bg-blue-600 hover:bg-blue-700 text-white text-center px-3 py-2 rounded-lg text-sm transition">
-                                                    Download ${metadata.fileName}
+                                                <a href="${url}" download="${safeFileName}" class="block w-full bg-blue-600 hover:bg-blue-700 text-white text-center px-3 py-2 rounded-lg text-sm transition">
+                                                    Download ${safeFileName}
                                                 </a>
                                             </div>
                                         `;
@@ -2508,20 +2690,20 @@ class UIController {
                     } else {
                         // Format not playable - show download button
                         container.outerHTML = `
-                            <div data-file-id="${fileId}" class="max-w-xs">
+                            <div data-file-id="${this.escapeAttr(fileId)}" class="max-w-xs">
                                 <div class="bg-[#252525] rounded-lg p-3">
                                     <div class="flex items-center gap-2 mb-2">
                                         <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z"/>
                                         </svg>
-                                        <span class="font-medium text-sm truncate text-white">${this.escapeHtml(metadata.fileName)}</span>
+                                        <span class="font-medium text-sm truncate text-white">${safeFileName}</span>
                                     </div>
                                     <div class="text-xs text-yellow-500 mb-2">
-                                        ⚠️ Format not supported in browser (${metadata.fileType.split('/')[1]?.toUpperCase() || 'video'})
+                                        ⚠️ Format not supported in browser (${safeFileType.split('/')[1]?.toUpperCase() || 'video'})
                                     </div>
                                     <div class="flex items-center justify-between">
                                         <span class="text-xs text-gray-400">${this.formatFileSize(metadata.fileSize)}</span>
-                                        <a href="${url}" download="${this.escapeHtml(metadata.fileName)}" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm transition">
+                                        <a href="${url}" download="${safeFileName}" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm transition">
                                             Download
                                         </a>
                                     </div>
@@ -2537,7 +2719,7 @@ class UIController {
                     }
                 } else {
                     container.innerHTML = `
-                        <a href="${url}" download="${this.escapeHtml(metadata.fileName)}" class="text-blue-400 hover:underline">${this.escapeHtml(metadata.fileName)}</a>
+                        <a href="${url}" download="${safeFileName}" class="text-blue-400 hover:underline">${safeFileName}</a>
                     `;
                 }
             }
@@ -2601,6 +2783,26 @@ class UIController {
     }
     
     /**
+     * Attach click listeners to lightbox trigger elements
+     * Uses data-media-id instead of inline onclick to prevent XSS
+     */
+    attachLightboxListeners() {
+        document.querySelectorAll('.lightbox-trigger[data-media-id]').forEach(el => {
+            // Skip if already has listener attached
+            if (el.dataset.lightboxBound) return;
+            el.dataset.lightboxBound = 'true';
+            
+            el.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const mediaId = el.dataset.mediaId;
+                if (mediaId) {
+                    this.openLightboxById(mediaId);
+                }
+            });
+        });
+    }
+    
+    /**
      * Check if text is emoji-only (no other characters)
      * @param {string} text - Text to check
      * @returns {boolean|string} - false if not emoji-only, 'true' for 1-3 emojis, 'many' for 4+ emojis
@@ -2650,14 +2852,20 @@ class UIController {
                 }
                 
                 if (imageData) {
+                    // Register media for safe onclick handling
+                    const mediaId = this.registerMedia(imageData, 'image');
+                    if (!mediaId) {
+                        return `<div class="text-red-400 text-sm">Invalid image data</div>`;
+                    }
+                    
                     return `
                         <div class="relative inline-block max-w-xs group">
                             <img src="${imageData}" 
-                                 class="max-w-full max-h-60 rounded-lg cursor-pointer object-contain" 
-                                 onclick="window.uiController.openLightbox('${imageData}', 'image')"
+                                 class="max-w-full max-h-60 rounded-lg cursor-pointer object-contain lightbox-trigger" 
+                                 data-media-id="${mediaId}"
                                  alt="Image"/>
-                            <button class="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white p-1 rounded transition opacity-0 group-hover:opacity-100"
-                                    onclick="event.stopPropagation(); window.uiController.openLightbox('${imageData}', 'image')"
+                            <button class="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white p-1 rounded transition opacity-0 group-hover:opacity-100 lightbox-trigger"
+                                    data-media-id="${mediaId}"
                                     title="Maximize">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>
@@ -2672,7 +2880,7 @@ class UIController {
                         mediaController.requestImage(channel.streamId, msg.imageId, channel.password);
                     }
                     return `
-                        <div data-image-id="${msg.imageId}" class="bg-[#1a1a1a] rounded-lg p-4 max-w-xs">
+                        <div data-image-id="${this.escapeAttr(msg.imageId)}" class="bg-[#1a1a1a] rounded-lg p-4 max-w-xs">
                             <div class="flex items-center gap-2">
                                 <div class="animate-spin w-4 h-4 border-2 border-gray-600 border-t-white rounded-full"></div>
                                 <span class="text-gray-500 text-sm">Loading image...</span>
@@ -2692,25 +2900,32 @@ class UIController {
                 const videoUrl = mediaController.getFileUrl(metadata.fileId);
                 const isSeeding = mediaController.isSeeding(metadata.fileId);
                 
+                // Escape metadata for safe HTML insertion
+                const safeFileId = this.escapeAttr(metadata.fileId);
+                const safeFileName = this.escapeHtml(metadata.fileName);
+                const safeFileType = this.escapeHtml(metadata.fileType);
+                
                 if (videoUrl) {
                     // Check if video format is playable in browser
                     const isPlayable = mediaController.isVideoPlayable(metadata.fileType);
                     
-                    if (isPlayable) {
+                    // Register media for safe lightbox handling
+                    const videoMediaId = this.registerMedia(videoUrl, 'video');
+                    
+                    if (isPlayable && videoMediaId) {
                         // Video available and playable - show player with seeding badge
                         return `
-                            <div data-file-id="${metadata.fileId}" class="video-container">
+                            <div data-file-id="${safeFileId}" class="video-container">
                                 <div class="relative rounded-lg overflow-hidden bg-black">
                                     <video src="${videoUrl}" 
-                                           class="w-full max-h-56 cursor-pointer video-player-${metadata.fileId}" 
+                                           class="w-full max-h-56 cursor-pointer video-player-${safeFileId}" 
                                            controls
                                            preload="metadata"
-                                           playsinline
-                                           onclick="event.stopPropagation()">
-                                        <source src="${videoUrl}" type="${metadata.fileType}">
+                                           playsinline>
+                                        <source src="${videoUrl}" type="${safeFileType}">
                                     </video>
-                                    <button class="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white p-1 rounded transition"
-                                            onclick="event.stopPropagation(); window.uiController.openLightbox('${videoUrl}', 'video')"
+                                    <button class="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white p-1 rounded transition lightbox-trigger"
+                                            data-media-id="${videoMediaId}"
                                             title="Fullscreen">
                                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>
@@ -2726,25 +2941,25 @@ class UIController {
                                     ` : ''}
                                 </div>
                                 <div class="flex items-center gap-2 mt-1 px-0.5 text-[11px] text-gray-500">
-                                    <span class="truncate flex-1">${this.escapeHtml(metadata.fileName)}</span>
+                                    <span class="truncate flex-1">${safeFileName}</span>
                                     <span class="text-gray-600">${this.formatFileSize(metadata.fileSize)}</span>
-                                    <a href="${videoUrl}" download="${this.escapeHtml(metadata.fileName)}" class="text-blue-400 hover:text-blue-300">Save</a>
+                                    <a href="${videoUrl}" download="${safeFileName}" class="text-blue-400 hover:text-blue-300">Save</a>
                                 </div>
                             </div>
                         `;
                     } else {
                         // Video available but not playable - show download button
                         return `
-                            <div data-file-id="${metadata.fileId}" class="video-container">
+                            <div data-file-id="${safeFileId}" class="video-container">
                                 <div class="flex items-center gap-2 bg-[#1a1a1a] rounded-lg p-2">
                                     <svg class="w-8 h-8 text-purple-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z"/>
                                     </svg>
                                     <div class="flex-1 min-w-0">
-                                        <div class="text-sm text-white truncate">${this.escapeHtml(metadata.fileName)}</div>
+                                        <div class="text-sm text-white truncate">${safeFileName}</div>
                                         <div class="text-[10px] text-yellow-500/80">Format not playable · ${this.formatFileSize(metadata.fileSize)}</div>
                                     </div>
-                                    <a href="${videoUrl}" download="${this.escapeHtml(metadata.fileName)}" class="bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded text-xs flex-shrink-0 transition">
+                                    <a href="${videoUrl}" download="${safeFileName}" class="bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded text-xs flex-shrink-0 transition">
                                         Save
                                     </a>
                                 </div>
@@ -2761,7 +2976,7 @@ class UIController {
                 
                 // Video not available yet - show preview panel
                 return `
-                    <div data-file-id="${metadata.fileId}" class="video-container">
+                    <div data-file-id="${safeFileId}" class="video-container">
                         <!-- Compact Video Preview -->
                         <div class="relative rounded-lg overflow-hidden bg-[#1a1a1a] cursor-pointer group"
                              style="aspect-ratio: 16/9; width: 220px;">
@@ -2994,6 +3209,9 @@ class UIController {
         const description = exposure === 'visible' ? (this.elements.channelDescriptionInput?.value?.trim() || '') : '';
         const language = exposure === 'visible' ? (this.elements.channelLanguageInput?.value || 'en') : '';
         const category = exposure === 'visible' ? (this.elements.channelCategoryInput?.value || 'general') : '';
+        
+        // Classification for Closed channels (stored locally only)
+        const classification = type === 'native' ? (this.currentClassification || 'personal') : null;
 
         if (!name) {
             alert('Please enter a channel name');
@@ -3015,18 +3233,20 @@ class UIController {
             description,
             language,
             category,
+            classification,
             readOnly: this.currentReadOnly || false
         };
 
         Logger.debug('Creating channel:', { name, type, password: password ? '***' : null, members, options });
 
         try {
-            this.showLoading('Creating channel...');
+            this.showLoadingToast('Creating channel...', 'This may take a minute');
+            this.hideNewChannelModal();
+            
             const channel = await channelManager.createChannel(name, type, password, members, options);
             Logger.debug('Channel created in UI:', channel);
 
-            this.hideLoading();
-            this.hideNewChannelModal();
+            this.hideLoadingToast();
 
             // Force render channel list
             Logger.debug('Rendering channel list...');
@@ -3041,7 +3261,7 @@ class UIController {
 
             this.showNotification('Channel created successfully!', 'success');
         } catch (error) {
-            this.hideLoading();
+            this.hideLoadingToast();
             this.showNotification('Failed to create channel: ' + error.message, 'error');
         }
     }
@@ -3099,6 +3319,8 @@ class UIController {
         this.switchChannelTab('public');
         // Reset to hidden exposure (default)
         this.switchExposureTab('hidden');
+        // Reset classification to personal (for Closed channels)
+        this.switchClassificationTab('personal');
         // Reset read-only toggle
         this.setReadOnly(false);
         
@@ -3176,12 +3398,12 @@ class UIController {
         const activeCost = document.getElementById(`cost-${tabType}`);
         if (activeCost) activeCost.classList.remove('hidden');
         
-        // Native (on-chain) channels are forced to hidden exposure
+        // Native (Closed) channels: hide exposure section entirely (always hidden, no choice)
         if (tabType === 'native') {
             this.switchExposureTab('hidden');
-            this.elements.exposureSection?.classList.add('opacity-50', 'pointer-events-none');
+            this.elements.exposureSection?.classList.add('hidden');
         } else {
-            this.elements.exposureSection?.classList.remove('opacity-50', 'pointer-events-none');
+            this.elements.exposureSection?.classList.remove('hidden');
         }
     }
 
@@ -3189,18 +3411,16 @@ class UIController {
      * Switch exposure tab (hidden/visible)
      */
     switchExposureTab(exposure) {
-        // Update exposure buttons (new card-style design)
+        // Update exposure buttons with subtle orange highlight for active
         document.querySelectorAll('.exposure-tab').forEach(tab => {
             const isActive = tab.dataset.exposure === exposure;
-            // Active: border-white/20 bg-white/5 text-white
-            // Inactive: border-white/10 text-white/50
-            tab.classList.toggle('border-white/20', isActive);
-            tab.classList.toggle('bg-white/5', isActive);
-            tab.classList.toggle('text-white', isActive);
-            tab.classList.toggle('border-white/10', !isActive);
-            tab.classList.toggle('text-white/50', !isActive);
-            // Cursor feedback
-            tab.style.cursor = isActive ? 'default' : 'pointer';
+            // Active: subtle orange bg and text
+            // Inactive: muted white text with hover
+            tab.classList.toggle('bg-[#F6851B]/20', isActive);
+            tab.classList.toggle('text-[#F6851B]', isActive);
+            tab.classList.toggle('text-white/30', !isActive);
+            tab.classList.toggle('hover:text-white/50', !isActive);
+            tab.classList.toggle('hover:bg-white/5', !isActive);
         });
         
         // Show/hide visible fields
@@ -3212,6 +3432,63 @@ class UIController {
         
         // Store current exposure
         this.currentExposure = exposure;
+    }
+
+    /**
+     * Switch classification tab (personal/community) in Create modal
+     */
+    switchClassificationTab(classification) {
+        document.querySelectorAll('.classification-tab').forEach(tab => {
+            const isActive = tab.dataset.classification === classification;
+            // Active: bg-white/10 text-white border-white/10
+            // Inactive: bg-white/5 text-white/50 border-white/5 hover:bg-white/10 hover:text-white/70
+            tab.classList.toggle('bg-white/10', isActive);
+            tab.classList.toggle('text-white', isActive);
+            tab.classList.toggle('border-white/10', isActive);
+            tab.classList.toggle('bg-white/5', !isActive);
+            tab.classList.toggle('text-white/50', !isActive);
+            tab.classList.toggle('border-white/5', !isActive);
+            tab.classList.toggle('hover:bg-white/10', !isActive);
+            tab.classList.toggle('hover:text-white/70', !isActive);
+        });
+        this.currentClassification = classification;
+    }
+
+    /**
+     * Switch classification tab in Join Closed Channel modal
+     */
+    switchJoinClassificationTab(classification) {
+        document.querySelectorAll('.join-classification-tab').forEach(tab => {
+            const isActive = tab.dataset.joinClassification === classification;
+            tab.classList.toggle('bg-white/10', isActive);
+            tab.classList.toggle('text-white', isActive);
+            tab.classList.toggle('border-white/10', isActive);
+            tab.classList.toggle('bg-white/5', !isActive);
+            tab.classList.toggle('text-white/50', !isActive);
+            tab.classList.toggle('border-white/5', !isActive);
+            tab.classList.toggle('hover:bg-white/10', !isActive);
+            tab.classList.toggle('hover:text-white/70', !isActive);
+        });
+        this.joinClassification = classification;
+    }
+
+    /**
+     * Switch channel filter tab in sidebar (All/Personal/Communities)
+     */
+    switchChannelFilterTab(filter) {
+        document.querySelectorAll('.channel-filter-tab').forEach(tab => {
+            const isActive = tab.dataset.channelFilter === filter;
+            
+            // Border bottom indicator for active state
+            tab.classList.toggle('border-[#F6851B]', isActive);
+            tab.classList.toggle('border-transparent', !isActive);
+            tab.classList.toggle('text-[#F6851B]', isActive);
+            tab.classList.toggle('text-white/40', !isActive);
+            tab.classList.toggle('hover:text-white/60', !isActive);
+        });
+        
+        this.currentChannelFilter = filter;
+        this.renderChannelList();
     }
 
     /**
@@ -3238,15 +3515,15 @@ class UIController {
             toggle.classList.remove('bg-white/10');
             toggle.classList.add('bg-[#F6851B]');
             if (knob) {
-                knob.classList.remove('left-1', 'bg-white/40');
-                knob.classList.add('left-6', 'bg-white');
+                knob.classList.remove('left-0.5', 'bg-white/30');
+                knob.classList.add('left-4', 'bg-white');
             }
         } else {
             toggle.classList.remove('bg-[#F6851B]');
             toggle.classList.add('bg-white/10');
             if (knob) {
-                knob.classList.remove('left-6', 'bg-white');
-                knob.classList.add('left-1', 'bg-white/40');
+                knob.classList.remove('left-4', 'bg-white');
+                knob.classList.add('left-0.5', 'bg-white/30');
             }
         }
         
@@ -3337,6 +3614,80 @@ class UIController {
     }
 
     /**
+     * Show join closed channel modal (with name + classification)
+     */
+    showJoinClosedChannelModal(streamId = '') {
+        const modal = document.getElementById('join-closed-channel-modal');
+        const idInput = document.getElementById('join-closed-stream-id-input');
+        const nameInput = document.getElementById('join-closed-name-input');
+        
+        if (idInput) idInput.value = streamId;
+        if (nameInput) nameInput.value = '';
+        
+        // Reset classification to personal
+        this.switchJoinClassificationTab('personal');
+        
+        modal?.classList.remove('hidden');
+    }
+
+    /**
+     * Hide join closed channel modal
+     */
+    hideJoinClosedChannelModal() {
+        const modal = document.getElementById('join-closed-channel-modal');
+        modal?.classList.add('hidden');
+    }
+
+    /**
+     * Handle joining a closed channel (with local name + classification)
+     */
+    async handleJoinClosedChannel() {
+        const streamId = document.getElementById('join-closed-stream-id-input')?.value.trim();
+        const localName = document.getElementById('join-closed-name-input')?.value.trim();
+        const classification = this.joinClassification || 'personal';
+        
+        if (!streamId) {
+            this.showNotification('Please enter a Channel ID', 'error');
+            return;
+        }
+        
+        if (!localName) {
+            this.showNotification('Please give the channel a name', 'error');
+            return;
+        }
+        
+        this.hideJoinClosedChannelModal();
+        this.showLoadingToast('Joining channel...', 'Setting up encryption');
+        
+        try {
+            const channel = await channelManager.joinChannel(streamId, null, {
+                localName,
+                classification
+            });
+            
+            this.hideLoadingToast();
+            
+            // Clear the quick join input if it has the same ID
+            if (this.elements.quickJoinInput?.value.trim() === streamId) {
+                this.elements.quickJoinInput.value = '';
+                this.updateBrowseJoinButton();
+                this.updateQuickJoinHash();
+            }
+            
+            this.renderChannelList();
+            
+            if (channel) {
+                setTimeout(() => this.selectChannel(channel.streamId), 100);
+            }
+            
+            this.showNotification('Joined closed channel!', 'success');
+        } catch (error) {
+            this.hideLoadingToast();
+            this.showNotification('Failed to join: ' + error.message, 'error');
+        }
+    }
+
+    /**
      * Update browse/join button state based on input content
      * Shows "Join" when there's input, "Explore" when empty
      */
@@ -3362,6 +3713,28 @@ class UIController {
             text.textContent = 'Explore';
             // Restore globe icon
             icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418"/>';
+        }
+    }
+
+    /**
+     * Update quick join hash visibility based on input content
+     * Shows # prefix when there's input, hidden when empty to save space for placeholder
+     */
+    updateQuickJoinHash() {
+        const hasInput = this.elements.quickJoinInput?.value.trim();
+        const hash = this.elements.quickJoinHash;
+        const input = this.elements.quickJoinInput;
+        
+        if (!hash || !input) return;
+        
+        if (hasInput) {
+            hash.classList.remove('hidden');
+            input.classList.add('pl-6');
+            input.classList.remove('px-3');
+        } else {
+            hash.classList.add('hidden');
+            input.classList.remove('pl-6');
+            input.classList.add('px-3');
         }
     }
 
@@ -3400,47 +3773,56 @@ class UIController {
             }
             
             try {
-                this.showLoading('Joining channel...');
+                this.showLoadingToast('Joining channel...', 'This may take a moment');
                 await channelManager.joinChannel(streamId, password, {
                     name: channelInfo.name,
                     type: 'password'
                 });
-                this.hideLoading();
+                this.hideLoadingToast();
                 
                 // Clear the input
                 if (this.elements.quickJoinInput) {
                     this.elements.quickJoinInput.value = '';
                     this.updateBrowseJoinButton();
+                    this.updateQuickJoinHash();
                 }
                 
                 this.renderChannelList();
                 this.showNotification('Joined channel successfully!', 'success');
             } catch (error) {
-                this.hideLoading();
+                this.hideLoadingToast();
                 this.showNotification('Failed to join: ' + error.message, 'error');;
             }
+            return;
+        }
+        
+        // For native/Closed channels, show the special modal to get name + classification
+        if (channelInfo?.type === 'native') {
+            this.hideLoading();
+            this.showJoinClosedChannelModal(streamId);
             return;
         }
 
         // For unknown channels or public channels, try direct join
         try {
-            this.showLoading('Joining channel...');
+            this.showLoadingToast('Joining channel...', 'This may take a moment');
             await channelManager.joinChannel(streamId, null, channelInfo ? {
                 name: channelInfo.name,
                 type: channelInfo.type
             } : undefined);
-            this.hideLoading();
+            this.hideLoadingToast();
             
             // Clear the input
             if (this.elements.quickJoinInput) {
                 this.elements.quickJoinInput.value = '';
                 this.updateBrowseJoinButton();
+                this.updateQuickJoinHash();
             }
             
             this.renderChannelList();
             this.showNotification('Joined channel successfully!', 'success');
         } catch (error) {
-            this.hideLoading();
+            this.hideLoadingToast();
             
             // If channel isn't in cache but might require password, show join modal
             // This happens when we don't have info about the channel
@@ -3462,6 +3844,7 @@ class UIController {
                 if (this.elements.quickJoinInput) {
                     this.elements.quickJoinInput.value = '';
                     this.updateBrowseJoinButton();
+                    this.updateQuickJoinHash();
                 }
             } else {
                 this.showNotification('Failed to join: ' + error.message, 'error');
@@ -3482,14 +3865,14 @@ class UIController {
         }
 
         try {
-            this.showLoading('Joining channel...');
+            this.showLoadingToast('Joining channel...', 'This may take a moment');
             await channelManager.joinChannel(streamId, password);
-            this.hideLoading();
+            this.hideLoadingToast();
             this.hideJoinChannelModal();
             this.renderChannelList();
             this.showNotification('Joined channel successfully!', 'success');
         } catch (error) {
-            this.hideLoading();
+            this.hideLoadingToast();
             this.showNotification('Failed to join: ' + error.message, 'error');
         }
     }
@@ -3503,9 +3886,19 @@ class UIController {
             this.elements.browseSearchInput.value = '';
         }
         
-        // Reset type filter
+        // Reset all filters
         this.browseTypeFilter = 'public';
+        this.browseCategoryFilter = '';
+        this.browseLanguageFilterValue = 'en';
+        
+        // Reset language dropdown
+        if (this.elements.browseLanguageFilter) {
+            this.elements.browseLanguageFilter.value = 'en';
+        }
+        
         this.updateBrowseFilterTabs();
+        this.updateBrowseCategoryChips();
+        this.resetCategoriesExpand();
         
         // Load public channels from registry
         await this.loadPublicChannels();
@@ -3525,9 +3918,9 @@ class UIController {
         if (!this.elements.browseChannelsList) return;
 
         this.elements.browseChannelsList.innerHTML = `
-            <div class="text-center text-gray-500 py-8">
-                <div class="spinner mx-auto mb-2" style="width: 32px; height: 32px;"></div>
-                Loading channels...
+            <div class="flex flex-col items-center justify-center py-12 text-white/40">
+                <div class="spinner mb-3" style="width: 28px; height: 28px;"></div>
+                <p class="text-sm">Loading channels...</p>
             </div>
         `;
 
@@ -3539,9 +3932,12 @@ class UIController {
         } catch (error) {
             Logger.error('Failed to load public channels:', error);
             this.elements.browseChannelsList.innerHTML = `
-                <div class="text-center text-gray-500 py-8">
-                    <p>Failed to load channels</p>
-                    <p class="text-sm mt-2">${error.message}</p>
+                <div class="flex flex-col items-center justify-center py-12 text-white/40">
+                    <svg class="w-12 h-12 mb-3 text-red-400/50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/>
+                    </svg>
+                    <p class="text-sm">Failed to load channels</p>
+                    <p class="text-xs text-white/30 mt-1">${this.escapeHtml(error.message)}</p>
                 </div>
             `;
         }
@@ -3555,26 +3951,63 @@ class UIController {
 
         if (channels.length === 0) {
             this.elements.browseChannelsList.innerHTML = `
-                <div class="text-center text-[#555] py-8 text-[13px]">
-                    No channels found
+                <div class="flex flex-col items-center justify-center py-12 text-white/40">
+                    <svg class="w-12 h-12 mb-3 text-white/20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
+                    </svg>
+                    <p class="text-sm">No channels found</p>
+                    <p class="text-xs text-white/30 mt-1">Try adjusting your filters</p>
                 </div>
             `;
             return;
         }
+        
+        // Category display names
+        const categoryNames = {
+            politics: 'Politics', news: 'News', tech: 'Tech & AI', crypto: 'Crypto',
+            finance: 'Finance', science: 'Science', gaming: 'Gaming', entertainment: 'Entertainment',
+            sports: 'Sports', health: 'Health', education: 'Education', comedy: 'Comedy', 
+            general: 'General', other: 'Other'
+        };
+        
+        // Language display names
+        const languageNames = { 
+            en: 'EN', pt: 'PT', es: 'ES', fr: 'FR', de: 'DE', 
+            it: 'IT', zh: '中文', ja: '日本語', ko: '한국어', ru: 'RU', ar: 'العربية', other: 'Other'
+        };
 
         this.elements.browseChannelsList.innerHTML = channels.map(ch => {
             const readOnlyBadge = ch.readOnly 
-                ? '<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-amber-500/20 text-amber-400 text-[9px] font-medium rounded ml-1.5"><svg class="w-2 h-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>RO</span>' 
+                ? '<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-amber-500/15 text-amber-400/80 text-[9px] font-medium rounded">RO</span>' 
                 : '';
+            const categoryBadge = ch.category && ch.category !== 'general'
+                ? `<span class="px-1.5 py-0.5 bg-white/5 text-white/50 text-[9px] font-medium rounded">${this.escapeHtml(categoryNames[ch.category] || ch.category)}</span>`
+                : '';
+            const languageBadge = ch.language
+                ? `<span class="px-1.5 py-0.5 bg-white/5 text-white/40 text-[9px] font-medium rounded">${this.escapeHtml(languageNames[ch.language] || ch.language.toUpperCase())}</span>`
+                : '';
+            const description = ch.description 
+                ? `<p class="text-xs text-white/40 mt-1 line-clamp-2">${this.escapeHtml(ch.description)}</p>` 
+                : '';
+            
             return `
-            <div class="px-3 py-2.5 bg-[#1a1a1a] border border-[#282828] rounded-lg hover:bg-[#252525] hover:border-[#333] transition cursor-pointer browse-channel-item flex items-center justify-between" data-stream-id="${ch.streamId}" data-type="${ch.type || 'public'}">
-                <div class="flex-1 min-w-0">
-                    <h4 class="text-[13px] font-medium text-white truncate">${this.escapeHtml(ch.name)}${readOnlyBadge}</h4>
-                    ${ch.members ? `<p class="text-[10px] text-[#666] mt-0.5">${ch.members} members</p>` : ''}
+            <div class="p-3 bg-white/5 border border-white/5 rounded-xl hover:bg-white/[0.07] hover:border-white/10 transition cursor-pointer browse-channel-item group" data-stream-id="${ch.streamId}" data-type="${ch.type || 'public'}">
+                <div class="flex items-start justify-between gap-3">
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <h4 class="text-sm font-medium text-white/90 truncate">${this.escapeHtml(ch.name)}</h4>
+                            ${readOnlyBadge}
+                        </div>
+                        ${description}
+                    </div>
+                    <svg class="w-4 h-4 text-white/20 group-hover:text-white/40 flex-shrink-0 mt-0.5 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                    </svg>
                 </div>
-                <svg class="w-4 h-4 text-[#555] flex-shrink-0 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-                </svg>
+                <div class="flex items-center gap-1.5 mt-2">
+                    ${categoryBadge}
+                    ${languageBadge}
+                </div>
             </div>
             `;
         }).join('');
@@ -3603,11 +4036,23 @@ class UIController {
             filtered = filtered.filter(ch => ch.type === this.browseTypeFilter);
         }
         
+        // Apply category filter
+        if (this.browseCategoryFilter) {
+            filtered = filtered.filter(ch => ch.category === this.browseCategoryFilter);
+        }
+        
+        // Apply language filter
+        if (this.browseLanguageFilterValue) {
+            filtered = filtered.filter(ch => ch.language === this.browseLanguageFilterValue);
+        }
+        
         // Apply search filter
         if (query) {
+            const q = query.toLowerCase();
             filtered = filtered.filter(ch => 
-                ch.name.toLowerCase().includes(query.toLowerCase()) ||
-                ch.streamId.toLowerCase().includes(query.toLowerCase())
+                ch.name.toLowerCase().includes(q) ||
+                ch.streamId.toLowerCase().includes(q) ||
+                (ch.description && ch.description.toLowerCase().includes(q))
             );
         }
         
@@ -3615,19 +4060,81 @@ class UIController {
     }
 
     /**
-     * Update browse filter tabs UI
+     * Update browse filter tabs UI (sidebar style)
      */
     updateBrowseFilterTabs() {
         document.querySelectorAll('.browse-filter-tab').forEach(tab => {
             const isActive = tab.dataset.browseFilter === this.browseTypeFilter;
             if (isActive) {
-                tab.classList.add('bg-white', 'text-black', 'font-medium');
-                tab.classList.remove('text-[#888]', 'hover:text-white', 'hover:bg-[#252525]');
+                tab.classList.add('bg-white/10', 'text-white');
+                tab.classList.remove('text-white/60', 'hover:text-white/90', 'hover:bg-white/5');
             } else {
-                tab.classList.remove('bg-white', 'text-black', 'font-medium');
-                tab.classList.add('text-[#888]', 'hover:text-white', 'hover:bg-[#252525]');
+                tab.classList.remove('bg-white/10', 'text-white');
+                tab.classList.add('text-white/60', 'hover:text-white/90', 'hover:bg-white/5');
             }
         });
+    }
+    
+    /**
+     * Update browse category chips UI
+     */
+    updateBrowseCategoryChips() {
+        document.querySelectorAll('.browse-category-chip').forEach(chip => {
+            const isActive = chip.dataset.category === this.browseCategoryFilter;
+            if (isActive) {
+                chip.classList.add('bg-white', 'text-black');
+                chip.classList.remove('bg-white/5', 'text-white/60', 'hover:bg-white/10', 'hover:text-white/80');
+            } else {
+                chip.classList.remove('bg-white', 'text-black');
+                chip.classList.add('bg-white/5', 'text-white/60', 'hover:bg-white/10', 'hover:text-white/80');
+            }
+        });
+    }
+
+    /**
+     * Toggle category chips expand/collapse
+     */
+    toggleCategoriesExpand() {
+        const container = document.getElementById('browse-category-chips');
+        const icon = document.getElementById('toggle-categories-icon');
+        const btn = document.getElementById('toggle-categories-btn');
+        
+        if (!container) return;
+        
+        const isExpanded = container.dataset.expanded === 'true';
+        
+        if (isExpanded) {
+            // Collapse
+            container.classList.add('max-h-[26px]');
+            container.classList.remove('max-h-[200px]');
+            container.dataset.expanded = 'false';
+            icon?.classList.remove('rotate-180');
+            btn?.classList.remove('bg-transparent');
+        } else {
+            // Expand
+            container.classList.remove('max-h-[26px]');
+            container.classList.add('max-h-[200px]');
+            container.dataset.expanded = 'true';
+            icon?.classList.add('rotate-180');
+            btn?.classList.add('bg-transparent');
+        }
+    }
+
+    /**
+     * Reset category chips to collapsed state
+     */
+    resetCategoriesExpand() {
+        const container = document.getElementById('browse-category-chips');
+        const icon = document.getElementById('toggle-categories-icon');
+        const btn = document.getElementById('toggle-categories-btn');
+        
+        if (container) {
+            container.classList.add('max-h-[26px]');
+            container.classList.remove('max-h-[200px]');
+            container.dataset.expanded = 'false';
+        }
+        icon?.classList.remove('rotate-180');
+        btn?.classList.remove('bg-transparent');
     }
 
     /**
@@ -3647,7 +4154,7 @@ class UIController {
                     return; // User cancelled
                 }
                 
-                this.showLoading('Joining channel...');
+                this.showLoadingToast('Joining channel...', 'This may take a moment');
                 await channelManager.joinChannel(streamId, password, {
                     name: channelInfo?.name,
                     type: 'password',
@@ -3655,7 +4162,7 @@ class UIController {
                     createdBy: channelInfo?.createdBy
                 });
             } else {
-                this.showLoading('Joining channel...');
+                this.showLoadingToast('Joining channel...', 'This may take a moment');
                 await channelManager.joinChannel(streamId, null, {
                     name: channelInfo?.name,
                     type: channelInfo?.type || 'public',
@@ -3664,12 +4171,12 @@ class UIController {
                 });
             }
             
-            this.hideLoading();
+            this.hideLoadingToast();
             this.hideBrowseChannelsModal();
             this.renderChannelList();
             this.showNotification('Joined channel successfully!', 'success');
         } catch (error) {
-            this.hideLoading();
+            this.hideLoadingToast();
             this.showNotification('Failed to join: ' + error.message, 'error');
         }
     }
@@ -3916,23 +4423,89 @@ class UIController {
         }
 
         const icons = {
-            success: '✓',
-            error: '✕',
-            info: 'ℹ',
-            warning: '⚠'
+            success: `<svg class="toast-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`,
+            error: `<svg class="toast-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>`,
+            info: `<svg class="toast-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`,
+            warning: `<svg class="toast-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>`
         };
 
         const toast = document.createElement('div');
         toast.className = `toast ${type}`;
-        toast.innerHTML = `<span>${icons[type] || ''}</span><span>${this.escapeHtml(message)}</span>`;
+        toast.style.setProperty('--toast-duration', `${duration}ms`);
+        toast.innerHTML = `
+            ${icons[type] || icons.info}
+            <div class="toast-content">
+                <span class="toast-message">${this.escapeHtml(message)}</span>
+            </div>
+            <span class="toast-close" title="Dismiss">
+                <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </span>
+            <div class="toast-progress"></div>
+        `;
+        
+        // Close button handler
+        const closeBtn = toast.querySelector('.toast-close');
+        closeBtn?.addEventListener('click', () => {
+            toast.classList.add('toast-exit');
+            setTimeout(() => toast.remove(), 250);
+        });
         
         container.appendChild(toast);
 
         // Auto remove after duration
         setTimeout(() => {
-            toast.classList.add('toast-exit');
-            setTimeout(() => toast.remove(), 300);
+            if (toast.parentElement) {
+                toast.classList.add('toast-exit');
+                setTimeout(() => toast.remove(), 250);
+            }
         }, duration);
+    }
+
+    /**
+     * Show a persistent loading toast notification (for long operations)
+     * @param {string} message - Loading message
+     * @param {string} subtitle - Optional subtitle with more info
+     * @returns {HTMLElement} - Toast element (call hideLoadingToast to dismiss)
+     */
+    showLoadingToast(message, subtitle = 'This may take a moment...') {
+        const container = document.getElementById('toast-container');
+        if (!container) {
+            Logger.debug(`[loading] ${message}`);
+            return null;
+        }
+
+        // Remove any existing loading toasts
+        container.querySelectorAll('.toast.loading').forEach(t => t.remove());
+
+        const toast = document.createElement('div');
+        toast.className = 'toast loading';
+        toast.innerHTML = `
+            <svg class="toast-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            <div class="toast-content">
+                <span class="toast-message">${this.escapeHtml(message)}</span>
+                ${subtitle ? `<span class="text-[11px] text-white/40 block mt-0.5">${this.escapeHtml(subtitle)}</span>` : ''}
+            </div>
+            <div class="toast-progress"></div>
+        `;
+        
+        container.appendChild(toast);
+        this.currentLoadingToast = toast;
+        return toast;
+    }
+
+    /**
+     * Hide the current loading toast
+     * @param {HTMLElement} toast - Optional specific toast to hide
+     */
+    hideLoadingToast(toast = null) {
+        const target = toast || this.currentLoadingToast;
+        if (target && target.parentElement) {
+            target.classList.add('toast-exit');
+            setTimeout(() => target.remove(), 250);
+        }
+        this.currentLoadingToast = null;
     }
 
     /**
@@ -5763,7 +6336,7 @@ class UIController {
                                 chainId: '0x89',
                                 chainName: 'Polygon Mainnet',
                                 nativeCurrency: { name: 'POL', symbol: 'POL', decimals: 18 },
-                                rpcUrls: ['https://polygon-rpc.com'],
+                                rpcUrls: ['https://polygon-bor-rpc.publicnode.com', 'https://rpc.ankr.com/polygon'],
                                 blockExplorerUrls: ['https://polygonscan.com']
                             }],
                         });

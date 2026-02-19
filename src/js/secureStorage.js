@@ -285,6 +285,23 @@ class SecureStorage {
     }
 
     /**
+     * Get NSFW content enabled setting
+     */
+    getNsfwEnabled() {
+        if (!this.isUnlocked) return false;
+        return this.cache.nsfwEnabled || false;
+    }
+
+    /**
+     * Set NSFW content enabled setting
+     */
+    async setNsfwEnabled(enabled) {
+        if (!this.isUnlocked) return;
+        this.cache.nsfwEnabled = enabled;
+        await this.saveToStorage();
+    }
+
+    /**
      * Get The Graph API key
      */
     getGraphApiKey() {

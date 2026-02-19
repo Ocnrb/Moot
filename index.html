@@ -25,9 +25,10 @@
     <script src="./js/vendor.bundle.js"></script>
 
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #121212; color: #e0e0e0; }
-        .chat-container { height: calc(100vh - 4rem); }
-        .messages-area { height: calc(100% - 120px); background-color: #141414; }
+        body { font-family: 'Inter', sans-serif; background-color: #0d0d0d; color: #e0e0e0; }
+        .app-container { height: 100vh; }
+        .chat-container { height: calc(100vh - 3.5rem); }
+        .messages-area { height: calc(100% - 120px); background-color: #161616; }
         
         /* Message styles */
         .message-entry { animation: fadeIn 0.3s ease-in-out; max-width: 85%; display: flex; flex-direction: column; margin-bottom: 0.5rem; position: relative; }
@@ -230,59 +231,33 @@
     </style>
 </head>
 <body class="min-h-screen">
-    <!-- Header -->
-    <header class="bg-[#1b1b1b] border-b border-[#282828] h-14 flex items-center justify-between px-5">
-        <div class="flex items-center gap-3">
-            <!-- Logo -->
-            <svg viewBox="0 0 512 512" class="w-12 h-12" fill="#ff5c00">
-                <g transform="translate(0,512) scale(0.1,-0.1)">
-                    <path d="M3138 4803 c-88 -35 -88 -35 -88 -89 0 -52 1 -54 28 -54 15 -1 43 -3 62 -6 34 -5 37 -2 112 91 78 95 78 95 25 94 -34 -1 -82 -13 -139 -36z m88 -13 c11 0 12 -3 4 -12 -6 -7 -24 -31 -41 -53 -17 -22 -37 -39 -45 -39 -8 1 -20 2 -27 3 -17 1 -42 51 -26 51 6 0 8 4 5 9 -3 5 1 12 10 15 9 4 13 2 8 -5 -4 -7 6 -3 22 8 49 32 69 41 72 32 2 -5 10 -9 18 -9z"/>
-                    <path d="M2878 4730 c-63 -5 -101 -14 -142 -34 -144 -70 -260 -256 -272 -434 -8 -122 7 -216 71 -456 55 -203 56 -212 54 -325 -3 -136 -17 -219 -57 -334 -28 -84 -28 -84 141 -25 169 58 169 58 371 -3 202 -62 202 -62 226 -103 13 -23 67 -107 121 -188 99 -148 99 -148 88 -370 -12 -241 5 -204 -312 -685 -24 -36 -545 -362 -612 -383 -22 -7 -87 -30 -145 -50 -485 -176 -450 -165 -1035 -315 -141 -36 -186 -52 -210 -73 -16 -15 -127 -122 -246 -239 -215 -213 -215 -213 173 -213 388 0 388 0 551 217 89 120 165 222 168 226 3 5 116 37 250 71 134 35 254 66 267 70 21 7 22 5 22 -49 0 -56 0 -56 123 -189 67 -73 136 -152 152 -176 29 -42 29 -42 -3 -71 -24 -21 -43 -29 -71 -29 -36 0 -107 -39 -126 -69 -11 -19 86 -13 141 8 51 20 51 20 254 -15 169 -29 224 -34 322 -32 118 3 118 3 96 35 -38 53 -73 63 -216 63 -181 0 -188 4 -320 189 -92 129 -102 147 -92 166 6 12 73 101 148 198 130 167 143 180 242 250 275 192 498 357 504 372 2 7 69 116 147 242 158 252 152 236 164 442 3 58 8 143 11 188 5 76 2 96 -46 270 -148 541 -118 469 -348 838 -113 182 -220 353 -237 382 -35 57 -37 76 -39 360 -1 123 -1 123 -73 124 -40 1 -79 2 -85 3 -9 1 -14 26 -16 79 -2 42 -6 76 -10 76 -4 -1 -46 -5 -94 -9z"/>
-                    <path d="M2730 4570 c-8 -5 -25 -10 -37 -10 -13 0 -22 -3 -21 -7 1 -5 -6 -23 -15 -40 -22 -41 -22 -39 -2 -70 9 -14 12 -22 6 -19 -6 4 -9 2 -5 -6 8 -21 53 -50 82 -53 35 -4 104 28 120 55 8 12 9 19 3 15 -6 -3 -11 -2 -11 4 0 5 4 12 9 15 10 7 9 19 -7 59 -7 16 -12 33 -12 39 0 6 -3 8 -6 5 -4 -3 -16 0 -28 8 -24 17 -54 19 -76 5z m69 -25 c33 -16 41 -33 41 -80 0 -42 -38 -75 -86 -75 -87 0 -112 118 -34 157 32 16 45 16 79 -2z"/>
-                    <path d="M2645 3034 c-190 -65 -190 -65 -331 -242 -77 -97 -206 -258 -286 -357 -146 -180 -146 -180 -112 -394 19 -121 39 -220 46 -227 7 -6 75 -64 151 -127 138 -115 138 -115 304 -162 166 -46 166 -46 247 5 44 27 159 98 255 157 173 108 173 108 265 248 50 77 119 182 154 234 60 92 62 97 62 161 0 36 3 124 6 197 6 132 6 132 -101 298 -60 91 -111 168 -115 170 -7 4 -348 105 -352 104 -2 0 -88 -30 -193 -65z"/>
-                    <path d="M1730 2057 c-47 -61 -156 -203 -242 -316 -158 -205 -158 -205 -430 -423 -249 -199 -275 -222 -301 -273 -15 -32 -27 -58 -25 -59 2 -1 20 -7 41 -13 34 -10 75 -2 430 88 215 54 462 117 547 139 175 46 705 229 693 240 -4 3 -55 19 -113 35 -58 15 -114 33 -125 40 -16 10 -285 234 -319 266 -5 5 -22 92 -37 194 -14 102 -28 187 -30 189 -2 2 -42 -47 -89 -107z"/>
-                    <path d="M3050 1305 c-69 -51 -136 -108 -151 -126 -14 -19 -54 -72 -90 -119 -36 -47 -68 -91 -73 -97 -4 -8 29 -53 93 -125 56 -62 101 -116 101 -120 0 -3 -11 -20 -25 -36 -14 -17 -25 -33 -25 -36 0 -3 56 -6 124 -6 142 0 211 -17 256 -62 28 -28 28 -28 170 -28 137 0 140 0 130 20 -6 11 -27 31 -48 45 -35 24 -44 25 -172 25 -218 0 -240 12 -352 190 -44 69 -82 131 -85 137 -3 7 50 93 118 190 67 98 131 191 142 206 10 16 18 30 16 32 -2 2 -60 -38 -129 -90z"/>
-                </g>
-            </svg>
-            <div class="flex flex-col">
-                <!-- Show only the status dot in front of the brand; keep the textual status hidden for JS compatibility -->
-                <div class="flex items-center gap-1.5" title="Streamr Network">
-                    <div id="network-dot" class="w-2.5 h-2.5 rounded-full bg-[#444] transition-colors"></div>
-                    <span class="text-[17px] font-extrabold text-white tracking-tight leading-tight ml-1">Pombo</span>
+    <!-- App Container - Full Height -->
+    <div class="flex app-container">
+        <!-- Sidebar - Channel List (Full Height) -->
+        <aside class="w-80 bg-[#0d0d0d] border-r border-[#333] flex flex-col flex-shrink-0">
+            <!-- Sidebar Header with Logo -->
+            <div class="h-14 flex items-center px-4 gap-3">
+                <!-- Logo -->
+                <svg viewBox="0 0 512 512" class="w-10 h-10" fill="#ff5c00">
+                    <g transform="translate(0,512) scale(0.1,-0.1)">
+                        <path d="M3138 4803 c-88 -35 -88 -35 -88 -89 0 -52 1 -54 28 -54 15 -1 43 -3 62 -6 34 -5 37 -2 112 91 78 95 78 95 25 94 -34 -1 -82 -13 -139 -36z m88 -13 c11 0 12 -3 4 -12 -6 -7 -24 -31 -41 -53 -17 -22 -37 -39 -45 -39 -8 1 -20 2 -27 3 -17 1 -42 51 -26 51 6 0 8 4 5 9 -3 5 1 12 10 15 9 4 13 2 8 -5 -4 -7 6 -3 22 8 49 32 69 41 72 32 2 -5 10 -9 18 -9z"/>
+                        <path d="M2878 4730 c-63 -5 -101 -14 -142 -34 -144 -70 -260 -256 -272 -434 -8 -122 7 -216 71 -456 55 -203 56 -212 54 -325 -3 -136 -17 -219 -57 -334 -28 -84 -28 -84 141 -25 169 58 169 58 371 -3 202 -62 202 -62 226 -103 13 -23 67 -107 121 -188 99 -148 99 -148 88 -370 -12 -241 5 -204 -312 -685 -24 -36 -545 -362 -612 -383 -22 -7 -87 -30 -145 -50 -485 -176 -450 -165 -1035 -315 -141 -36 -186 -52 -210 -73 -16 -15 -127 -122 -246 -239 -215 -213 -215 -213 173 -213 388 0 388 0 551 217 89 120 165 222 168 226 3 5 116 37 250 71 134 35 254 66 267 70 21 7 22 5 22 -49 0 -56 0 -56 123 -189 67 -73 136 -152 152 -176 29 -42 29 -42 -3 -71 -24 -21 -43 -29 -71 -29 -36 0 -107 -39 -126 -69 -11 -19 86 -13 141 8 51 20 51 20 254 -15 169 -29 224 -34 322 -32 118 3 118 3 96 35 -38 53 -73 63 -216 63 -181 0 -188 4 -320 189 -92 129 -102 147 -92 166 6 12 73 101 148 198 130 167 143 180 242 250 275 192 498 357 504 372 2 7 69 116 147 242 158 252 152 236 164 442 3 58 8 143 11 188 5 76 2 96 -46 270 -148 541 -118 469 -348 838 -113 182 -220 353 -237 382 -35 57 -37 76 -39 360 -1 123 -1 123 -73 124 -40 1 -79 2 -85 3 -9 1 -14 26 -16 79 -2 42 -6 76 -10 76 -4 -1 -46 -5 -94 -9z"/>
+                        <path d="M2730 4570 c-8 -5 -25 -10 -37 -10 -13 0 -22 -3 -21 -7 1 -5 -6 -23 -15 -40 -22 -41 -22 -39 -2 -70 9 -14 12 -22 6 -19 -6 4 -9 2 -5 -6 8 -21 53 -50 82 -53 35 -4 104 28 120 55 8 12 9 19 3 15 -6 -3 -11 -2 -11 4 0 5 4 12 9 15 10 7 9 19 -7 59 -7 16 -12 33 -12 39 0 6 -3 8 -6 5 -4 -3 -16 0 -28 8 -24 17 -54 19 -76 5z m69 -25 c33 -16 41 -33 41 -80 0 -42 -38 -75 -86 -75 -87 0 -112 118 -34 157 32 16 45 16 79 -2z"/>
+                        <path d="M2645 3034 c-190 -65 -190 -65 -331 -242 -77 -97 -206 -258 -286 -357 -146 -180 -146 -180 -112 -394 19 -121 39 -220 46 -227 7 -6 75 -64 151 -127 138 -115 138 -115 304 -162 166 -46 166 -46 247 5 44 27 159 98 255 157 173 108 173 108 265 248 50 77 119 182 154 234 60 92 62 97 62 161 0 36 3 124 6 197 6 132 6 132 -101 298 -60 91 -111 168 -115 170 -7 4 -348 105 -352 104 -2 0 -88 -30 -193 -65z"/>
+                        <path d="M1730 2057 c-47 -61 -156 -203 -242 -316 -158 -205 -158 -205 -430 -423 -249 -199 -275 -222 -301 -273 -15 -32 -27 -58 -25 -59 2 -1 20 -7 41 -13 34 -10 75 -2 430 88 215 54 462 117 547 139 175 46 705 229 693 240 -4 3 -55 19 -113 35 -58 15 -114 33 -125 40 -16 10 -285 234 -319 266 -5 5 -22 92 -37 194 -14 102 -28 187 -30 189 -2 2 -42 -47 -89 -107z"/>
+                        <path d="M3050 1305 c-69 -51 -136 -108 -151 -126 -14 -19 -54 -72 -90 -119 -36 -47 -68 -91 -73 -97 -4 -8 29 -53 93 -125 56 -62 101 -116 101 -120 0 -3 -11 -20 -25 -36 -14 -17 -25 -33 -25 -36 0 -3 56 -6 124 -6 142 0 211 -17 256 -62 28 -28 28 -28 170 -28 137 0 140 0 130 20 -6 11 -27 31 -48 45 -35 24 -44 25 -172 25 -218 0 -240 12 -352 190 -44 69 -82 131 -85 137 -3 7 50 93 118 190 67 98 131 191 142 206 10 16 18 30 16 32 -2 2 -60 -38 -129 -90z"/>
+                    </g>
+                </svg>
+                <div class="flex flex-col">
+                    <div class="flex items-center gap-1.5" title="Streamr Network">
+                        <div id="network-dot" class="w-2.5 h-2.5 rounded-full bg-[#444] transition-colors"></div>
+                        <span class="text-[17px] font-extrabold text-white tracking-tight leading-tight ml-1">Pombo</span>
+                    </div>
                 </div>
             </div>
-        </div>
-        <div class="flex items-center gap-3">
-            <div id="wallet-info" class="text-sm text-[#666] cursor-pointer hover:text-white transition font-mono" title="Click to copy address">Not Connected</div>
-            <button id="connect-wallet" class="bg-white hover:bg-[#f0f0f0] text-black px-3 py-1.5 rounded-lg text-sm font-medium transition flex items-center gap-1.5">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/>
-                </svg>
-                Connect
-            </button>
-            <div id="wallet-controls" class="hidden flex items-center gap-1">
-                <button id="switch-wallet" class="hidden bg-[#1a1a1a] hover:bg-[#252525] border border-[#282828] p-1.5 rounded-lg transition" title="Switch Account">
-                    <svg class="w-3.5 h-3.5 text-[#888]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/>
-                    </svg>
-                </button>
-                <button id="disconnect-wallet" class="bg-[#1a1a1a] hover:bg-[#252525] border border-[#282828] text-[#888] hover:text-white px-3 py-1.5 rounded-lg text-sm font-medium transition flex items-center gap-1.5">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/>
-                    </svg>
-                    Disconnect
-                </button>
-            </div>
-        </div>
-    </header>
-
-    <!-- Main Container -->
-    <div class="flex chat-container">
-        <!-- Sidebar - Channel List -->
-        <aside class="w-80 bg-[#1b1b1b] border-r border-gray-800 flex flex-col">
-            <!-- Sidebar Header -->
-            <div class="px-3 pt-3 space-y-2.5">
-                <!-- Header with title and + button -->
+            
+            <!-- Channel Controls -->
+            <div class="px-3 pb-2 space-y-2.5">
                 <div class="flex items-center justify-between">
                     <span class="text-xs font-medium text-[#666] uppercase tracking-wider">Channels</span>
                     <button id="new-channel-btn" class="p-1.5 hover:bg-[#252525] rounded-lg transition group" title="New Channel">
@@ -303,12 +278,12 @@
                             placeholder="Join with #ID..."
                             autocomplete="off"
                             style="text-overflow: ellipsis;"
-                            class="w-full bg-[#1a1a1a] border border-[#282828] text-white px-3 py-2 rounded-lg text-sm placeholder-[#555] focus:outline-none focus:border-[#444] transition overflow-hidden quick-join-field"
+                            class="w-full bg-[#141414] border border-[#1f1f1f] text-white px-3 py-2 rounded-lg text-sm placeholder-[#555] focus:outline-none focus:border-[#333] transition overflow-hidden quick-join-field"
                         />
                     </div>
                     
                     <!-- Explore/Join button (60-65%) -->
-                    <button id="browse-channels-btn" class="flex-1 bg-[#1a1a1a] hover:bg-[#252525] border border-[#282828] px-3 py-2 rounded-lg text-sm text-[#888] hover:text-white transition flex items-center justify-center gap-1.5">
+                    <button id="browse-channels-btn" class="flex-1 bg-[#141414] hover:bg-[#1a1a1a] border border-[#1f1f1f] px-3 py-2 rounded-lg text-sm text-[#888] hover:text-white transition flex items-center justify-center gap-1.5">
                         <svg id="browse-btn-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418"/>
                         </svg>
@@ -317,21 +292,15 @@
                 </div>
                 
                 <!-- Channel Filter Tabs -->
-                <div class="flex items-center mt-3 -mx-3 px-3 border-b border-[#282828]">
-                    <button data-channel-filter="all" class="channel-filter-tab px-4 py-2.5 text-xs transition-all text-[#F6851B] border-b-2 border-[#F6851B] -mb-px">
+                <div class="flex items-center mt-3 border-b border-[#1f1f1f]">
+                    <button data-channel-filter="all" class="channel-filter-tab flex-1 py-2.5 text-[10px] font-light uppercase tracking-widest transition-all text-[#F6851B] border-b-2 border-[#F6851B] -mb-px">
                         All
                     </button>
-                    <button data-channel-filter="personal" class="channel-filter-tab flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs transition-all text-white/40 hover:text-white/60 border-b-2 border-transparent -mb-px">
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/>
-                        </svg>
-                        <span>Personal</span>
+                    <button data-channel-filter="personal" class="channel-filter-tab flex-1 py-2.5 text-[10px] font-light uppercase tracking-widest transition-all text-white/40 hover:text-white/60 border-b-2 border-transparent -mb-px">
+                        Personal
                     </button>
-                    <button data-channel-filter="community" class="channel-filter-tab flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs transition-all text-white/40 hover:text-white/60 border-b-2 border-transparent -mb-px">
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z"/>
-                        </svg>
-                        <span>Communities</span>
+                    <button data-channel-filter="community" class="channel-filter-tab flex-1 py-2.5 text-[10px] font-light uppercase tracking-widest transition-all text-white/40 hover:text-white/60 border-b-2 border-transparent -mb-px">
+                        Communities
                     </button>
                 </div>
             </div>
@@ -345,7 +314,7 @@
             </div>
 
             <!-- Sidebar Footer -->
-            <div class="p-3 border-t border-[#282828] space-y-1">
+            <div class="p-3 border-t border-[#1f1f1f] space-y-1">
                 <button id="contacts-btn" class="hidden w-full px-3 py-2 rounded-lg text-sm text-[#888] hover:text-white hover:bg-[#252525] transition flex items-center gap-2">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
@@ -362,20 +331,48 @@
             </div>
         </aside>
 
-        <!-- Main Chat Area -->
-        <main class="flex-1 flex flex-col bg-[#121212]">
+        <!-- Right Content Area -->
+        <div class="flex-1 flex flex-col min-w-0">
+            <!-- Header -->
+            <header class="bg-[#0d0d0d] border-b border-[#333] h-14 flex items-center justify-end px-5 flex-shrink-0">
+                <div class="flex items-center gap-3">
+                    <div id="wallet-info" class="text-sm text-[#666] cursor-pointer hover:text-white transition font-mono" title="Click to copy address">Not Connected</div>
+                    <button id="connect-wallet" class="bg-white hover:bg-[#f0f0f0] text-black px-3 py-1.5 rounded-lg text-sm font-medium transition flex items-center gap-1.5">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/>
+                        </svg>
+                        Connect
+                    </button>
+                    <div id="wallet-controls" class="hidden flex items-center gap-1">
+                        <button id="switch-wallet" class="hidden bg-[#1a1a1a] hover:bg-[#252525] border border-[#282828] p-1.5 rounded-lg transition" title="Switch Account">
+                            <svg class="w-3.5 h-3.5 text-[#888]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/>
+                            </svg>
+                        </button>
+                        <button id="disconnect-wallet" class="bg-[#1a1a1a] hover:bg-[#252525] border border-[#282828] text-[#888] hover:text-white px-3 py-1.5 rounded-lg text-sm font-medium transition flex items-center gap-1.5">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/>
+                            </svg>
+                            Disconnect
+                        </button>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Main Chat Area -->
+            <main class="flex-1 flex flex-col bg-[#161616] overflow-hidden">
             <!-- Chat Header -->
-            <div id="chat-header" class="bg-[#1e1e1e] border-b border-gray-800 p-4 flex items-center justify-between">
+            <div id="chat-header" class="bg-[#161616] border-b border-[#333] px-5 py-4 flex items-center justify-between">
                 <div class="flex-1">
                     <div class="flex items-center gap-2">
-                        <h2 id="current-channel-name" class="text-xl font-semibold">Select a channel</h2>
+                        <h2 id="current-channel-name" class="text-xl font-semibold">Explore Channels</h2>
                         <button id="channel-menu-btn" class="hidden p-1 hover:bg-gray-700 rounded transition text-gray-400 hover:text-gray-200" title="Channel options">
                             <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                                 <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"/>
                             </svg>
                         </button>
                     </div>
-                    <div class="flex items-center gap-1.5 text-sm text-gray-400">
+                    <div class="flex items-center gap-1.5 text-sm text-gray-400 min-h-[20px]">
                         <span id="current-channel-info" class="inline-flex items-center"></span>
                         <span id="online-separator" class="hidden leading-none">·</span>
                         <div class="relative inline-flex items-center">
@@ -408,12 +405,6 @@
 
             <!-- Messages Area -->
             <div id="messages-area" class="flex-1 overflow-y-auto p-4 messages-area">
-                <div class="flex flex-col items-center justify-center h-full text-gray-500 gap-3">
-                    <svg class="w-12 h-12 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/>
-                    </svg>
-                    <span>Connect your account to start</span>
-                </div>
             </div>
 
             <!-- Typing Indicator -->
@@ -436,7 +427,7 @@
             </div>
 
             <!-- Message Input -->
-            <div id="message-input-container" class="bg-[#1e1e1e] border-t border-gray-800 p-3 hidden">
+            <div id="message-input-container" class="bg-[#161616] border-t border-[#333] p-3 hidden">
                 <div class="relative flex items-center gap-2">
                     <!-- Emoji Picker -->
                     <div id="emoji-picker" class="emoji-picker"></div>
@@ -494,6 +485,7 @@
                 </div>
             </div>
         </main>
+        </div>
     </div>
 
     <!-- Modal: New Channel -->
@@ -692,6 +684,8 @@
                                         <option value="education">Education</option>
                                         <option value="comedy">Comedy & Memes</option>
                                         <option value="general">General</option>
+                                        <option value="nsfw">NSFW (18+)</option>
+                                        <option value="adult">Adult (18+)</option>
                                     </select>
                                 </div>
                             </div>
@@ -1310,7 +1304,7 @@
             
             <div class="flex min-h-[420px]">
                 <!-- Sidebar Tabs -->
-                <div class="w-44 bg-[#0a0a0a] border-r border-white/5 py-2">
+                <div class="w-44 bg-[#0a0a0a] border-r border-white/5 py-2 flex flex-col justify-between">
                     <nav class="space-y-1 px-2">
                         <button data-settings-tab="profile" class="settings-tab w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left transition-all text-white/60 hover:text-white/90 hover:bg-white/5">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/></svg>
@@ -1330,6 +1324,12 @@
                             <span>Security</span>
                         </button>
                     </nav>
+                    <div class="px-2 pb-2">
+                        <button id="about-btn" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left transition-all text-white/40 hover:text-white/60 hover:bg-white/5">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z"/></svg>
+                            <span>About</span>
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Content Panels -->
@@ -1377,6 +1377,19 @@
                                     Fund with MetaMask
                                 </button>
                                 <p class="text-xs text-white/30 mt-2 text-center">Send POL from your MetaMask wallet</p>
+                            </div>
+                            <div class="my-4 border-t border-white/5"></div>
+                            <div class="flex items-start justify-between p-4 bg-white/5 rounded-xl border border-white/5">
+                                <div class="flex-1 mr-4">
+                                    <h4 class="text-sm font-medium text-white/90 mb-1">Show Sensitive Content</h4>
+                                    <p class="text-xs text-white/40 leading-relaxed">
+                                        Enable NSFW filter in channel exploration
+                                    </p>
+                                </div>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="nsfw-enabled" class="sr-only peer">
+                                    <div class="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white/60 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#F6851B]"></div>
+                                </label>
                             </div>
                         </div>
                     </div>
@@ -1722,6 +1735,26 @@
     <div id="loading-overlay" class="loading-overlay">
         <div class="spinner"></div>
         <div id="loading-text" class="loading-text">Loading...</div>
+    </div>
+
+    <!-- Modal: About/Disclaimer -->
+    <div id="about-modal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60]">
+        <div class="bg-[#141414] rounded-2xl w-[480px] max-w-[95vw] mx-4 shadow-2xl border border-white/5 overflow-hidden">
+            <div class="flex items-center justify-between px-6 py-4 border-b border-white/5">
+                <h3 class="text-lg font-medium text-white/90">About</h3>
+                <button id="close-about-btn" class="text-white/40 hover:text-white/80 transition p-1">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="p-6">
+                <h4 class="text-sm font-medium text-white/80 mb-3">Disclaimer</h4>
+                <p class="text-sm text-white/50 leading-relaxed">
+                    We provide a decentralized interface. We do not host content. By using this, you agree not to post illegal content. We reserve the right to block access to illegal content via this specific gateway.
+                </p>
+            </div>
+        </div>
     </div>
 
     <!-- App Bundle (built from src/js/) -->

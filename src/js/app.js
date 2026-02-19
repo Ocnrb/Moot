@@ -1152,27 +1152,16 @@ class App {
             // Render saved channels
             uiController.renderChannelList();
 
-            // Show "select a channel" state (connected but no channel open)
+            // Show Explore view as front-page (connected but no channel open)
             uiController.showConnectedNoChannelState();
 
             // Start background activity poller for all channels
             // This detects new messages without full subscriptions
             subscriptionManager.startBackgroundPoller();
             
-            // Restore last opened channel OR select first channel
-            // Only subscribes to the active channel (not all channels)
-            const lastChannel = secureStorage.getLastOpenedChannel();
-            const channels = channelManager.getAllChannels();
-            
-            if (lastChannel && channelManager.getChannel(lastChannel)) {
-                // Restore previous session's channel
-                Logger.info('Restoring last opened channel:', lastChannel);
-                await uiController.selectChannel(lastChannel);
-            } else if (channels.length > 0) {
-                // Select first channel if no last channel saved
-                Logger.info('Selecting first channel:', channels[0].streamId);
-                await uiController.selectChannel(channels[0].streamId);
-            }
+            // NOTE: We no longer auto-restore last opened channel
+            // User starts at Explore view and can choose a channel from there
+            // The lastOpenedChannel is still saved for other uses (e.g., quick access)
             
             Logger.info('Dynamic subscription management active (background poller started)');
 

@@ -14,152 +14,18 @@ import { mediaController } from './media.js';
 import { streamrController } from './streamr.js';
 import { subscriptionManager } from './subscriptionManager.js';
 
-// Gas estimation for Polygon network
-const GasEstimator = {
-    // Multiple RPC endpoints for fallback (ordered by reliability)
-    RPC_URLS: [
-        'https://rpc.ankr.com/polygon',
-        'https://polygon.drpc.org',
-        'https://polygon-bor-rpc.publicnode.com'
-    ],
-    currentRpcIndex: 0,
-    
-    // Approximate gas units for Streamr operations (based on real tx data)
-    GAS_UNITS: {
-        createStream: 420000,           // Creating a new stream
-        setPublicPermissions: 80000,    // Public permissions (single assignment)
-        setPermissionsBatch: 210000,    // Batch setPermissions (multiple members)
-        addStorageNode: 165000,         // Adding stream to storage node
-    },
-    
-    cachedGasPrice: null,
-    cacheTime: 0,
-    CACHE_DURATION: 60000, // 1 minute
-    
-    async rpcCall(method, params = []) {
-        let lastError = null;
-        const startIndex = this.currentRpcIndex;
-        
-        // Try each RPC in sequence, starting from the last successful one
-        for (let i = 0; i < this.RPC_URLS.length; i++) {
-            const index = (startIndex + i) % this.RPC_URLS.length;
-            const rpcUrl = this.RPC_URLS[index];
-            
-            try {
-                const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), 5000); // 5s timeout
-                
-                const response = await fetch(rpcUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        jsonrpc: '2.0',
-                        method: method,
-                        params: params,
-                        id: 1
-                    }),
-                    signal: controller.signal
-                });
-                
-                clearTimeout(timeout);
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}`);
-                }
-                
-                const data = await response.json();
-                
-                if (data.error) {
-                    throw new Error(data.error.message || 'RPC error');
-                }
-                
-                // Success - remember this RPC for next time
-                this.currentRpcIndex = index;
-                return data;
-            } catch (error) {
-                lastError = error;
-                Logger.debug(`RPC ${rpcUrl} failed: ${error.message}`);
-                continue;
-            }
-        }
-        
-        throw lastError || new Error('All RPCs failed');
-    },
-    
-    async getGasPrice() {
-        const now = Date.now();
-        if (this.cachedGasPrice && (now - this.cacheTime) < this.CACHE_DURATION) {
-            return this.cachedGasPrice;
-        }
-        
-        try {
-            const data = await this.rpcCall('eth_gasPrice');
-            const gasPriceWei = parseInt(data.result, 16);
-            this.cachedGasPrice = gasPriceWei;
-            this.cacheTime = now;
-            return gasPriceWei;
-        } catch (error) {
-            Logger.warn('Failed to fetch gas price:', error);
-            // Fallback to 30 gwei if all RPCs fail
-            return 30 * 1e9;
-        }
-    },
-    
-    formatPOL(wei) {
-        const pol = wei / 1e18;
-        if (pol < 0.0001) return '< 0.0001 POL';
-        if (pol < 0.01) return `~${pol.toFixed(4)} POL`;
-        return `~${pol.toFixed(3)} POL`;
-    },
-    
-    formatGwei(wei) {
-        const gwei = wei / 1e9;
-        return `${gwei.toFixed(1)} gwei`;
-    },
-    
-    async estimateCosts() {
-        const gasPrice = await this.getGasPrice();
-        
-        // Public/Password channels: createStream + setPublicPermissions + addStorageNode
-        const publicCost = gasPrice * (this.GAS_UNITS.createStream + this.GAS_UNITS.setPublicPermissions + this.GAS_UNITS.addStorageNode);
-        // Native adds batch setPermissions for members (larger than public permissions)
-        const nativeCost = gasPrice * (this.GAS_UNITS.createStream + this.GAS_UNITS.setPermissionsBatch + this.GAS_UNITS.addStorageNode);
-        
-        return {
-            public: publicCost,
-            password: publicCost,
-            native: nativeCost,
-            gasPrice: gasPrice,
-            formatted: {
-                public: this.formatPOL(publicCost),
-                password: this.formatPOL(publicCost),
-                native: this.formatPOL(nativeCost),
-                gasPrice: this.formatGwei(gasPrice)
-            }
-        };
-    },
-
-    async getBalance(address) {
-        try {
-            const data = await this.rpcCall('eth_getBalance', [address, 'latest']);
-            const balanceWei = parseInt(data.result, 16);
-            return balanceWei;
-        } catch (error) {
-            Logger.warn('Failed to fetch balance:', error);
-            return null;
-        }
-    },
-
-    formatBalancePOL(wei) {
-        if (wei === null || wei === undefined) return 'Error';
-        const pol = wei / 1e18;
-        if (pol === 0) return '0 POL';
-        if (pol < 0.0001) return '< 0.0001 POL';
-        if (pol < 1) return `${pol.toFixed(4)} POL`;
-        if (pol < 100) return `${pol.toFixed(3)} POL`;
-        return `${pol.toFixed(2)} POL`;
-    }
-};
+// UI Modules
+import { GasEstimator } from './ui/GasEstimator.js';
+import { notificationUI } from './ui/NotificationUI.js';
+import { escapeHtml as _escapeHtml, escapeAttr as _escapeAttr, formatAddress as _formatAddress, isValidMediaUrl as _isValidMediaUrl } from './ui/utils.js';
+import { reactionManager } from './ui/ReactionManager.js';
+import { onlineUsersUI } from './ui/OnlineUsersUI.js';
+import { dropdownManager } from './ui/DropdownManager.js';
+import { mediaHandler } from './ui/MediaHandler.js';
+import { messageRenderer } from './ui/MessageRenderer.js';
+import { modalManager } from './ui/ModalManager.js';
+import { settingsUI } from './ui/SettingsUI.js';
+import { exploreUI } from './ui/ExploreUI.js';
 
 class UIController {
     constructor() {
@@ -172,47 +38,99 @@ class UIController {
         // Reply state
         this.replyingTo = null; // { id, text, sender, senderName }
         
-        // Reaction picker state
-        this.reactionPickerTimeout = null;
-        
         // Send button debounce - prevents duplicate sends on rapid clicks
         this.isSending = false;
         
         // Channel filter state (sidebar tabs: all/personal/community)
         this.currentChannelFilter = 'all';
         
-        // Media cache for safe lightbox handling (prevents XSS via onclick)
-        // Maps mediaId -> { url, type }
-        this.mediaCache = new Map();
-        this.mediaIdCounter = 0;
+        // Setup callbacks for UI modules
+        this._setupModuleCallbacks();
     }
     
     /**
-     * Register media URL and get a safe ID for onclick handlers
-     * @param {string} url - Media URL (base64, blob, or http)
-     * @param {string} type - 'image' or 'video'
-     * @returns {string} - Safe media ID
+     * Setup dependencies for UI modules
+     */
+    _setupModuleCallbacks() {
+        // ReactionManager
+        reactionManager.setDependencies({
+            getCurrentAddress: () => authManager.getAddress(),
+            onSendReaction: (msgId, emoji, isRemoving) => {
+                const channel = channelManager.getCurrentChannel();
+                if (channel) {
+                    channelManager.sendReaction(channel.streamId, msgId, emoji, isRemoving);
+                }
+            }
+        });
+        
+        // OnlineUsersUI
+        onlineUsersUI.setDependencies({
+            getCurrentAddress: () => authManager.getAddress(),
+            onUserMenuAction: (action, address) => this.handleUserMenuAction(action, address)
+        });
+        
+        // DropdownManager
+        dropdownManager.setDependencies({
+            onChannelMenuAction: (action) => this.handleChannelMenuAction(action)
+        });
+        
+        // MediaHandler
+        mediaHandler.setDependencies({
+            showNotification: (msg, type) => this.showNotification(msg, type)
+        });
+        
+        // MessageRenderer
+        messageRenderer.setDependencies({
+            getCurrentAddress: () => authManager.getAddress(),
+            getMessageReactions: (msgId) => reactionManager.getReactions(msgId),
+            registerMedia: (url, type) => this.registerMedia(url, type),
+            getImage: (imageId) => mediaController.getImage(imageId),
+            cacheImage: (imageId, data) => mediaController.cacheImage(imageId, data),
+            requestImage: (streamId, imageId, password) => mediaController.requestImage(streamId, imageId, password),
+            getCurrentChannel: () => channelManager.getCurrentChannel(),
+            getFileUrl: (fileId) => mediaController.getFileUrl(fileId),
+            isSeeding: (fileId) => mediaController.isSeeding(fileId),
+            isVideoPlayable: (fileType) => mediaController.isVideoPlayable(fileType)
+        });
+        
+        // SettingsUI
+        settingsUI.setDependencies({
+            authManager,
+            secureStorage,
+            channelManager,
+            streamrController,
+            mediaController,
+            identityManager,
+            graphAPI,
+            Logger,
+            modalManager,
+            showNotification: (msg, type) => this.showNotification(msg, type),
+            updateWalletInfo: (address) => this.updateWalletInfo(address),
+            updateNetworkStatus: (status, connected) => this.updateNetworkStatus(status, connected),
+            renderChannelList: () => this.renderChannelList(),
+            resetToDisconnectedState: () => this.resetToDisconnectedState()
+        });
+        
+        // ExploreUI
+        exploreUI.setDependencies({
+            getPublicChannels: () => channelManager.getPublicChannels(),
+            joinPublicChannel: (streamId) => this.joinPublicChannel(streamId),
+            getNsfwEnabled: () => secureStorage.getNsfwEnabled()
+        });
+    }
+    
+    /**
+     * Register media URL (delegates to MediaHandler)
      */
     registerMedia(url, type = 'image') {
-        // Validate URL before registering
-        if (!this.isValidMediaUrl(url)) {
-            Logger.warn('Invalid media URL rejected:', url?.substring(0, 50));
-            return null;
-        }
-        const mediaId = `media_${++this.mediaIdCounter}`;
-        this.mediaCache.set(mediaId, { url, type });
-        return mediaId;
+        return mediaHandler.registerMedia(url, type);
     }
     
     /**
-     * Open lightbox by media ID (safe method)
-     * @param {string} mediaId - Registered media ID
+     * Open lightbox by media ID (delegates to MediaHandler)
      */
     openLightboxById(mediaId) {
-        const media = this.mediaCache.get(mediaId);
-        if (media) {
-            this.openLightbox(media.url, media.type);
-        }
+        mediaHandler.openLightboxById(mediaId);
     }
 
     /**
@@ -445,13 +363,13 @@ class UIController {
 
         // Channel types info modal
         document.getElementById('channel-info-help-btn')?.addEventListener('click', () => {
-            document.getElementById('channel-types-modal')?.classList.remove('hidden');
+            modalManager.show('channel-types-modal');
         });
         document.getElementById('close-channel-types-btn')?.addEventListener('click', () => {
-            document.getElementById('channel-types-modal')?.classList.add('hidden');
+            modalManager.hide('channel-types-modal');
         });
         document.getElementById('close-channel-types-btn-footer')?.addEventListener('click', () => {
-            document.getElementById('channel-types-modal')?.classList.add('hidden');
+            modalManager.hide('channel-types-modal');
         });
 
         // Quick join input (sidebar) - Enter to join
@@ -473,7 +391,8 @@ class UIController {
             if (hasInput) {
                 this.handleQuickJoin();
             } else {
-                this.showBrowseChannelsModal();
+                // No input: go to Explore view (deselect channel)
+                this.deselectChannel();
             }
         });
 
@@ -938,6 +857,10 @@ class UIController {
         // (on first load, existing messages are considered "seen")
         // Using timestamp-based tracking now via secureStorage
 
+        // Get current channel to highlight it
+        const currentChannel = channelManager.getCurrentChannel();
+        const currentStreamId = currentChannel?.streamId;
+
         this.elements.channelList.innerHTML = channels.map(channel => {
             // Calculate unread count based on timestamps
             const lastAccess = secureStorage.getChannelLastAccess(channel.streamId) || 0;
@@ -951,9 +874,13 @@ class UIController {
             // Show "+30" if we hit the initial load limit (may have more unread)
             const displayCount = hasUnread ? (unreadCount >= 30 ? '+30' : unreadCount) : '';
             
+            // Check if this is the currently open channel
+            const isActive = channel.streamId === currentStreamId;
+            const activeClass = isActive ? 'border-l-2 border-l-[#F6851B] bg-[#1a1a1a]' : 'border-l-2 border-l-transparent';
+            
             return `
             <div
-                class="channel-item px-3 py-2.5 mx-2 rounded-lg cursor-pointer bg-[#151515] border border-[#222] hover:bg-[#1e1e1e] hover:border-[#333] transition group"
+                class="channel-item px-3 py-4 mx-2 rounded-lg cursor-pointer bg-[#151515] border border-[#222] hover:bg-[#1e1e1e] hover:border-[#333] transition group ${activeClass}"
                 data-stream-id="${channel.streamId}"
                 draggable="true"
             >
@@ -969,9 +896,8 @@ class UIController {
                             <circle cx="16" cy="18" r="1.5"/>
                         </svg>
                     </div>
-                    <div class="flex-1 min-w-0">
+                    <div class="flex-1 min-w-0 pl-1">
                         <h3 class="text-[13px] font-medium text-white truncate">${this.escapeHtml(channel.name)}</h3>
-                        <p class="text-[11px] text-[#666]">${this.getChannelTypeLabel(channel.type, channel.readOnly)}</p>
                     </div>
                     <div class="flex items-center gap-1.5 ml-2">
                         ${hasUnread ? `<span class="channel-msg-count text-[10px] ${countClass} px-1.5 py-0.5 rounded" data-channel-count="${channel.streamId}">${unreadCount}</span>` : `<span class="channel-msg-count text-[10px] text-[#666] bg-[#252525] px-1.5 py-0.5 rounded hidden" data-channel-count="${channel.streamId}">0</span>`}
@@ -1129,6 +1055,12 @@ class UIController {
         // Clear any pending reply from previous channel
         this.cancelReply();
         
+        // Immediately clear messages area to prevent flash of explore view with wrong padding
+        this.elements.messagesArea.innerHTML = '';
+        
+        // Restore padding for chat messages
+        this.elements.messagesArea?.classList.add('p-4');
+        
         channelManager.setCurrentChannel(streamId);
         const channel = channelManager.getCurrentChannel();
 
@@ -1148,6 +1080,7 @@ class UIController {
             
             this.elements.currentChannelName.textContent = channel.name;
             this.elements.currentChannelInfo.innerHTML = this.getChannelTypeLabel(channel.type, channel.readOnly);
+            this.elements.currentChannelInfo.parentElement.classList.remove('hidden');
             this.elements.messageInputContainer.classList.remove('hidden');
 
             // Handle read-only channels (async - checks actual publish permission)
@@ -1212,9 +1145,7 @@ class UIController {
         // Clear current channel
         channelManager.setCurrentChannel(null);
         
-        // Reset UI to "connected but no channel" state
-        this.elements.currentChannelName.textContent = 'Select a channel';
-        this.elements.currentChannelInfo.textContent = '';
+        // Hide message input (will be shown by showExploreView if needed)
         this.elements.messageInputContainer.classList.add('hidden');
         
         // Hide channel-specific buttons
@@ -1233,15 +1164,8 @@ class UIController {
             this.elements.onlineUsersCount.textContent = '0';
         }
         
-        // Show "select channel" message
-        this.elements.messagesArea.innerHTML = `
-            <div class="flex flex-col items-center justify-center h-full text-gray-500 gap-3">
-                <svg class="w-12 h-12 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
-                </svg>
-                <span>Select or create a channel to start chatting</span>
-            </div>
-        `;
+        // Show Explore view (front-page) instead of static message
+        this.showExploreView();
         
         // Remove selection highlight from channel list
         document.querySelectorAll('.channel-item').forEach(item => {
@@ -1266,15 +1190,16 @@ class UIController {
         this.updateBrowseJoinButton();
         this.updateQuickJoinHash();
         
-        // Close any open modals first
-        this.elements.channelSettingsModal?.classList.add('hidden');
-        this.elements.inviteUsersModal?.classList.add('hidden');
-        document.getElementById('delete-channel-modal')?.classList.add('hidden');
-        document.getElementById('leave-channel-modal')?.classList.add('hidden');
+        // Close any open modals first (using ModalManager)
+        modalManager.hide('channel-settings-modal');
+        modalManager.hide('invite-users-modal');
+        modalManager.hide('delete-channel-modal');
+        this.hideLeaveChannelModal();
         
         // Reset channel name and info
-        this.elements.currentChannelName.textContent = 'Select a channel';
+        this.elements.currentChannelName.textContent = 'Explore Channels';
         this.elements.currentChannelInfo.textContent = '';
+        this.elements.currentChannelInfo.parentElement.classList.add('hidden');
         this.elements.messageInputContainer.classList.add('hidden');
         
         this.elements.inviteUsersBtn?.classList.add('hidden');
@@ -1292,30 +1217,51 @@ class UIController {
             this.elements.onlineUsersCount.textContent = '0';
         }
         
-        // Show "connect account" message
-        this.elements.messagesArea.innerHTML = `
-            <div class="flex flex-col items-center justify-center h-full text-gray-500 gap-3">
-                <svg class="w-12 h-12 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/>
-                </svg>
-                <span>Connect your account to start</span>
-            </div>
-        `;
+        // Clear messages area (will show loading or empty state)
+        this.elements.messagesArea.innerHTML = '';
     }
 
     /**
      * Show connected but no channel selected state
+     * Now shows the Explore view as the front-page
      */
     showConnectedNoChannelState() {
-        // Show "select channel" message
-        this.elements.messagesArea.innerHTML = `
-            <div class="flex flex-col items-center justify-center h-full text-gray-500 gap-3">
-                <svg class="w-12 h-12 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
-                </svg>
-                <span>Select or create a channel to start chatting</span>
-            </div>
-        `;
+        this.showExploreView();
+    }
+
+    /**
+     * Show Explore view inline in messages area (not as modal)
+     * This is the front-page when no channel is selected
+     */
+    async showExploreView() {
+        // Hide message input (not needed in Explore view)
+        this.elements.messageInputContainer?.classList.add('hidden');
+        
+        // Remove padding from messages area for edge-to-edge explore view
+        this.elements.messagesArea?.classList.remove('p-4');
+        
+        // Update header to show Explore context
+        this.elements.currentChannelName.textContent = 'Explore Channels';
+        this.elements.currentChannelInfo.textContent = '';
+        this.elements.currentChannelInfo.parentElement.classList.add('hidden');
+        
+        // Hide channel-specific buttons
+        this.elements.inviteUsersBtn?.classList.add('hidden');
+        this.elements.channelMenuBtn?.classList.add('hidden');
+        this.elements.closeChannelBtn?.classList.add('hidden');
+        this.elements.onlineHeader?.classList.add('hidden');
+        this.elements.onlineSeparator?.classList.add('hidden');
+        
+        // Render Explore view using ExploreUI module
+        const nsfwEnabled = secureStorage.getNsfwEnabled();
+        this.elements.messagesArea.innerHTML = exploreUI.getTemplate(nsfwEnabled);
+        
+        // Setup listeners and reset filters
+        exploreUI.setupListeners();
+        exploreUI.resetFilters();
+        
+        // Load channels
+        await exploreUI.loadChannels();
     }
 
     /**
@@ -1324,152 +1270,23 @@ class UIController {
      * @param {Array} users - Array of online users
      */
     updateOnlineUsers(streamId, users) {
-        // Only update if this is the current channel
         const currentChannel = channelManager.getCurrentChannel();
         if (!currentChannel || currentChannel.streamId !== streamId) return;
-        
-        // Update count
-        if (this.elements.onlineUsersCount) {
-            this.elements.onlineUsersCount.textContent = users.length;
-        }
-        
-        // Update list
-        if (this.elements.onlineUsersList) {
-            if (users.length === 0) {
-                this.elements.onlineUsersList.innerHTML = '<div class="text-gray-400 text-sm text-center">No one online</div>';
-            } else {
-                const myAddress = authManager.getAddress()?.toLowerCase();
-                
-                this.elements.onlineUsersList.innerHTML = users.map(user => {
-                    const address = user.address || user.id;
-                    const isMe = address?.toLowerCase() === myAddress;
-                    const nickname = user.nickname;
-                    const shortAddress = this.formatAddress(address);
-                    
-                    // Display: nickname or address as main name
-                    const displayName = nickname 
-                        ? `${this.escapeHtml(nickname)}` 
-                        : shortAddress;
-                    
-                    // Subtitle: address if has nickname, or "(you)" if it's me
-                    let subtitle = '';
-                    if (nickname) {
-                        subtitle = isMe ? `${shortAddress} (you)` : shortAddress;
-                    } else if (isMe) {
-                        subtitle = '(you)';
-                    }
-                    
-                    return `
-                        <div class="user-item-wrapper" data-user-address="${address}">
-                            <div class="user-item cursor-pointer hover:bg-[#2a2a2a] rounded px-2 py-1 -mx-2">
-                                <div class="user-dot ${isMe ? 'bg-white' : ''}"></div>
-                                <div class="flex flex-col min-w-0 flex-1">
-                                    <span class="text-gray-300 truncate text-sm ${isMe ? 'font-semibold' : ''}">${displayName}</span>
-                                    ${subtitle ? `<span class="text-gray-500 text-xs truncate">${subtitle}</span>` : ''}
-                                </div>
-                                <button class="user-menu-btn ml-auto text-gray-500 hover:text-gray-300 p-1" title="Options">
-                                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                                        <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z"/>
-                                    </svg>
-                                </button>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-                
-                // Attach event listeners for dropdowns
-                this.attachUserMenuListeners();
-            }
-        }
+        onlineUsersUI.updateOnlineUsers(this.elements.onlineUsersCount, this.elements.onlineUsersList, users);
     }
     
     /**
      * Attach event listeners for user dropdown menus
      */
     attachUserMenuListeners() {
-        // Menu toggle buttons
-        document.querySelectorAll('.user-menu-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const wrapper = btn.closest('.user-item-wrapper');
-                const address = wrapper?.dataset.userAddress;
-                const isMe = address?.toLowerCase() === authManager.getAddress()?.toLowerCase();
-                
-                // Close any existing dropdown
-                this.closeUserDropdown();
-                
-                // Create dropdown and append to body for proper positioning
-                const dropdown = document.createElement('div');
-                dropdown.id = 'user-dropdown-menu';
-                dropdown.className = 'fixed bg-[#1e1e1e] border border-gray-700 rounded-lg shadow-xl py-1 z-[9999] min-w-[160px]';
-                
-                // Sanitize address for safe attribute insertion
-                const safeAddress = this.escapeAttr(address);
-                
-                dropdown.innerHTML = `
-                    <button class="user-action w-full text-left px-3 py-2 hover:bg-[#2a2a2a] text-sm text-gray-300" data-action="copy-address" data-address="${safeAddress}">
-                        📋 Copy Address
-                    </button>
-                    ${!isMe ? `
-                    <button class="user-action w-full text-left px-3 py-2 hover:bg-[#2a2a2a] text-sm text-gray-300" data-action="add-contact" data-address="${safeAddress}">
-                        ➕ Add to Contacts
-                    </button>
-                    <button class="user-action w-full text-left px-3 py-2 hover:bg-[#2a2a2a] text-sm text-red-400" data-action="start-dm" data-address="${safeAddress}">
-                        💬 Start DM
-                    </button>
-                    ` : ''}
-                `;
-                
-                document.body.appendChild(dropdown);
-                
-                // Position dropdown relative to button
-                const btnRect = btn.getBoundingClientRect();
-                const dropdownRect = dropdown.getBoundingClientRect();
-                
-                // Position to the left of the button, aligned with top
-                let left = btnRect.left - dropdownRect.width - 8;
-                let top = btnRect.top;
-                
-                // If would go off left edge, position to the right instead
-                if (left < 8) {
-                    left = btnRect.right + 8;
-                }
-                
-                // If would go off bottom, adjust up
-                if (top + dropdownRect.height > window.innerHeight - 8) {
-                    top = window.innerHeight - dropdownRect.height - 8;
-                }
-                
-                dropdown.style.left = `${left}px`;
-                dropdown.style.top = `${top}px`;
-                
-                // Attach action listeners
-                dropdown.querySelectorAll('.user-action').forEach(actionBtn => {
-                    actionBtn.addEventListener('click', async (evt) => {
-                        evt.stopPropagation();
-                        const action = actionBtn.dataset.action;
-                        const addr = actionBtn.dataset.address;
-                        this.closeUserDropdown();
-                        await this.handleUserMenuAction(action, addr);
-                    });
-                });
-                
-                // Close on outside click
-                setTimeout(() => {
-                    document.addEventListener('click', this.closeUserDropdown.bind(this), { once: true });
-                }, 0);
-            });
-        });
+        onlineUsersUI.attachUserMenuListeners();
     }
     
     /**
      * Close user dropdown menu
      */
     closeUserDropdown() {
-        const existing = document.getElementById('user-dropdown-menu');
-        if (existing) {
-            existing.remove();
-        }
+        onlineUsersUI.closeUserDropdown();
     }
     
     /**
@@ -1478,77 +1295,14 @@ class UIController {
     showChannelDropdown(e) {
         const currentChannel = channelManager.getCurrentChannel();
         if (!currentChannel) return;
-        
-        // Close any existing dropdown
-        this.closeChannelDropdown();
-        
-        // Create dropdown
-        const dropdown = document.createElement('div');
-        dropdown.id = 'channel-dropdown-menu';
-        dropdown.className = 'fixed bg-[#141414] border border-white/10 rounded-xl shadow-2xl py-1 z-[9999] min-w-[180px] overflow-hidden';
-        dropdown.innerHTML = `
-            <button class="channel-action w-full text-left px-4 py-2.5 hover:bg-white/5 text-sm text-white/70 hover:text-white transition flex items-center gap-2" data-action="copy-stream-id">
-                <span class="w-4 h-4 flex items-center justify-center font-semibold text-base">#</span>
-                Copy Channel ID
-            </button>
-            <button class="channel-action w-full text-left px-4 py-2.5 hover:bg-white/5 text-sm text-white/70 hover:text-white transition flex items-center gap-2" data-action="channel-settings">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-                Channel Settings
-            </button>
-            <div class="my-1 border-t border-white/5"></div>
-            <button class="channel-action w-full text-left px-4 py-2.5 hover:bg-red-500/10 text-sm text-white/50 hover:text-red-400 transition flex items-center gap-2" data-action="leave-channel">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/></svg>
-                Leave Channel
-            </button>
-        `;
-        
-        document.body.appendChild(dropdown);
-        
-        // Position dropdown below button
-        const btn = this.elements.channelMenuBtn;
-        const btnRect = btn.getBoundingClientRect();
-        const dropdownRect = dropdown.getBoundingClientRect();
-        
-        let left = btnRect.left;
-        let top = btnRect.bottom + 4;
-        
-        // If would go off right edge, align to right side
-        if (left + dropdownRect.width > window.innerWidth - 8) {
-            left = btnRect.right - dropdownRect.width;
-        }
-        
-        // If would go off bottom, show above
-        if (top + dropdownRect.height > window.innerHeight - 8) {
-            top = btnRect.top - dropdownRect.height - 4;
-        }
-        
-        dropdown.style.left = `${left}px`;
-        dropdown.style.top = `${top}px`;
-        
-        // Attach action listeners
-        dropdown.querySelectorAll('.channel-action').forEach(actionBtn => {
-            actionBtn.addEventListener('click', async (evt) => {
-                evt.stopPropagation();
-                const action = actionBtn.dataset.action;
-                this.closeChannelDropdown();
-                await this.handleChannelMenuAction(action);
-            });
-        });
-        
-        // Close on outside click
-        setTimeout(() => {
-            document.addEventListener('click', this.closeChannelDropdown.bind(this), { once: true });
-        }, 0);
+        dropdownManager.showChannelDropdown(e, this.elements.channelMenuBtn, currentChannel);
     }
     
     /**
      * Close channel dropdown menu
      */
     closeChannelDropdown() {
-        const existing = document.getElementById('channel-dropdown-menu');
-        if (existing) {
-            existing.remove();
-        }
+        dropdownManager.closeChannelDropdown();
     }
     
     /**
@@ -1604,71 +1358,40 @@ class UIController {
     }
 
     /**
-     * Format Ethereum address for display
-     * @param {string} address - Full address
-     * @returns {string} - Formatted address
+     * Format Ethereum address for display (delegates to utils)
      */
     formatAddress(address) {
-        if (!address) return 'Unknown';
-        return `${address.slice(0, 6)}...${address.slice(-4)}`;
+        return _formatAddress(address);
     }
 
     /**
-     * Escape HTML to prevent XSS
-     * @param {string} str - String to escape
-     * @returns {string} - Escaped string
+     * Escape HTML to prevent XSS (delegates to utils)
      */
     escapeHtml(str) {
-        if (!str) return '';
-        return str.replace(/&/g, '&amp;')
-                  .replace(/</g, '&lt;')
-                  .replace(/>/g, '&gt;')
-                  .replace(/"/g, '&quot;')
-                  .replace(/'/g, '&#39;');
+        return _escapeHtml(str);
     }
 
     /**
-     * Escape string for use in HTML attributes (alias for escapeHtml)
-     * @param {string} str - String to escape
-     * @returns {string} - Escaped string safe for attributes
+     * Escape string for use in HTML attributes (delegates to utils)
      */
     escapeAttr(str) {
-        return this.escapeHtml(str);
+        return _escapeAttr(str);
     }
 
     /**
-     * Validate URL for safe use in src/href attributes
-     * Prevents javascript: and other dangerous protocols
-     * @param {string} url - URL to validate
-     * @returns {boolean} - True if URL is safe
+     * Validate URL for safe use in src/href attributes (delegates to utils)
      */
     isValidMediaUrl(url) {
-        if (!url || typeof url !== 'string') return false;
-        // Allow data URIs (base64 images), blob URLs, and http(s)
-        if (url.startsWith('data:image/') || url.startsWith('data:video/')) return true;
-        if (url.startsWith('blob:')) return true;
-        try {
-            const parsed = new URL(url);
-            return ['http:', 'https:'].includes(parsed.protocol);
-        } catch {
-            return false;
-        }
+        return _isValidMediaUrl(url);
     }
 
     /**
-     * Load reactions from channel state into UI
+     * Load reactions from channel state into UI (delegates to ReactionManager)
      * @param {string} streamId - Stream ID
      */
     loadChannelReactions(streamId) {
-        this.initReactions();
-        this.messageReactions.clear();
-        
         const reactions = channelManager.getChannelReactions(streamId);
-        
-        for (const [messageId, emojiMap] of Object.entries(reactions)) {
-            this.messageReactions.set(messageId, emojiMap);
-        }
-        
+        reactionManager.loadFromChannelState(reactions);
         Logger.debug('Loaded reactions for channel:', Object.keys(reactions).length, 'messages with reactions');
     }
 
@@ -1722,35 +1445,17 @@ class UIController {
     }
 
     /**
-     * Show loading indicator at top of messages
+     * Show loading indicator at top of messages (delegates to NotificationUI)
      */
     showLoadingMoreIndicator() {
-        // Remove existing if any
-        this.hideLoadingMoreIndicator();
-        
-        const indicator = document.createElement('div');
-        indicator.id = 'loading-more-indicator';
-        indicator.className = 'flex justify-center py-3';
-        indicator.innerHTML = `
-            <div class="flex items-center gap-2 text-gray-400 text-sm">
-                <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                <span>Loading older messages...</span>
-            </div>
-        `;
-        this.elements.messagesArea?.prepend(indicator);
+        notificationUI.showLoadingMoreIndicator(this.elements.messagesArea);
     }
 
     /**
-     * Hide loading indicator
+     * Hide loading indicator (delegates to NotificationUI)
      */
     hideLoadingMoreIndicator() {
-        const indicator = document.getElementById('loading-more-indicator');
-        if (indicator) {
-            indicator.remove();
-        }
+        notificationUI.hideLoadingMoreIndicator();
     }
 
     /**
@@ -1758,7 +1463,6 @@ class UIController {
      * @param {Array} messages - Array of message objects
      */
     renderMessages(messages) {
-        // Get channel info for "no more history" indicator
         const channel = channelManager.getCurrentChannel();
         const hasMoreHistory = channel?.hasMoreHistory !== false;
         
@@ -1774,7 +1478,6 @@ class UIController {
         const currentAddress = authManager.getAddress();
         let lastDateStr = null;
         
-        // Add "beginning of history" indicator if no more to load
         let historyStartIndicator = '';
         if (!hasMoreHistory) {
             historyStartIndicator = `
@@ -1791,76 +1494,29 @@ class UIController {
             const msgDate = new Date(msg.timestamp);
             const time = msgDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             
-            // Check if we need a date separator
             const dateStr = msgDate.toDateString();
             let dateSeparator = '';
             if (dateStr !== lastDateStr) {
                 lastDateStr = dateStr;
-                dateSeparator = this.renderDateSeparator(msgDate);
+                dateSeparator = messageRenderer.renderDateSeparator(msgDate);
             }
             
-            // Get verification badge (pass isOwn to show different badge for own messages)
             const badge = this.getVerificationBadge(msg, isOwn);
-            
-            // Priority for display name:
-            // 1. senderName (from message)
-            // 2. ENS name
-            // 3. Sender address
             let displayName = msg.senderName || msg.verified?.ensName;
             if (!displayName) {
                 displayName = this.formatAddress(msg.sender);
             }
             
-            const msgId = msg.id || msg.timestamp;
-            
-            // Get reactions for this message
-            const reactionsHtml = this.renderReactions(msgId, isOwn);
-            
-            // Render message content based on type
-            const contentHtml = this.renderMessageContent(msg);
-            
-            // Render reply preview if this is a reply
-            const replyPreviewHtml = this.renderReplyPreview(msg.replyTo);
-            
-            // Check for emoji-only messages (only for text type)
-            const msgType = msg.type || 'text';
-            const emojiOnly = msgType === 'text' ? this.isEmojiOnly(msg.text) : false;
-            const emojiAttr = emojiOnly ? ` data-emoji-only="${emojiOnly}"` : '';
-
-            return `
-                ${dateSeparator}
-                <div class="message-entry ${isOwn ? 'own-message' : 'other-message'}" data-msg-id="${msgId}" data-sender="${msg.sender || ''}" data-type="${msgType}"${emojiAttr}>
-                    <div class="message-bubble">
-                        <div class="flex items-center gap-1 mb-1">
-                            ${badge.html}
-                            <span class="text-xs font-medium ${badge.textColor}">${this.escapeHtml(displayName)}</span>
-                        </div>
-                        ${replyPreviewHtml}
-                        <div class="message-content">${contentHtml}</div>
-                        <div class="message-footer">
-                            ${reactionsHtml}
-                            <span class="message-time text-xs text-gray-500">${time}</span>
-                        </div>
-                        ${!msg.verified?.valid && msg.signature ? '<div class="text-xs text-red-400 mt-1">⚠️ Invalid signature</div>' : ''}
-                        <span class="reply-trigger reply-btn" data-msg-id="${msgId}" title="Reply"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17l-5-5 5-5"/><path d="M4 12h11a4 4 0 0 1 4 4v4"/></svg></span>
-                        <span class="react-trigger react-btn" data-msg-id="${msgId}" title="React"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg></span>
-                    </div>
-                </div>
-            `;
+            return dateSeparator + messageRenderer.buildMessageHTML(msg, isOwn, time, badge, displayName);
         }).join('');
 
-        // Prepend history start indicator if no more history
         this.elements.messagesArea.innerHTML = historyStartIndicator + this.elements.messagesArea.innerHTML;
 
-        // Scroll to bottom (only on initial render, not on load more)
         if (!this.isLoadingMore) {
             this.elements.messagesArea.scrollTop = this.elements.messagesArea.scrollHeight;
         }
         
-        // Attach reaction button listeners
         this.attachReactionListeners();
-        
-        // Attach lightbox listeners for safe media handling
         this.attachLightboxListeners();
     }
 
@@ -1868,73 +1524,21 @@ class UIController {
      * Render date separator pill
      */
     renderDateSeparator(date) {
-        const today = new Date();
-        const yesterday = new Date(today);
-        yesterday.setDate(yesterday.getDate() - 1);
-        
-        let dateText;
-        if (date.toDateString() === today.toDateString()) {
-            dateText = 'Today';
-        } else if (date.toDateString() === yesterday.toDateString()) {
-            dateText = 'Yesterday';
-        } else {
-            // Format: "February 14" or "February 14, 2025" if different year
-            const month = date.toLocaleDateString('en-US', { month: 'long' });
-            const day = date.getDate();
-            const year = date.getFullYear();
-            
-            if (year === today.getFullYear()) {
-                dateText = `${month} ${day}`;
-            } else {
-                dateText = `${month} ${day}, ${year}`;
-            }
-        }
-        
-        return `
-            <div class="date-separator">
-                <span class="date-pill">${dateText}</span>
-            </div>
-        `;
+        return messageRenderer.renderDateSeparator(date);
     }
 
     /**
      * Render reactions for a message
      */
     renderReactions(msgId, isOwn) {
-        const reactions = this.messageReactions?.get(msgId);
-        if (!reactions || Object.keys(reactions).length === 0) {
-            return `<div class="reactions-container" data-reactions-for="${msgId}"></div>`;
-        }
-
-        const currentAddress = authManager.getAddress()?.toLowerCase();
-        let html = `<div class="reactions-container" data-reactions-for="${msgId}">`;
-        
-        for (const [emoji, users] of Object.entries(reactions)) {
-            if (users.length > 0) {
-                const userReacted = users.some(u => u.toLowerCase() === currentAddress);
-                html += `<span class="reaction-badge ${userReacted ? 'user-reacted' : ''}" data-emoji="${emoji}" data-msg-id="${msgId}"><span class="reaction-emoji">${emoji}</span>${users.length}</span>`;
-            }
-        }
-        
-        html += '</div>';
-        return html;
+        return messageRenderer.renderReactions(msgId, isOwn);
     }
 
     /**
      * Render reply preview for a message
      */
     renderReplyPreview(replyTo) {
-        if (!replyTo) return '';
-        
-        const displayName = replyTo.senderName || this.formatAddress(replyTo.sender);
-        const previewText = replyTo.text ? this.escapeHtml(replyTo.text.substring(0, 50)) + (replyTo.text.length > 50 ? '...' : '') : '[Message]';
-        
-        return `
-            <div class="reply-preview" data-reply-to-id="${replyTo.id}">
-                <span class="reply-preview-name">${this.escapeHtml(displayName)}</span>
-                <span class="reply-preview-text">${previewText}</span>
-            </div>
-        `;
+        return messageRenderer.renderReplyPreview(replyTo);
     }
 
     /**
@@ -1999,180 +1603,39 @@ class UIController {
      * Initialize reactions map
      */
     initReactions() {
-        if (!this.messageReactions) {
-            this.messageReactions = new Map();
-        }
+        reactionManager.init();
     }
 
     /**
      * Add or toggle a reaction
      */
     toggleReaction(msgId, emoji) {
-        this.initReactions();
-        
-        const currentAddress = authManager.getAddress();
-        if (!currentAddress) return;
-        
-        if (!this.messageReactions.has(msgId)) {
-            this.messageReactions.set(msgId, {});
-        }
-        
-        const reactions = this.messageReactions.get(msgId);
-        if (!reactions[emoji]) {
-            reactions[emoji] = [];
-        }
-        
-        const userIndex = reactions[emoji].findIndex(u => u.toLowerCase() === currentAddress.toLowerCase());
-        const isRemoving = userIndex >= 0;
-        
-        if (isRemoving) {
-            reactions[emoji].splice(userIndex, 1);
-        } else {
-            reactions[emoji].push(currentAddress);
-        }
-        
-        // Update the UI
-        this.updateReactionUI(msgId);
-        
-        // Send reaction to channel (will be stored via handleControlMessage)
-        this.sendReaction(msgId, emoji, isRemoving);
+        reactionManager.toggleReaction(msgId, emoji);
     }
 
     /**
      * Update reaction UI for specific message
      */
     updateReactionUI(msgId) {
-        const container = document.querySelector(`[data-reactions-for="${msgId}"]`);
-        if (!container) return;
-        
-        const reactions = this.messageReactions?.get(msgId);
-        const currentAddress = authManager.getAddress()?.toLowerCase();
-        
-        container.innerHTML = '';
-        
-        if (reactions) {
-            for (const [emoji, users] of Object.entries(reactions)) {
-                if (users.length > 0) {
-                    const userReacted = users.some(u => u.toLowerCase() === currentAddress);
-                    const badge = document.createElement('span');
-                    badge.className = `reaction-badge ${userReacted ? 'user-reacted' : ''}`;
-                    badge.dataset.emoji = emoji;
-                    badge.dataset.msgId = msgId;
-                    badge.innerHTML = `<span class="reaction-emoji">${emoji}</span>${users.length}`;
-                    badge.addEventListener('click', () => this.toggleReaction(msgId, emoji));
-                    container.appendChild(badge);
-                }
-            }
-        }
-    }
-
-    /**
-     * Send reaction via channel
-     * @param {string} msgId - Message ID
-     * @param {string} emoji - Emoji
-     * @param {boolean} isRemoving - True if removing reaction
-     */
-    sendReaction(msgId, emoji, isRemoving = false) {
-        const channel = channelManager.getCurrentChannel();
-        if (channel) {
-            channelManager.sendReaction(channel.streamId, msgId, emoji, isRemoving);
-        }
+        reactionManager.updateReactionUI(msgId);
     }
 
     /**
      * Handle incoming reaction
-     * @param {string} msgId - Message ID
-     * @param {string} emoji - Emoji
-     * @param {string} sender - Sender address
-     * @param {string} action - 'add' or 'remove'
      */
     handleIncomingReaction(msgId, emoji, sender, action = 'add') {
-        this.initReactions();
-        
-        if (!this.messageReactions.has(msgId)) {
-            this.messageReactions.set(msgId, {});
-        }
-        
-        const reactions = this.messageReactions.get(msgId);
-        if (!reactions[emoji]) {
-            reactions[emoji] = [];
-        }
-        
-        const senderLower = sender.toLowerCase();
-        const userIndex = reactions[emoji].findIndex(u => u.toLowerCase() === senderLower);
-        
-        if (action === 'remove') {
-            // Remove user from reaction
-            if (userIndex >= 0) {
-                reactions[emoji].splice(userIndex, 1);
-                // Clean up empty arrays
-                if (reactions[emoji].length === 0) {
-                    delete reactions[emoji];
-                }
-                this.updateReactionUI(msgId);
-            }
-        } else {
-            // Add if not already present
-            if (userIndex < 0) {
-                reactions[emoji].push(sender);
-                this.updateReactionUI(msgId);
-            }
-        }
+        reactionManager.handleIncomingReaction(msgId, emoji, sender, action);
     }
 
     /**
      * Attach reaction button listeners
      */
     attachReactionListeners() {
-        document.querySelectorAll('.react-btn').forEach(btn => {
-            // Remove old listeners by cloning
-            const newBtn = btn.cloneNode(true);
-            btn.parentNode.replaceChild(newBtn, btn);
-            
-            newBtn.addEventListener('mouseenter', (e) => {
-                const msgId = newBtn.dataset.msgId;
-                this.showReactionPicker(e, msgId, newBtn);
-            });
-        });
-        
-        // Reply buttons
-        document.querySelectorAll('.reply-btn').forEach(btn => {
-            const newBtn = btn.cloneNode(true);
-            btn.parentNode.replaceChild(newBtn, btn);
-            
-            newBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const msgId = newBtn.dataset.msgId;
-                this.startReply(msgId);
-            });
-        });
-        
-        // Reply preview click - scroll to original message
-        document.querySelectorAll('.reply-preview').forEach(preview => {
-            preview.addEventListener('click', (e) => {
-                const replyToId = preview.dataset.replyToId;
-                if (replyToId) {
-                    this.scrollToMessage(replyToId);
-                }
-            });
-        });
-        
-        document.querySelectorAll('.reaction-badge').forEach(badge => {
-            badge.addEventListener('click', (e) => {
-                const msgId = badge.dataset.msgId;
-                const emoji = badge.dataset.emoji;
-                this.toggleReaction(msgId, emoji);
-            });
-        });
-        
-        // Attach download button listeners
-        document.querySelectorAll('.download-file-btn').forEach(btn => {
-            btn.addEventListener('click', async (e) => {
-                e.stopPropagation();
-                const fileId = btn.dataset.fileId;
-                await this.handleFileDownload(fileId);
-            });
-        });
+        reactionManager.attachReactionListeners(
+            (msgId) => this.startReply(msgId),
+            (fileId) => this.handleFileDownload(fileId),
+            (msgId) => this.scrollToMessage(msgId)
+        );
     }
     
     /**
@@ -2180,204 +1643,28 @@ class UIController {
      */
     async handleFileDownload(fileId) {
         const channel = channelManager.getCurrentChannel();
-        if (!channel) return;
-        
-        // Find the message with this file
-        const msg = channel.messages.find(m => m.metadata?.fileId === fileId);
-        if (!msg || !msg.metadata) {
-            this.showNotification('File not found', 'error');
-            return;
-        }
-        
-        // Show progress overlay
-        const progressOverlay = document.querySelector(`[data-progress-overlay="${fileId}"]`);
-        if (progressOverlay) {
-            progressOverlay.classList.remove('hidden');
-        }
-        
-        const progressText = document.querySelector(`[data-progress-text="${fileId}"]`);
-        if (progressText) {
-            progressText.textContent = 'Starting...';
-        }
-        
-        // Update download button to show loading state
-        const downloadBtn = document.querySelector(`.download-file-btn[data-file-id="${fileId}"]`);
-        if (downloadBtn) {
-            const playIcon = downloadBtn.querySelector('.download-play-icon');
-            const loadingIcon = downloadBtn.querySelector('.download-loading-icon');
-            if (playIcon) playIcon.classList.add('hidden');
-            if (loadingIcon) loadingIcon.classList.remove('hidden');
-            downloadBtn.disabled = true;
-            downloadBtn.classList.add('cursor-not-allowed');
-        }
-        
-        try {
-            await mediaController.startDownload(channel.streamId, msg.metadata, channel.password);
-        } catch (error) {
-            this.showNotification('Download failed: ' + error.message, 'error');
-            // Reset UI state on error
-            this.resetDownloadUI(fileId);
-        }
+        await mediaHandler.handleFileDownload(fileId, channel, mediaController);
     }
 
     /**
      * Reset download UI to initial state (on error or cancel)
      */
     resetDownloadUI(fileId) {
-        const progressOverlay = document.querySelector(`[data-progress-overlay="${fileId}"]`);
-        if (progressOverlay) {
-            progressOverlay.classList.add('hidden');
-        }
-        
-        const downloadBtn = document.querySelector(`.download-file-btn[data-file-id="${fileId}"]`);
-        if (downloadBtn) {
-            const playIcon = downloadBtn.querySelector('.download-play-icon');
-            const loadingIcon = downloadBtn.querySelector('.download-loading-icon');
-            if (playIcon) playIcon.classList.remove('hidden');
-            if (loadingIcon) loadingIcon.classList.add('hidden');
-            downloadBtn.disabled = false;
-            downloadBtn.classList.remove('cursor-not-allowed', 'opacity-50');
-        }
+        mediaHandler.resetDownloadUI(fileId);
     }
 
     /**
      * Show reaction picker
      */
     showReactionPicker(e, msgId, triggerBtn) {
-        const picker = document.getElementById('reaction-picker');
-        if (!picker) return;
-        
-        // Clear any pending hide timeout
-        if (this.reactionPickerTimeout) {
-            clearTimeout(this.reactionPickerTimeout);
-            this.reactionPickerTimeout = null;
-        }
-        
-        // Position near the button
-        const rect = e.target.getBoundingClientRect();
-        
-        // Temporarily show picker to measure dimensions
-        picker.style.visibility = 'hidden';
-        picker.style.display = 'flex';
-        
-        const pickerWidth = picker.offsetWidth;
-        const pickerHeight = picker.offsetHeight;
-        const viewportWidth = window.innerWidth;
-        const viewportHeight = window.innerHeight;
-        
-        // Calculate initial position
-        let left = rect.left;
-        let top = rect.bottom + 5;
-        
-        // Adjust if picker would overflow right edge
-        if (left + pickerWidth > viewportWidth - 10) {
-            left = viewportWidth - pickerWidth - 10;
-        }
-        
-        // Adjust if picker would overflow bottom edge
-        if (top + pickerHeight > viewportHeight - 10) {
-            top = rect.top - pickerHeight - 5; // Show above instead
-        }
-        
-        // Ensure minimum left
-        left = Math.max(10, left);
-        
-        picker.style.left = `${left}px`;
-        picker.style.top = `${top}px`;
-        picker.style.visibility = 'visible';
-        
-        // Store current message ID
-        picker.dataset.currentMsgId = msgId;
-        
-        // Attach click handlers
-        picker.querySelectorAll('span').forEach(span => {
-            span.onclick = () => {
-                this.toggleReaction(msgId, span.dataset.emoji);
-                picker.style.display = 'none';
-            };
-        });
-        
-        // Setup mouse leave handlers
-        const hidePickerWithDelay = () => {
-            this.reactionPickerTimeout = setTimeout(() => {
-                picker.style.display = 'none';
-            }, 150);
-        };
-        
-        const cancelHide = () => {
-            if (this.reactionPickerTimeout) {
-                clearTimeout(this.reactionPickerTimeout);
-                this.reactionPickerTimeout = null;
-            }
-        };
-        
-        // Remove old listeners
-        picker.onmouseleave = hidePickerWithDelay;
-        picker.onmouseenter = cancelHide;
-        
-        if (triggerBtn) {
-            triggerBtn.onmouseleave = hidePickerWithDelay;
-        }
+        reactionManager.showReactionPicker(e, msgId, triggerBtn);
     }
 
     /**
      * Initialize emoji picker
      */
     initEmojiPicker() {
-        const emojiPicker = document.getElementById('emoji-picker');
-        const emojiBtn = document.getElementById('emoji-btn');
-        
-        if (!emojiPicker || !emojiBtn) return;
-        
-        const emojis = [
-            '😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇',
-            '🙂', '🙃', '😉', '😍', '🥰', '😘', '😋', '😛', '😜', '🤪',
-            '🤨', '🧐', '🤓', '😎', '🤩', '🥳', '😏', '😔', '😢', '😭',
-            '😤', '😠', '😡', '🤬', '🤯', '😳', '🥵', '🥶', '😱', '😨',
-            '🤗', '🤔', '🤭', '🤫', '🤥', '😶', '😐', '😬', '🙄', '😯',
-            '😲', '🥱', '😴', '🤤', '😵', '🤐', '🥴', '🤢', '🤮', '🤧',
-            '👍', '👎', '👏', '🙌', '🤝', '🙏', '✌️', '🤞', '🤟', '🤘',
-            '👋', '💪', '❤️', '🔥', '⭐', '🎉', '🎊', '💯', '✅', '❌',
-            '⚡', '🚀', '💀', '👻', '🤖', '👽', '💩', '🤡'
-        ];
-        
-        emojiPicker.innerHTML = emojis.map(e => `<span>${e}</span>`).join('');
-        
-        // Add click handlers
-        emojiPicker.querySelectorAll('span').forEach(span => {
-            span.addEventListener('click', () => {
-                if (this.elements.messageInput) {
-                    this.elements.messageInput.value += span.textContent;
-                    this.elements.messageInput.focus();
-                }
-            });
-        });
-        
-        // Toggle emoji picker
-        emojiBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            emojiPicker.style.display = emojiPicker.style.display === 'flex' ? 'none' : 'flex';
-        });
-        
-        // Close picker when clicking outside
-        document.addEventListener('click', (e) => {
-            if (!emojiPicker.contains(e.target) && e.target !== emojiBtn) {
-                emojiPicker.style.display = 'none';
-            }
-            
-            // Also close reaction picker
-            const reactionPicker = document.getElementById('reaction-picker');
-            if (reactionPicker && !reactionPicker.contains(e.target)) {
-                reactionPicker.style.display = 'none';
-            }
-            
-            // Also close attach menu
-            const attachMenu = document.getElementById('attach-menu');
-            const attachBtn = document.getElementById('attach-btn');
-            if (attachMenu && !attachMenu.contains(e.target) && e.target !== attachBtn) {
-                attachMenu.classList.add('hidden');
-            }
-        });
+        reactionManager.initEmojiPicker(this.elements.messageInput);
     }
 
     /**
@@ -2391,10 +1678,7 @@ class UIController {
         const imageInput = document.getElementById('image-input');
         const videoInput = document.getElementById('video-input');
         
-        // File confirm modal elements
-        const fileConfirmModal = document.getElementById('file-confirm-modal');
-        const confirmFileName = document.getElementById('confirm-file-name');
-        const confirmFileSize = document.getElementById('confirm-file-size');
+        // File confirm modal buttons
         const cancelFileBtn = document.getElementById('cancel-file-btn');
         const confirmFileBtn = document.getElementById('confirm-file-btn');
         
@@ -2444,7 +1728,7 @@ class UIController {
         cancelFileBtn?.addEventListener('click', () => {
             this.pendingFile = null;
             this.pendingFileType = null;
-            fileConfirmModal?.classList.add('hidden');
+            modalManager.hide('file-confirm-modal');
         });
         
         // Confirm file send
@@ -2456,7 +1740,7 @@ class UIController {
             
             this.pendingFile = null;
             this.pendingFileType = null;
-            fileConfirmModal?.classList.add('hidden');
+            modalManager.hide('file-confirm-modal');
             
             await this.sendMediaFile(file, type);
         });
@@ -2497,7 +1781,7 @@ class UIController {
             `;
         }
         
-        modal.classList.remove('hidden');
+        modalManager.show('file-confirm-modal');
     }
     
     /**
@@ -2736,317 +2020,51 @@ class UIController {
     
     /**
      * Open media lightbox
-     * @param {string} src - Media source URL
-     * @param {string} type - 'image' or 'video'
      */
     openLightbox(src, type = 'image') {
-        const modal = document.getElementById('media-lightbox-modal');
-        const imageEl = document.getElementById('lightbox-image');
-        const videoEl = document.getElementById('lightbox-video');
-        
-        if (!modal) return;
-        
-        // Reset both
-        if (imageEl) imageEl.classList.add('hidden');
-        if (videoEl) {
-            videoEl.classList.add('hidden');
-            videoEl.pause();
-            videoEl.src = '';
-        }
-        
-        // Show appropriate media
-        if (type === 'image' && imageEl) {
-            imageEl.src = src;
-            imageEl.classList.remove('hidden');
-        } else if (type === 'video' && videoEl) {
-            videoEl.src = src;
-            videoEl.classList.remove('hidden');
-        }
-        
-        modal.classList.remove('hidden');
+        mediaHandler.openLightbox(src, type);
     }
     
     /**
      * Close media lightbox
      */
     closeLightbox() {
-        const modal = document.getElementById('media-lightbox-modal');
-        const videoEl = document.getElementById('lightbox-video');
-        
-        if (videoEl) {
-            videoEl.pause();
-        }
-        
-        if (modal) {
-            modal.classList.add('hidden');
-        }
+        mediaHandler.closeLightbox();
     }
     
     /**
      * Attach click listeners to lightbox trigger elements
-     * Uses data-media-id instead of inline onclick to prevent XSS
      */
     attachLightboxListeners() {
-        document.querySelectorAll('.lightbox-trigger[data-media-id]').forEach(el => {
-            // Skip if already has listener attached
-            if (el.dataset.lightboxBound) return;
-            el.dataset.lightboxBound = 'true';
-            
-            el.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const mediaId = el.dataset.mediaId;
-                if (mediaId) {
-                    this.openLightboxById(mediaId);
-                }
-            });
-        });
+        mediaHandler.attachLightboxListeners();
     }
     
     /**
-     * Check if text is emoji-only (no other characters)
-     * @param {string} text - Text to check
-     * @returns {boolean|string} - false if not emoji-only, 'true' for 1-3 emojis, 'many' for 4+ emojis
+     * Check if text is emoji-only
      */
     isEmojiOnly(text) {
-        if (!text) return false;
-        // Regex for emoji detection (covers most emoji including compound ones)
-        const emojiRegex = /[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu;
-        const stripped = text.replace(/\s/g, '');
-        const emojis = stripped.match(emojiRegex);
-        if (!emojis || emojis.length === 0) return false;
-        
-        // Check if only emojis remain after removing them
-        const withoutEmojis = stripped.replace(emojiRegex, '').replace(/[\uFE0F\u200D]/g, '');
-        if (withoutEmojis.length > 0) return false;
-        
-        // Return 'true' for 1-3 emojis, 'many' for 4+
-        return emojis.length <= 3 ? 'true' : 'many';
+        return messageRenderer.isEmojiOnly(text);
     }
 
     /**
      * Wrap emojis in text with span for styling
-     * @param {string} html - Escaped HTML text
-     * @returns {string} - HTML with emojis wrapped in spans
      */
     wrapInlineEmojis(html) {
-        // Regex for emoji detection
-        const emojiRegex = /([\p{Emoji_Presentation}\p{Extended_Pictographic}][\uFE0F\u200D]?)/gu;
-        return html.replace(emojiRegex, '<span class="inline-emoji">$1</span>');
+        return messageRenderer.wrapInlineEmojis(html);
     }
 
     /**
      * Render message content based on type
      */
     renderMessageContent(msg) {
-        const type = msg.type || 'text';
-        
-        switch (type) {
-            case 'image':
-                // Try cache first, then embedded data (from history), then request
-                let imageData = mediaController.getImage(msg.imageId);
-                
-                // If not in cache but embedded in message (from LogStore), use that and cache it
-                if (!imageData && msg.imageData) {
-                    imageData = msg.imageData;
-                    mediaController.cacheImage(msg.imageId, imageData);
-                }
-                
-                if (imageData) {
-                    // Register media for safe onclick handling
-                    const mediaId = this.registerMedia(imageData, 'image');
-                    if (!mediaId) {
-                        return `<div class="text-red-400 text-sm">Invalid image data</div>`;
-                    }
-                    
-                    return `
-                        <div class="relative inline-block max-w-xs group">
-                            <img src="${imageData}" 
-                                 class="max-w-full max-h-60 rounded-lg cursor-pointer object-contain lightbox-trigger" 
-                                 data-media-id="${mediaId}"
-                                 alt="Image"/>
-                            <button class="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white p-1 rounded transition opacity-0 group-hover:opacity-100 lightbox-trigger"
-                                    data-media-id="${mediaId}"
-                                    title="Maximize">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>
-                                </svg>
-                            </button>
-                        </div>
-                    `;
-                } else {
-                    // Request image from network (fallback for old messages without embedded data)
-                    const channel = channelManager.getCurrentChannel();
-                    if (channel) {
-                        mediaController.requestImage(channel.streamId, msg.imageId, channel.password);
-                    }
-                    return `
-                        <div data-image-id="${this.escapeAttr(msg.imageId)}" class="bg-[#1a1a1a] rounded-lg p-4 max-w-xs">
-                            <div class="flex items-center gap-2">
-                                <div class="animate-spin w-4 h-4 border-2 border-gray-600 border-t-white rounded-full"></div>
-                                <span class="text-gray-500 text-sm">Loading image...</span>
-                            </div>
-                        </div>
-                    `;
-                }
-                
-            case 'video_announce':
-                const metadata = msg.metadata;
-                if (!metadata) return this.escapeHtml(msg.text || '');
-                
-                const currentAddress = authManager.getAddress();
-                const isOwn = msg.sender?.toLowerCase() === currentAddress?.toLowerCase();
-                
-                // Check if video is available (downloaded or local)
-                const videoUrl = mediaController.getFileUrl(metadata.fileId);
-                const isSeeding = mediaController.isSeeding(metadata.fileId);
-                
-                // Escape metadata for safe HTML insertion
-                const safeFileId = this.escapeAttr(metadata.fileId);
-                const safeFileName = this.escapeHtml(metadata.fileName);
-                const safeFileType = this.escapeHtml(metadata.fileType);
-                
-                if (videoUrl) {
-                    // Check if video format is playable in browser
-                    const isPlayable = mediaController.isVideoPlayable(metadata.fileType);
-                    
-                    // Register media for safe lightbox handling
-                    const videoMediaId = this.registerMedia(videoUrl, 'video');
-                    
-                    if (isPlayable && videoMediaId) {
-                        // Video available and playable - show player with seeding badge
-                        return `
-                            <div data-file-id="${safeFileId}" class="video-container">
-                                <div class="relative rounded-lg overflow-hidden bg-black">
-                                    <video src="${videoUrl}" 
-                                           class="w-full max-h-56 cursor-pointer video-player-${safeFileId}" 
-                                           controls
-                                           preload="metadata"
-                                           playsinline>
-                                        <source src="${videoUrl}" type="${safeFileType}">
-                                    </video>
-                                    <button class="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white p-1 rounded transition lightbox-trigger"
-                                            data-media-id="${videoMediaId}"
-                                            title="Fullscreen">
-                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>
-                                        </svg>
-                                    </button>
-                                    ${isSeeding ? `
-                                    <div class="absolute bottom-1 left-1 bg-green-600/80 text-white text-[10px] px-1.5 py-0.5 rounded-full flex items-center gap-1">
-                                        <svg class="w-2.5 h-2.5 animate-pulse" fill="currentColor" viewBox="0 0 20 20">
-                                            <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"/>
-                                        </svg>
-                                        Seeding
-                                    </div>
-                                    ` : ''}
-                                </div>
-                                <div class="flex items-center gap-2 mt-1 px-0.5 text-[11px] text-gray-500">
-                                    <span class="truncate flex-1">${safeFileName}</span>
-                                    <span class="text-gray-600">${this.formatFileSize(metadata.fileSize)}</span>
-                                    <a href="${videoUrl}" download="${safeFileName}" class="text-blue-400 hover:text-blue-300">Save</a>
-                                </div>
-                            </div>
-                        `;
-                    } else {
-                        // Video available but not playable - show download button
-                        return `
-                            <div data-file-id="${safeFileId}" class="video-container">
-                                <div class="flex items-center gap-2 bg-[#1a1a1a] rounded-lg p-2">
-                                    <svg class="w-8 h-8 text-purple-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z"/>
-                                    </svg>
-                                    <div class="flex-1 min-w-0">
-                                        <div class="text-sm text-white truncate">${safeFileName}</div>
-                                        <div class="text-[10px] text-yellow-500/80">Format not playable · ${this.formatFileSize(metadata.fileSize)}</div>
-                                    </div>
-                                    <a href="${videoUrl}" download="${safeFileName}" class="bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded text-xs flex-shrink-0 transition">
-                                        Save
-                                    </a>
-                                </div>
-                                ${isSeeding ? `
-                                <div class="flex items-center gap-1 mt-1 px-0.5">
-                                    <div class="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div>
-                                    <span class="text-[10px] text-green-400">Seeding</span>
-                                </div>
-                                ` : ''}
-                            </div>
-                        `;
-                    }
-                }
-                
-                // Video not available yet - show preview panel
-                return `
-                    <div data-file-id="${safeFileId}" class="video-container">
-                        <!-- Compact Video Preview -->
-                        <div class="relative rounded-lg overflow-hidden bg-[#1a1a1a] cursor-pointer group"
-                             style="aspect-ratio: 16/9; width: 220px;">
-                            
-                            <!-- Video Icon Background -->
-                            <div class="absolute inset-0 flex items-center justify-center">
-                                <svg class="w-10 h-10 text-purple-500/20" fill="currentColor" viewBox="0 0 24 24">
-                                    <path d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z"/>
-                                </svg>
-                            </div>
-                            
-                            <!-- Play Button -->
-                            <button class="download-file-btn absolute inset-0 flex items-center justify-center bg-black/30 hover:bg-black/40 transition-all" 
-                                    data-file-id="${metadata.fileId}">
-                                <div class="play-btn-container transform group-hover:scale-105 transition-transform">
-                                    <div class="w-12 h-12 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center border border-white/30">
-                                        <svg class="w-5 h-5 text-white ml-0.5 download-play-icon" fill="currentColor" viewBox="0 0 24 24">
-                                            <path d="M8 5v14l11-7z"/>
-                                        </svg>
-                                        <div class="download-loading-icon hidden">
-                                            <div class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </button>
-                            
-                            <!-- Progress Overlay -->
-                            <div data-progress-overlay="${metadata.fileId}" class="hidden absolute inset-0 bg-black/70 flex flex-col items-center justify-center">
-                                <div class="text-white text-sm font-medium" data-progress-percent="${metadata.fileId}">0%</div>
-                                <div class="w-2/3 bg-gray-700 rounded-full h-1.5 mt-1.5">
-                                    <div data-progress-fill="${metadata.fileId}" class="bg-blue-500 h-1.5 rounded-full transition-all duration-300" style="width: 0%"></div>
-                                </div>
-                                <div class="text-[10px] text-gray-400 mt-1" data-progress-text="${metadata.fileId}">Starting...</div>
-                            </div>
-                            
-                            <!-- File Size Badge -->
-                            <div class="absolute top-1.5 left-1.5 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1">
-                                <svg class="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
-                                    <path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zm12.553 1.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z"/>
-                                </svg>
-                                ${this.formatFileSize(metadata.fileSize)}
-                            </div>
-                            
-                            <!-- Seeder Badge -->
-                            <div class="absolute top-1.5 right-1.5 bg-black/60 text-gray-400 text-[10px] px-1.5 py-0.5 rounded" data-seeder-count="${metadata.fileId}"></div>
-                        </div>
-                        
-                        <!-- File Name -->
-                        <div class="mt-1 px-0.5 text-[11px] text-gray-500 truncate" title="${this.escapeHtml(metadata.fileName)}">
-                            ${this.escapeHtml(metadata.fileName)}
-                        </div>
-                    </div>
-                `;
-                
-            default:
-                // For text messages, escape HTML, convert newlines to <br>, and wrap emojis
-                const escapedText = this.escapeHtml(msg.text || '');
-                const withLineBreaks = escapedText.replace(/\n/g, '<br>');
-                return this.wrapInlineEmojis(withLineBreaks);
-        }
+        return messageRenderer.renderMessageContent(msg);
     }
     
     /**
      * Format file size for display
      */
     formatFileSize(bytes) {
-        if (bytes < 1024) return bytes + ' B';
-        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-        if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
-        return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+        return messageRenderer.formatFileSize(bytes);
     }
 
     /**
@@ -3304,10 +2322,10 @@ class UIController {
     }
 
     /**
-     * Show new channel modal
+     * Show new channel modal (uses ModalManager for display)
      */
     showNewChannelModal() {
-        this.elements.newChannelModal.classList.remove('hidden');
+        modalManager.show('new-channel-modal');
         this.elements.channelNameInput.value = '';
         this.elements.channelPasswordInput.value = '';
         this.elements.channelMembersInput.value = '';
@@ -3625,56 +2643,41 @@ class UIController {
      * Hide new channel modal
      */
     hideNewChannelModal() {
-        this.elements.newChannelModal.classList.add('hidden');
+        modalManager.hideNewChannelModal();
     }
 
     /**
      * Show join channel modal
      */
     showJoinChannelModal() {
-        this.elements.joinChannelModal?.classList.remove('hidden');
-        if (this.elements.joinStreamIdInput) {
-            this.elements.joinStreamIdInput.value = '';
-        }
-        if (this.elements.joinPasswordInput) {
-            this.elements.joinPasswordInput.value = '';
-        }
-        this.elements.joinPasswordField?.classList.add('hidden');
-        // Reset checkbox
-        const checkbox = document.getElementById('join-has-password');
-        if (checkbox) checkbox.checked = false;
+        modalManager.showJoinChannelModal(
+            this.elements.joinChannelModal,
+            this.elements.joinStreamIdInput,
+            this.elements.joinPasswordInput,
+            this.elements.joinPasswordField
+        );
     }
 
     /**
      * Hide join channel modal
      */
     hideJoinChannelModal() {
-        this.elements.joinChannelModal?.classList.add('hidden');
+        modalManager.hide('join-channel-modal');
     }
 
     /**
      * Show join closed channel modal (with name + classification)
      */
     showJoinClosedChannelModal(streamId = '') {
-        const modal = document.getElementById('join-closed-channel-modal');
-        const idInput = document.getElementById('join-closed-stream-id-input');
-        const nameInput = document.getElementById('join-closed-name-input');
-        
-        if (idInput) idInput.value = streamId;
-        if (nameInput) nameInput.value = '';
-        
-        // Reset classification to personal
+        modalManager.showJoinClosedChannelModal(streamId);
         this.switchJoinClassificationTab('personal');
-        
-        modal?.classList.remove('hidden');
     }
 
     /**
      * Hide join closed channel modal
      */
     hideJoinClosedChannelModal() {
-        const modal = document.getElementById('join-closed-channel-modal');
-        modal?.classList.add('hidden');
+        modalManager.hide('join-closed-channel-modal');
     }
 
     /**
@@ -3876,7 +2879,7 @@ class UIController {
                     checkbox.checked = false;
                     this.elements.joinPasswordField?.classList.add('hidden');
                 }
-                this.elements.joinChannelModal?.classList.remove('hidden');
+                modalManager.show('join-channel-modal');
                 this.showNotification('Enter channel details or check if password is required', 'info');
                 
                 // Clear quick join input
@@ -3917,10 +2920,10 @@ class UIController {
     }
 
     /**
-     * Show browse channels modal
+     * Show browse channels modal (uses ModalManager for display)
      */
     async showBrowseChannelsModal() {
-        this.elements.browseChannelsModal?.classList.remove('hidden');
+        modalManager.show('browse-channels-modal');
         if (this.elements.browseSearchInput) {
             this.elements.browseSearchInput.value = '';
         }
@@ -3944,10 +2947,10 @@ class UIController {
     }
 
     /**
-     * Hide browse channels modal
+     * Hide browse channels modal (delegates to ModalManager)
      */
     hideBrowseChannelsModal() {
-        this.elements.browseChannelsModal?.classList.add('hidden');
+        modalManager.hide('browse-channels-modal');
     }
 
     /**
@@ -4006,7 +3009,7 @@ class UIController {
             politics: 'Politics', news: 'News', tech: 'Tech & AI', crypto: 'Crypto',
             finance: 'Finance', science: 'Science', gaming: 'Gaming', entertainment: 'Entertainment',
             sports: 'Sports', health: 'Health', education: 'Education', comedy: 'Comedy', 
-            general: 'General', other: 'Other'
+            general: 'General', other: 'Other', nsfw: 'NSFW', adult: 'Adult'
         };
         
         // Language display names
@@ -4325,59 +3328,32 @@ class UIController {
     }
 
     /**
-     * Show loading indicator with spinner overlay
-     * @param {string} message - Loading message
+     * Show loading indicator with spinner overlay (delegates to NotificationUI)
      */
     showLoading(message) {
-        const overlay = document.getElementById('loading-overlay');
-        const textEl = document.getElementById('loading-text');
-        if (overlay && textEl) {
-            textEl.textContent = message || 'Loading...';
-            overlay.classList.add('active');
-        }
+        notificationUI.showLoading(message);
     }
 
     /**
-     * Hide loading indicator
+     * Hide loading indicator (delegates to NotificationUI)
      */
     hideLoading() {
-        const overlay = document.getElementById('loading-overlay');
-        if (overlay) {
-            overlay.classList.remove('active');
-        }
+        notificationUI.hideLoading();
     }
 
     /**
      * Show add contact modal
-     * @param {string} address - Contact address to add
      */
     showAddContactModal(address) {
-        const modal = document.getElementById('add-contact-nickname-modal');
-        const addressDisplay = document.getElementById('add-contact-modal-address');
-        const nicknameInput = document.getElementById('add-contact-modal-nickname');
-        
-        if (!modal || !addressDisplay || !nicknameInput) return;
-        
-        // Store the address for later use
+        modalManager.showAddContactModal(address);
         this._pendingContactAddress = address;
-        
-        // Set the address display
-        addressDisplay.textContent = address;
-        nicknameInput.value = '';
-        
-        // Show modal
-        modal.classList.remove('hidden');
-        nicknameInput.focus();
     }
 
     /**
      * Hide add contact modal
      */
     hideAddContactModal() {
-        const modal = document.getElementById('add-contact-nickname-modal');
-        if (modal) {
-            modal.classList.add('hidden');
-        }
+        modalManager.hideAddContactModal();
         this._pendingContactAddress = null;
     }
 
@@ -4387,7 +3363,7 @@ class UIController {
     async confirmAddContact() {
         const nicknameInput = document.getElementById('add-contact-modal-nickname');
         const nickname = nicknameInput?.value?.trim() || null;
-        const address = this._pendingContactAddress;
+        const address = this._pendingContactAddress || modalManager.getPendingData('contactAddress');
         
         if (!address) return;
         
@@ -4398,34 +3374,18 @@ class UIController {
 
     /**
      * Show remove contact confirmation modal
-     * @param {string} address - Contact address to remove
-     * @param {Function} onRemoveCallback - Optional callback after removal
      */
     showRemoveContactModal(address, onRemoveCallback = null) {
-        const modal = document.getElementById('remove-contact-modal');
-        const addressDisplay = document.getElementById('remove-contact-modal-address');
-        
-        if (!modal || !addressDisplay) return;
-        
-        // Store the address and callback for later use
+        modalManager.showRemoveContactModal(address, onRemoveCallback);
         this._pendingRemoveContactAddress = address;
         this._onRemoveContactCallback = onRemoveCallback;
-        
-        // Set the address display
-        addressDisplay.textContent = address;
-        
-        // Show modal
-        modal.classList.remove('hidden');
     }
 
     /**
      * Hide remove contact modal
      */
     hideRemoveContactModal() {
-        const modal = document.getElementById('remove-contact-modal');
-        if (modal) {
-            modal.classList.add('hidden');
-        }
+        modalManager.hideRemoveContactModal();
         this._pendingRemoveContactAddress = null;
         this._onRemoveContactCallback = null;
     }
@@ -4449,102 +3409,25 @@ class UIController {
     }
 
     /**
-     * Show toast notification
-     * @param {string} message - Notification message
-     * @param {string} type - Notification type (success, error, info, warning)
-     * @param {number} duration - Duration in ms (default 3000)
+     * Show toast notification (delegates to NotificationUI)
      */
     showNotification(message, type = 'info', duration = 3000) {
-        const container = document.getElementById('toast-container');
-        if (!container) {
-            Logger.debug(`[${type}] ${message}`);
-            return;
-        }
-
-        const icons = {
-            success: `<svg class="toast-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`,
-            error: `<svg class="toast-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>`,
-            info: `<svg class="toast-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`,
-            warning: `<svg class="toast-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>`
-        };
-
-        const toast = document.createElement('div');
-        toast.className = `toast ${type}`;
-        toast.style.setProperty('--toast-duration', `${duration}ms`);
-        toast.innerHTML = `
-            ${icons[type] || icons.info}
-            <div class="toast-content">
-                <span class="toast-message">${this.escapeHtml(message)}</span>
-            </div>
-            <span class="toast-close" title="Dismiss">
-                <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-            </span>
-            <div class="toast-progress"></div>
-        `;
-        
-        // Close button handler
-        const closeBtn = toast.querySelector('.toast-close');
-        closeBtn?.addEventListener('click', () => {
-            toast.classList.add('toast-exit');
-            setTimeout(() => toast.remove(), 250);
-        });
-        
-        container.appendChild(toast);
-
-        // Auto remove after duration
-        setTimeout(() => {
-            if (toast.parentElement) {
-                toast.classList.add('toast-exit');
-                setTimeout(() => toast.remove(), 250);
-            }
-        }, duration);
+        notificationUI.showNotification(message, type, duration);
     }
 
     /**
-     * Show a persistent loading toast notification (for long operations)
-     * @param {string} message - Loading message
-     * @param {string} subtitle - Optional subtitle with more info
+     * Show a persistent loading toast notification (delegates to NotificationUI)
      * @returns {HTMLElement} - Toast element (call hideLoadingToast to dismiss)
      */
     showLoadingToast(message, subtitle = 'This may take a moment...') {
-        const container = document.getElementById('toast-container');
-        if (!container) {
-            Logger.debug(`[loading] ${message}`);
-            return null;
-        }
-
-        // Remove any existing loading toasts
-        container.querySelectorAll('.toast.loading').forEach(t => t.remove());
-
-        const toast = document.createElement('div');
-        toast.className = 'toast loading';
-        toast.innerHTML = `
-            <svg class="toast-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-            </svg>
-            <div class="toast-content">
-                <span class="toast-message">${this.escapeHtml(message)}</span>
-                ${subtitle ? `<span class="text-[11px] text-white/40 block mt-0.5">${this.escapeHtml(subtitle)}</span>` : ''}
-            </div>
-            <div class="toast-progress"></div>
-        `;
-        
-        container.appendChild(toast);
-        this.currentLoadingToast = toast;
-        return toast;
+        return notificationUI.showLoadingToast(message, subtitle);
     }
 
     /**
-     * Hide the current loading toast
-     * @param {HTMLElement} toast - Optional specific toast to hide
+     * Hide the current loading toast (delegates to NotificationUI)
      */
     hideLoadingToast(toast = null) {
-        const target = toast || this.currentLoadingToast;
-        if (target && target.parentElement) {
-            target.classList.add('toast-exit');
-            setTimeout(() => target.remove(), 250);
-        }
-        this.currentLoadingToast = null;
+        notificationUI.hideLoadingToast(toast);
     }
 
     /**
@@ -4562,27 +3445,6 @@ class UIController {
             'native': `<span class="inline-flex items-center gap-1"><svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1.5l-8 13.5 8 4.5 8-4.5-8-13.5zm0 18l-8-4.5 8 9 8-9-8 4.5z"/></svg>Closed${roIcon}</span>`
         };
         return labels[type] || type;
-    }
-
-    /**
-     * Format Ethereum address
-     * @param {string} address - Full address
-     * @returns {string} - Shortened address
-     */
-    formatAddress(address) {
-        if (!address) return 'Unknown';
-        return `${address.slice(0, 6)}...${address.slice(-4)}`;
-    }
-
-    /**
-     * Escape HTML to prevent XSS
-     * @param {string} text - Text to escape
-     * @returns {string} - Escaped text
-     */
-    escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
     }
 
     /**
@@ -4605,15 +3467,15 @@ class UIController {
         // Reset to link tab
         this.switchInviteTab('link');
 
-        // Show modal
-        this.elements.inviteUsersModal.classList.remove('hidden');
+        // Show modal (using ModalManager)
+        modalManager.show('invite-users-modal');
     }
 
     /**
-     * Hide invite modal
+     * Hide invite modal (delegates to ModalManager)
      */
     hideInviteModal() {
-        this.elements.inviteUsersModal.classList.add('hidden');
+        modalManager.hide('invite-users-modal');
     }
 
     /**
@@ -4762,8 +3624,8 @@ class UIController {
         // Select appropriate starting tab (always info for non-native since members tab is hidden)
         this.selectChannelSettingsTab('info');
 
-        // Show modal
-        this.elements.channelSettingsModal.classList.remove('hidden');
+        // Show modal (using ModalManager)
+        modalManager.show('channel-settings-modal');
 
         // Load members and permissions if native channel
         if (isNative) {
@@ -4814,29 +3676,29 @@ class UIController {
     }
 
     /**
-     * Hide channel settings modal
+     * Hide channel settings modal (delegates to ModalManager)
      */
     hideChannelSettingsModal() {
-        this.elements.channelSettingsModal.classList.add('hidden');;
+        modalManager.hide('channel-settings-modal');
         this.elements.addMemberInput.value = '';
     }
 
     /**
-     * Show delete channel confirmation modal
+     * Show delete channel confirmation modal (uses ModalManager for display)
      */
     showDeleteChannelModal() {
         const currentChannel = channelManager.getCurrentChannel();
         if (!currentChannel) return;
 
         this.elements.deleteChannelName.textContent = currentChannel.name;
-        this.elements.deleteChannelModal.classList.remove('hidden');
+        modalManager.show('delete-channel-modal');
     }
 
     /**
-     * Hide delete channel confirmation modal
+     * Hide delete channel confirmation modal (delegates to ModalManager)
      */
     hideDeleteChannelModal() {
-        this.elements.deleteChannelModal.classList.add('hidden');
+        modalManager.hide('delete-channel-modal');
     }
 
     /**
@@ -5571,489 +4433,50 @@ class UIController {
             this.elements.walletInfo.addEventListener('click', () => this.copyOwnAddress());
         }
 
-        // Initialize export private key functionality
-        this.initExportPrivateKeyUI();
+        // Initialize export private key functionality (delegates to SettingsUI)
+        settingsUI.initExportPrivateKeyUI();
 
-        // Initialize backup/restore functionality
-        this.initBackupRestoreUI();
+        // Initialize backup/restore functionality (delegates to SettingsUI)
+        settingsUI.initBackupRestoreUI((title, desc, confirm) => this.showPasswordPrompt(title, desc, confirm));
 
-        // Initialize delete account functionality
-        this.initDeleteAccountUI();
-    }
+        // Initialize delete account functionality (delegates to SettingsUI)
+        settingsUI.initDeleteAccountUI();
 
-    /**
-     * Initialize export private key UI handlers
-     */
-    initExportPrivateKeyUI() {
-        const exportKeyPassword = document.getElementById('export-key-password');
-        const unlockBtn = document.getElementById('unlock-private-key-btn');
-        const step1 = document.getElementById('export-key-step1');
-        const step2 = document.getElementById('export-key-step2');
-        const privateKeyDisplay = document.getElementById('private-key-display');
-        const toggleVisibilityBtn = document.getElementById('toggle-key-visibility');
-        const copyKeyBtn = document.getElementById('copy-private-key-btn');
-        const copyKeyProgress = document.getElementById('copy-key-progress');
-        const copyKeyText = document.getElementById('copy-key-text');
-        const lockBtn = document.getElementById('lock-private-key-btn');
+        // About button and modal
+        const aboutBtn = document.getElementById('about-btn');
+        const aboutModal = document.getElementById('about-modal');
+        const closeAboutBtn = document.getElementById('close-about-btn');
 
-        let unlockedPrivateKey = null;
-        let holdTimer = null;
-        let isKeyVisible = false;
+        if (aboutBtn && aboutModal) {
+            aboutBtn.addEventListener('click', () => {
+                modalManager.show('about-modal');
+            });
+        }
 
-        // Unlock private key
-        if (unlockBtn) {
-            unlockBtn.addEventListener('click', async () => {
-                const password = exportKeyPassword?.value;
-                if (!password) {
-                    this.showNotification('Please enter your password', 'error');
-                    return;
-                }
-
-                try {
-                    unlockBtn.disabled = true;
-                    unlockBtn.textContent = '🔄 Verifying...';
-                    
-                    unlockedPrivateKey = await authManager.getPrivateKey(password);
-                    
-                    // Show step 2
-                    step1?.classList.add('hidden');
-                    step2?.classList.remove('hidden');
-                    
-                    // Display masked key
-                    if (privateKeyDisplay) {
-                        privateKeyDisplay.value = unlockedPrivateKey;
-                        privateKeyDisplay.type = 'password';
-                        isKeyVisible = false;
-                    }
-                    
-                    this.showNotification('Private key unlocked!', 'success');
-                } catch (error) {
-                    this.showNotification(error.message || 'Failed to unlock', 'error');
-                } finally {
-                    unlockBtn.disabled = false;
-                    unlockBtn.textContent = 'Unlock Key';
-                    if (exportKeyPassword) exportKeyPassword.value = '';
+        if (closeAboutBtn && aboutModal) {
+            closeAboutBtn.addEventListener('click', () => {
+                modalManager.hide('about-modal');
+            });
+            // Close on backdrop click
+            aboutModal.addEventListener('click', (e) => {
+                if (e.target === aboutModal) {
+                    modalManager.hide('about-modal');
                 }
             });
         }
 
-        // Toggle visibility
-        if (toggleVisibilityBtn) {
-            toggleVisibilityBtn.addEventListener('click', () => {
-                if (privateKeyDisplay) {
-                    isKeyVisible = !isKeyVisible;
-                    privateKeyDisplay.type = isKeyVisible ? 'text' : 'password';
-                    toggleVisibilityBtn.innerHTML = isKeyVisible 
-                        ? '<svg class="w-4 h-4 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88"/></svg>'
-                        : '<svg class="w-4 h-4 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>';
+        // NSFW toggle
+        const nsfwToggle = document.getElementById('nsfw-enabled');
+        if (nsfwToggle) {
+            nsfwToggle.addEventListener('change', async (e) => {
+                await secureStorage.setNsfwEnabled(e.target.checked);
+                // Refresh explore view if visible
+                const exploreView = document.querySelector('.explore-view');
+                if (exploreView) {
+                    this.showExploreView();
                 }
             });
         }
-
-        // Long press to copy (2 seconds)
-        if (copyKeyBtn) {
-            const startHold = () => {
-                if (!unlockedPrivateKey) return;
-                
-                // Start progress animation
-                copyKeyProgress?.classList.remove('-translate-x-full');
-                copyKeyProgress?.classList.add('translate-x-0');
-                if (copyKeyText) copyKeyText.textContent = 'Keep holding...';
-
-                holdTimer = setTimeout(async () => {
-                    try {
-                        await navigator.clipboard.writeText(unlockedPrivateKey);
-                        this.showNotification('Private key copied!', 'success');
-                        if (copyKeyText) copyKeyText.textContent = 'Copied!';
-                        
-                        // Reset after 2s
-                        setTimeout(() => {
-                            if (copyKeyText) copyKeyText.textContent = 'Hold to Copy Private Key (2s)';
-                        }, 2000);
-                    } catch (e) {
-                        this.showNotification('Failed to copy', 'error');
-                    }
-                    resetProgress();
-                }, 2000);
-            };
-
-            const resetProgress = () => {
-                if (holdTimer) {
-                    clearTimeout(holdTimer);
-                    holdTimer = null;
-                }
-                copyKeyProgress?.classList.remove('translate-x-0');
-                copyKeyProgress?.classList.add('-translate-x-full');
-                if (copyKeyText && copyKeyText.textContent === 'Keep holding...') {
-                    copyKeyText.textContent = 'Hold to Copy Private Key (2s)';
-                }
-            };
-
-            copyKeyBtn.addEventListener('mousedown', startHold);
-            copyKeyBtn.addEventListener('touchstart', startHold);
-            copyKeyBtn.addEventListener('mouseup', resetProgress);
-            copyKeyBtn.addEventListener('mouseleave', resetProgress);
-            copyKeyBtn.addEventListener('touchend', resetProgress);
-            copyKeyBtn.addEventListener('touchcancel', resetProgress);
-        }
-
-        // Lock (reset to step 1)
-        if (lockBtn) {
-            lockBtn.addEventListener('click', () => {
-                unlockedPrivateKey = null;
-                step2?.classList.add('hidden');
-                step1?.classList.remove('hidden');
-                if (privateKeyDisplay) {
-                    privateKeyDisplay.value = '';
-                    privateKeyDisplay.type = 'password';
-                }
-                isKeyVisible = false;
-                if (toggleVisibilityBtn) toggleVisibilityBtn.innerHTML = '<svg class="w-4 h-4 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>';
-                this.showNotification('Private key locked', 'info');
-            });
-        }
-    }
-
-    /**
-     * Initialize backup/restore UI handlers
-     */
-    initBackupRestoreUI() {
-        const exportBtn = document.getElementById('export-all-data-btn');
-        const importBtn = document.getElementById('import-data-btn');
-        const importFileInput = document.getElementById('import-data-file');
-
-        // Export encrypted data
-        if (exportBtn) {
-            exportBtn.addEventListener('click', async () => {
-                try {
-                    if (!secureStorage.isStorageUnlocked()) {
-                        this.showNotification('Please unlock account first', 'error');
-                        return;
-                    }
-
-                    // Get password for encryption
-                    const password = await this.showPasswordPrompt(
-                        'Encrypt Backup',
-                        'Enter a password to encrypt your backup.\nYou will need this password to restore.',
-                        true
-                    );
-                    if (!password) return;
-
-                    // Get stats for confirmation
-                    const stats = secureStorage.getStats();
-                    const confirmed = confirm(
-                        'Export encrypted backup?\n\n' +
-                        `📁 Channels: ${stats.channels}\n` +
-                        `� Contacts: ${stats.contacts}\n\n` +
-                        'Your data will be encrypted with the password you provided.\n' +
-                        'Note: Messages are stored on Streamr and will be loaded on demand.'
-                    );
-                    if (!confirmed) return;
-
-                    // Export encrypted data
-                    const encryptedData = await secureStorage.exportEncrypted(password);
-                    
-                    // Also include keystores
-                    const keystores = authManager.exportKeystores();
-                    
-                    const fullBackup = {
-                        format: 'pombo-full-backup',
-                        version: 2,
-                        exportedAt: new Date().toISOString(),
-                        keystores: keystores,
-                        encryptedData: encryptedData
-                    };
-
-                    const json = JSON.stringify(fullBackup, null, 2);
-                    const blob = new Blob([json], { type: 'application/json' });
-                    const url = URL.createObjectURL(blob);
-                    
-                    const timestamp = new Date().toISOString().slice(0, 10);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `pombo-backup-encrypted-${timestamp}.json`;
-                    a.click();
-                    
-                    URL.revokeObjectURL(url);
-                    this.showNotification('Encrypted backup exported!', 'success');
-                } catch (error) {
-                    Logger.error('Export failed:', error);
-                    this.showNotification('Failed to export: ' + error.message, 'error');
-                }
-            });
-        }
-
-        // Import encrypted data
-        if (importBtn && importFileInput) {
-            importBtn.addEventListener('click', () => {
-                importFileInput.click();
-            });
-
-            importFileInput.addEventListener('change', async (e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-
-                try {
-                    const text = await file.text();
-                    const data = JSON.parse(text);
-                    
-                    // Handle new encrypted format
-                    if (data.format === 'pombo-full-backup' && data.version === 2) {
-                        await this.handleEncryptedImport(data);
-                    } 
-                    // Handle encrypted data only
-                    else if (data.format === 'pombo-encrypted-backup') {
-                        await this.handleEncryptedDataImport(data);
-                    }
-                    // Handle keystores only
-                    else if (data.format === 'pombo-keystores') {
-                        await this.handleKeystoresImport(data);
-                    }
-                    else {
-                        throw new Error('Unknown backup format');
-                    }
-                } catch (error) {
-                    Logger.error('Import failed:', error);
-                    this.showNotification('Failed to import: ' + error.message, 'error');
-                } finally {
-                    importFileInput.value = '';
-                }
-            });
-        }
-    }
-
-    /**
-     * Initialize delete account UI handlers
-     */
-    initDeleteAccountUI() {
-        const deletePasswordInput = document.getElementById('delete-account-password');
-        const verifyBtn = document.getElementById('verify-delete-account-btn');
-        const step1 = document.getElementById('delete-account-step1');
-        const step2 = document.getElementById('delete-account-step2');
-        const deleteBtn = document.getElementById('delete-account-btn');
-        const deleteProgress = document.getElementById('delete-account-progress');
-        const deleteText = document.getElementById('delete-account-text');
-        const cancelBtn = document.getElementById('cancel-delete-account-btn');
-
-        let isPasswordVerified = false;
-        let holdTimer = null;
-
-        // Verify password
-        if (verifyBtn) {
-            verifyBtn.addEventListener('click', async () => {
-                const password = deletePasswordInput?.value;
-                if (!password) {
-                    this.showNotification('Please enter your password', 'error');
-                    return;
-                }
-
-                try {
-                    verifyBtn.disabled = true;
-                    verifyBtn.textContent = '🔄 Verifying...';
-                    
-                    // Verify password by trying to decrypt
-                    await authManager.getPrivateKey(password);
-                    
-                    isPasswordVerified = true;
-                    
-                    // Show step 2 (confirmation)
-                    step1?.classList.add('hidden');
-                    step2?.classList.remove('hidden');
-                    
-                    this.showNotification('Password verified', 'success');
-                } catch (error) {
-                    this.showNotification('Incorrect password', 'error');
-                } finally {
-                    verifyBtn.disabled = false;
-                    verifyBtn.textContent = 'Verify Password';
-                    if (deletePasswordInput) deletePasswordInput.value = '';
-                }
-            });
-        }
-
-        // Cancel - back to step 1
-        if (cancelBtn) {
-            cancelBtn.addEventListener('click', () => {
-                isPasswordVerified = false;
-                step2?.classList.add('hidden');
-                step1?.classList.remove('hidden');
-            });
-        }
-
-        // Long press to delete (2 seconds)
-        if (deleteBtn) {
-            const startHold = () => {
-                if (!isPasswordVerified) return;
-                
-                // Start progress animation
-                deleteProgress?.classList.remove('-translate-x-full');
-                deleteProgress?.classList.add('translate-x-0');
-                if (deleteText) deleteText.textContent = 'Keep holding...';
-
-                holdTimer = setTimeout(async () => {
-                    try {
-                        const currentAddress = authManager.getAddress();
-                        if (!currentAddress) {
-                            throw new Error('No account connected');
-                        }
-
-                        // 1. Stop presence tracking
-                        channelManager.stopPresenceTracking();
-
-                        // 2. Leave all channels (unsubscribe from Streamr streams)
-                        await channelManager.leaveAllChannels();
-
-                        // 3. Destroy Streamr client completely
-                        await streamrController.disconnect();
-
-                        // 4. Clear seed files for this user from IndexedDB
-                        await mediaController.clearSeedFilesForOwner(currentAddress);
-
-                        // 5. Reset media controller (clear in-memory state)
-                        mediaController.reset();
-
-                        // 6. Delete encrypted storage data for this address
-                        const storageKey = `pombo_secure_${currentAddress.toLowerCase()}`;
-                        localStorage.removeItem(storageKey);
-
-                        // 7. Lock secure storage
-                        secureStorage.lock();
-
-                        // 8. Delete the wallet keystore
-                        authManager.deleteWallet(currentAddress);
-                        
-                        this.showNotification('Account deleted successfully', 'success');
-                        
-                        // Close settings modal
-                        document.getElementById('settings-modal')?.classList.add('hidden');
-                        
-                        // Update UI - clear wallet info and status
-                        this.updateWalletInfo(null);
-                        this.updateNetworkStatus('Disconnected', false);
-                        this.renderChannelList(); // Clear channel list
-                        this.resetToDisconnectedState();
-                        
-                        // Check if there are other accounts
-                        if (authManager.hasSavedWallet()) {
-                            // Show unlock modal for remaining accounts
-                            setTimeout(() => {
-                                window.ethChat?.connectWallet();
-                            }, 500);
-                        }
-                    } catch (e) {
-                        Logger.error('Failed to delete account:', e);
-                        this.showNotification('Failed to delete: ' + e.message, 'error');
-                    }
-                    resetProgress();
-                }, 2000);
-            };
-
-            const resetProgress = () => {
-                if (holdTimer) {
-                    clearTimeout(holdTimer);
-                    holdTimer = null;
-                }
-                deleteProgress?.classList.remove('translate-x-0');
-                deleteProgress?.classList.add('-translate-x-full');
-                if (deleteText && deleteText.textContent === 'Keep holding...') {
-                    deleteText.textContent = 'Hold to Delete (2s)';
-                }
-            };
-
-            deleteBtn.addEventListener('mousedown', startHold);
-            deleteBtn.addEventListener('touchstart', startHold);
-            deleteBtn.addEventListener('mouseup', resetProgress);
-            deleteBtn.addEventListener('mouseleave', resetProgress);
-            deleteBtn.addEventListener('touchend', resetProgress);
-            deleteBtn.addEventListener('touchcancel', resetProgress);
-        }
-    }
-
-    /**
-     * Handle encrypted full backup import
-     */
-    async handleEncryptedImport(data) {
-        // First import keystores (no password needed - already encrypted with wallet password)
-        const keystoresCount = Object.keys(data.keystores?.keystores || {}).length;
-        
-        // Get password for encrypted data
-        const password = await this.showPasswordPrompt(
-            'Decrypt Backup',
-            'Enter the password used to encrypt this backup.',
-            false
-        );
-        if (!password) return;
-
-        if (!secureStorage.isStorageUnlocked()) {
-            this.showNotification('Please unlock account to import data', 'error');
-            return;
-        }
-
-        // Import keystores
-        let keystoresSummary = { keystoresImported: 0 };
-        if (data.keystores && keystoresCount > 0) {
-            keystoresSummary = authManager.importKeystores(data.keystores, true);
-        }
-
-        // Import encrypted data
-        const dataSummary = await secureStorage.importEncrypted(data.encryptedData, password, true);
-
-        this.showNotification(
-            `Imported: ${keystoresSummary.keystoresImported} wallets, ` +
-            `${dataSummary.channelsImported} channels, ` +
-            `${dataSummary.contactsImported} contacts`,
-            'success'
-        );
-
-        // Reload channels if any were imported
-        if (dataSummary.channelsImported > 0) {
-            channelManager.loadChannels();
-            this.renderChannelList();
-        }
-    }
-
-    /**
-     * Handle encrypted data only import
-     */
-    async handleEncryptedDataImport(data) {
-        const password = await this.showPasswordPrompt(
-            'Decrypt Backup',
-            'Enter the password used to encrypt this backup.',
-            false
-        );
-        if (!password) return;
-
-        if (!secureStorage.isStorageUnlocked()) {
-            this.showNotification('Please unlock account to import data', 'error');
-            return;
-        }
-
-        const summary = await secureStorage.importEncrypted(data, password, true);
-
-        this.showNotification(
-            `Imported: ${summary.channelsImported} channels, ${summary.contactsImported} contacts`,
-            'success'
-        );
-
-        if (summary.channelsImported > 0) {
-            channelManager.loadChannels();
-            this.renderChannelList();
-        }
-    }
-
-    /**
-     * Handle keystores only import
-     */
-    async handleKeystoresImport(data) {
-        const confirmed = confirm(
-            'Import wallets from backup?\n\n' +
-            `Wallets found: ${Object.keys(data.keystores || {}).length}\n\n` +
-            'This will merge with existing wallets.'
-        );
-        if (!confirmed) return;
-
-        const summary = authManager.importKeystores(data, true);
-        this.showNotification(`Imported ${summary.keystoresImported} wallets`, 'success');
     }
 
     /**
@@ -6230,6 +4653,12 @@ class UIController {
             }
             await this.updateGraphApiStatus();
 
+            // Update NSFW toggle state
+            const nsfwToggle = document.getElementById('nsfw-enabled');
+            if (nsfwToggle) {
+                nsfwToggle.checked = secureStorage.getNsfwEnabled();
+            }
+
             // Select first tab by default
             this.selectSettingsTab('profile');
 
@@ -6245,7 +4674,7 @@ class UIController {
             const deleteAccountPassword = document.getElementById('delete-account-password');
             if (deleteAccountPassword) deleteAccountPassword.value = '';
 
-            this.elements.settingsModal.classList.remove('hidden');
+            modalManager.show('settings-modal');
         }
     }
 
@@ -6521,10 +4950,10 @@ class UIController {
     }
 
     /**
-     * Hide settings modal
+     * Hide settings modal (delegates to ModalManager)
      */
     hideSettingsModal() {
-        this.elements.settingsModal?.classList.add('hidden');
+        modalManager.hide('settings-modal');
     }
 
     /**
@@ -6609,21 +5038,21 @@ class UIController {
     }
 
     /**
-     * Show contacts modal
+     * Show contacts modal (uses ModalManager for display)
      */
     showContactsModal() {
         if (!this.elements.contactsModal) {
             this.initContactsUI();
         }
         this.renderContactsList();
-        this.elements.contactsModal?.classList.remove('hidden');
+        modalManager.show('contacts-modal');
     }
 
     /**
-     * Hide contacts modal
+     * Hide contacts modal (delegates to ModalManager)
      */
     hideContactsModal() {
-        this.elements.contactsModal?.classList.add('hidden');
+        modalManager.hide('contacts-modal');
         // Clear inputs
         if (this.elements.addContactAddress) this.elements.addContactAddress.value = '';
         if (this.elements.addContactNickname) this.elements.addContactNickname.value = '';

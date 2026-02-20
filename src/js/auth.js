@@ -19,6 +19,7 @@ class AuthManager {
         this.address = null;
         this.signer = null;
         this.currentWalletName = null;
+        this.isGuest = false; // Guest mode flag (ephemeral wallet)
     }
 
     /**
@@ -30,6 +31,7 @@ class AuthManager {
             this.wallet = wallet;
             this.address = wallet.address;
             this.signer = wallet;
+            this.isGuest = false; // Reset guest flag - this is a real account now
 
             Logger.info('Generated local wallet:', this.address);
             Logger.warn('Private key is only stored in memory. Save it to keep access!');
@@ -54,6 +56,7 @@ class AuthManager {
             this.wallet = wallet;
             this.address = wallet.address;
             this.signer = wallet;
+            this.isGuest = false; // Reset guest flag - this is a real account now
 
             Logger.info('Imported wallet:', this.address);
 
@@ -399,6 +402,39 @@ class AuthManager {
     }
 
     /**
+     * Connect as Guest with ephemeral wallet
+     * Wallet is NOT saved - lost on refresh/close
+     * @returns {Object} - { address, signer }
+     */
+    connectAsGuest() {
+        try {
+            const wallet = ethers.Wallet.createRandom();
+            this.wallet = wallet;
+            this.address = wallet.address;
+            this.signer = wallet;
+            this.isGuest = true;
+            this.currentWalletName = 'Guest';
+
+            Logger.info('Connected as Guest:', this.address);
+            return {
+                address: this.address,
+                signer: this.signer
+            };
+        } catch (error) {
+            Logger.error('Failed to create guest wallet:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Check if currently in Guest mode
+     * @returns {boolean}
+     */
+    isGuestMode() {
+        return this.isGuest === true;
+    }
+
+    /**
      * Disconnect wallet
      */
     disconnect() {
@@ -406,6 +442,7 @@ class AuthManager {
         this.address = null;
         this.signer = null;
         this.currentWalletName = null;
+        this.isGuest = false;
         Logger.info('Wallet disconnected');
     }
 

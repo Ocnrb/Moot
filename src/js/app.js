@@ -52,10 +52,13 @@ class App {
             this.initialized = true;
             Logger.info('Pombo - Ready!');
             
-            // Auto-show wallet modal if saved wallets exist
+            // Auto-connect: if saved wallets exist show unlock, otherwise connect as Guest
             if (authManager.hasSavedWallet()) {
                 // Small delay to let UI settle
                 setTimeout(() => this.connectWallet(), 300);
+            } else {
+                // No saved wallets - connect as Guest automatically
+                setTimeout(() => this.connectAsGuest(), 300);
             }
         } catch (error) {
             Logger.error('Initialization failed:', error);
@@ -72,13 +75,9 @@ class App {
         const switchBtn = document.getElementById('switch-wallet');
 
         connectBtn.addEventListener('click', async () => {
-            if (authManager.isConnected()) {
-                // Already connected, show options
-                this.showWalletOptions();
-            } else {
-                // Connect wallet
-                await this.connectWallet();
-            }
+            // Connect or upgrade from Guest to real account
+            // (button is hidden when connected with real account)
+            await this.connectWallet();
         });
 
         disconnectBtn?.addEventListener('click', async () => {
@@ -172,10 +171,40 @@ class App {
     }
 
     /**
+     * Connect as Guest with ephemeral wallet
+     * No password needed, instant connection
+     */
+    async connectAsGuest() {
+        try {
+            uiController.updateNetworkStatus('Connecting as Guest...', false);
+            
+            // Generate ephemeral wallet
+            const { address, signer } = authManager.connectAsGuest();
+            
+            Logger.info('Guest wallet created:', address);
+            
+            // Complete connection flow
+            await this.onWalletConnected(address, signer);
+            
+            Logger.info('Connected as Guest - ready to explore!');
+        } catch (error) {
+            Logger.error('Failed to connect as Guest:', error);
+            uiController.updateNetworkStatus('Failed to connect', false);
+            uiController.showNotification('Failed to connect: ' + error.message, 'error');
+        }
+    }
+
+    /**
      * Connect wallet (generate, import, or load saved)
      */
     async connectWallet() {
         try {
+            // If connected as Guest, show create/import modal to upgrade
+            if (authManager.isGuestMode()) {
+                await this.showCreateWalletModal();
+                return;
+            }
+            
             // Check if there are saved wallets
             const savedWallets = authManager.listSavedWallets();
             
@@ -537,51 +566,6 @@ class App {
     }
 
     /**
-     * Show wallet connection options (legacy - deprecated)
-     * @returns {Promise<string>} - Selected option
-     */
-    async showConnectOptions() {
-        return new Promise((resolve) => {
-            const modal = document.createElement('div');
-            modal.className = 'fixed inset-0 bg-black/80 flex items-center justify-center z-50';
-            modal.innerHTML = `
-                <div class="bg-[#111111] rounded-xl p-5 w-[340px] border border-[#222]">
-                    <h3 class="text-[15px] font-medium mb-3 text-white">Connect Account</h3>
-                    <div class="space-y-2">
-                        <button class="w-full bg-white hover:bg-[#f0f0f0] text-black px-3 py-2.5 rounded-lg text-left transition" data-choice="local">
-                            <div class="text-[13px] font-medium">Generate New Account</div>
-                            <div class="text-[11px] text-[#666]">Create a new account</div>
-                        </button>
-                        <button class="w-full bg-[#1a1a1a] hover:bg-[#202020] border border-[#282828] px-3 py-2.5 rounded-lg text-left transition" data-choice="import">
-                            <div class="text-[13px] font-medium text-white">Import Private Key</div>
-                            <div class="text-[11px] text-[#666]">Use existing account</div>
-                        </button>
-                        ${authManager.hasSavedWallet() ? `
-                        <button class="w-full bg-[#1a1a1a] hover:bg-[#202020] border border-[#282828] px-3 py-2.5 rounded-lg text-left transition" data-choice="load">
-                            <div class="text-[13px] font-medium text-white">Load Saved Account</div>
-                            <div class="text-[11px] text-[#666]">Decrypt from storage</div>
-                        </button>
-                        ` : ''}
-                        <button class="w-full bg-[#1a1a1a] hover:bg-[#202020] border border-[#282828] text-[#888] text-[13px] px-3 py-2 rounded-lg transition mt-1" data-choice="cancel">
-                            Cancel
-                        </button>
-                    </div>
-                </div>
-            `;
-
-            document.body.appendChild(modal);
-
-            modal.querySelectorAll('button[data-choice]').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const choice = e.currentTarget.dataset.choice;
-                    document.body.removeChild(modal);
-                    resolve(choice);
-                });
-            });
-        });
-    }
-
-    /**
      * Show secure input modal (for sensitive data like private keys)
      * @param {string} title - Modal title
      * @param {string} label - Input label
@@ -670,6 +654,12 @@ class App {
      */
     async connectLocal() {
         try {
+            // If upgrading from Guest, disconnect first to cleanup client
+            const wasGuest = authManager.isGuestMode();
+            if (wasGuest) {
+                await this.disconnectWallet();
+            }
+
             const result = authManager.generateLocalWallet();
 
             // Show wallet created modal with secure private key display
@@ -1052,6 +1042,13 @@ class App {
             );
             if (!privateKey) return;
 
+            // If upgrading from Guest, disconnect first to cleanup client
+            // Do this AFTER getting the private key so user doesn't get disconnected if they cancel
+            const wasGuest = authManager.isGuestMode();
+            if (wasGuest) {
+                await this.disconnectWallet();
+            }
+
             const result = authManager.importPrivateKey(privateKey);
 
             // Ask if user wants to save encrypted
@@ -1111,21 +1108,27 @@ class App {
      */
     async onWalletConnected(address, signer) {
         try {
+            const isGuest = authManager.isGuestMode();
+            
             // Update UI
-            uiController.updateWalletInfo(address);
+            uiController.updateWalletInfo(address, isGuest);
             uiController.updateNetworkStatus('Connecting to Streamr...', false);
 
             // Show/hide switch wallet button based on saved wallets count
             const savedWallets = authManager.listSavedWallets();
             uiController.updateSwitchWalletButton(savedWallets.length > 1);
 
-            // Initialize secure storage for this wallet (requires signer for encryption key derivation)
-            await secureStorage.init(signer, address);
+            // Initialize secure storage (Guest uses memory-only mode)
+            if (isGuest) {
+                secureStorage.initAsGuest(address);
+            } else {
+                await secureStorage.init(signer, address);
+            }
 
             // Clear any previously loaded channels (from another wallet)
             channelManager.clearChannels();
 
-            // Load channels for THIS wallet
+            // Load channels for THIS wallet (Guest will have empty list)
             channelManager.loadChannels();
             Logger.info('Loaded channels for wallet:', address);
 
@@ -1188,14 +1191,6 @@ class App {
             uiController.updateNetworkStatus('Failed to connect to Streamr', false);
             throw error;
         }
-    }
-
-    /**
-     * Show wallet options when already connected
-     */
-    showWalletOptions() {
-        const address = authManager.getAddress();
-        alert(`Connected: ${address}\n\nRefresh page to connect a different wallet.`);
     }
 
     /**
@@ -1321,12 +1316,12 @@ class App {
                 window.history.replaceState({}, document.title, window.location.pathname);
 
                 // If wallet already connected, process immediately
+                // Otherwise store for processing after auto-connect (Guest or saved account)
                 if (authManager.isConnected()) {
                     this.showInviteDialog(inviteData);
                 } else {
-                    // Store for later when wallet connects
+                    // Store for later - will be processed in onWalletConnected()
                     this.pendingInvite = inviteData;
-                    uiController.showNotification('Please connect your account to join the channel', 'info');
                 }
             }
         }
@@ -1429,11 +1424,6 @@ class App {
      */
     async joinChannelFromInvite(inviteData) {
         try {
-            if (!authManager.isConnected()) {
-                alert('Please connect your account first!');
-                return;
-            }
-
             uiController.showLoading('Joining channel...');
             await channelManager.joinChannel(inviteData.streamId, inviteData.password, {
                 name: inviteData.name,

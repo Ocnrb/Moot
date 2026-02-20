@@ -15,3 +15,6 @@ export * from './MessageGrouper.js';
 export { modalManager } from './ModalManager.js';
 export { settingsUI } from './SettingsUI.js';
 export { exploreUI } from './ExploreUI.js';
+export { channelSettingsUI } from './ChannelSettingsUI.js';
+export { contactsUI } from './ContactsUI.js';
+export { channelListUI } from './ChannelListUI.js';

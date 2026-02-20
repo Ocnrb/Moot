@@ -34,24 +34,24 @@
         .message-entry { animation: fadeIn 0.3s ease-in-out; max-width: 60%; display: flex; flex-direction: column; position: relative; }
         .own-message { margin-left: auto; align-items: flex-end; }
         .other-message { margin-right: auto; align-items: flex-start; }
-        .message-bubble { padding: 0.75rem 1rem; position: relative; }
+        .message-bubble { padding: 0.2rem 0.7rem; position: relative; }
         
         /* Message grouping - Stack Effect */
-        /* Single message (not grouped) - anchor corner sharp at top */
-        .own-message.msg-group-single .message-bubble { background-color: #272a2e; color: #f0f0f0; border-radius: 1rem 0 1rem 1rem; }
-        .other-message.msg-group-single .message-bubble { background-color: #1e1e1e; color: #d1d5db; border-radius: 0 1rem 1rem 1rem; }
+        /* Single message (not grouped) - only bottom anchor sharp, top fully rounded */
+        .own-message.msg-group-single .message-bubble { background-color: #272a2e; color: #f0f0f0; border-radius: 1rem 1rem 0 1rem; }
+        .other-message.msg-group-single .message-bubble { background-color: #1e1e1e; color: #d1d5db; border-radius: 1rem 1rem 1rem 0; }
         
-        /* First message in group - top anchor sharp + bottom anchor sharp (connects to next) */
-        .own-message.msg-group-first .message-bubble { background-color: #272a2e; color: #f0f0f0; border-radius: 1rem 0 0.25rem 1rem; }
-        .other-message.msg-group-first .message-bubble { background-color: #1e1e1e; color: #d1d5db; border-radius: 0 1rem 1rem 0.25rem; }
+        /* First message in group - top corners rounded, bottom-right small (connection) */
+        .own-message.msg-group-first .message-bubble { background-color: #272a2e; color: #f0f0f0; border-radius: 1rem 1rem 0.25rem 1rem; }
+        .other-message.msg-group-first .message-bubble { background-color: #1e1e1e; color: #d1d5db; border-radius: 1rem 1rem 1rem 0.25rem; }
         
-        /* Middle message in group - both anchor corners sharp (continuation) */
+        /* Middle message in group - both right corners small (continuation) */
         .own-message.msg-group-middle .message-bubble { background-color: #272a2e; color: #f0f0f0; border-radius: 1rem 0.25rem 0.25rem 1rem; }
         .other-message.msg-group-middle .message-bubble { background-color: #1e1e1e; color: #d1d5db; border-radius: 0.25rem 1rem 1rem 0.25rem; }
         
-        /* Last message in group - top anchor sharp, bottom rounded (closes group) */
-        .own-message.msg-group-last .message-bubble { background-color: #272a2e; color: #f0f0f0; border-radius: 1rem 0.25rem 1rem 1rem; }
-        .other-message.msg-group-last .message-bubble { background-color: #1e1e1e; color: #d1d5db; border-radius: 0.25rem 1rem 1rem 1rem; }
+        /* Last message in group - bottom corner sharp (anchor) */
+        .own-message.msg-group-last .message-bubble { background-color: #272a2e; color: #f0f0f0; border-radius: 1rem 0.25rem 0 1rem; }
+        .other-message.msg-group-last .message-bubble { background-color: #1e1e1e; color: #d1d5db; border-radius: 0.25rem 1rem 1rem 0; }
         
         /* Tighter spacing within groups - using margin-top system instead */
         .msg-group-first, .msg-group-middle { margin-bottom: 0; }
@@ -68,9 +68,9 @@
         /* Hide sender name in middle/last of group */
         .msg-group-middle .message-sender-row, .msg-group-last .message-sender-row { display: none; }
         
-        /* Legacy fallback for non-grouped messages */
-        .own-message .message-bubble { background-color: #272a2e; color: #f0f0f0; border-radius: 1rem 0 1rem 1rem; }
-        .other-message .message-bubble { background-color: #1e1e1e; color: #d1d5db; border-radius: 0 1rem 1rem 1rem; }
+        /* Legacy fallback for non-grouped messages (bottom-anchor) */
+        .own-message .message-bubble { background-color: #272a2e; color: #f0f0f0; border-radius: 1rem 0.25rem 0 1rem; }
+        .other-message .message-bubble { background-color: #1e1e1e; color: #d1d5db; border-radius: 0.25rem 1rem 1rem 0; }
         /* Video message styles - compact design */
         .message-entry[data-type="video_announce"] .message-bubble { padding: 0.25rem; background: transparent; }
         .message-entry[data-type="video_announce"] .message-content { font-size: inherit; }
@@ -93,7 +93,7 @@
         
         /* Reactions */
         .reactions-container { display: flex; gap: 4px; flex-wrap: wrap; }
-        .message-footer { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; margin-top: 4px; }
+        .message-footer { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; margin-top: 0px; }
         .message-footer .message-time { flex-shrink: 0; }
         .reaction-badge { background-color: #374151; color: #e0e0e0; padding: 3px 8px; border-radius: 12px; font-size: 0.75rem; cursor: pointer; transition: background-color 0.2s; display: inline-flex; align-items: center; gap: 4px; }
         .reaction-badge .reaction-emoji { font-size: 1.2rem; line-height: 1; }

@@ -17,6 +17,7 @@ class SecureStorage {
         this.address = null;          // Current wallet address
         this.isUnlocked = false;      // Whether storage is decrypted
         this.cache = null;            // Decrypted data cache
+        this.isGuestMode = false;     // Guest mode - no persistence
         this.STORAGE_PREFIX = 'pombo_secure_';
         this.PBKDF2_ITERATIONS = 100000;
     }
@@ -93,6 +94,34 @@ class SecureStorage {
             Logger.error('Failed to initialize secure storage:', error);
             throw error;
         }
+    }
+
+    /**
+     * Initialize secure storage for Guest mode (memory only, no persistence)
+     * @param {string} address - Guest wallet address
+     */
+    initAsGuest(address) {
+        this.address = address.toLowerCase();
+        this.isGuestMode = true;
+        this.isUnlocked = true;
+        this.storageKey = null; // No encryption needed for in-memory only
+        
+        // Initialize empty cache in memory (never persisted)
+        this.cache = {
+            channels: [],
+            trustedContacts: {},
+            ensCache: {},
+            username: null,
+            graphApiKey: null,
+            sessionData: null,
+            channelLastAccess: {},
+            channelOrder: [],
+            lastOpenedChannel: null,
+            version: 2
+        };
+        
+        Logger.info('🔓 Guest storage initialized (memory only):', this.address.slice(0, 8) + '...');
+        return true;
     }
 
     /**
@@ -200,6 +229,12 @@ class SecureStorage {
      * Save encrypted data to localStorage
      */
     async saveToStorage() {
+        // Guest mode: keep in memory only, don't persist
+        if (this.isGuestMode) {
+            Logger.debug('💾 Guest mode - data kept in memory only');
+            return;
+        }
+        
         if (!this.isUnlocked || !this.cache) {
             Logger.warn('Cannot save - storage not unlocked');
             return;
@@ -458,6 +493,7 @@ class SecureStorage {
         this.cache = null;
         this.isUnlocked = false;
         this.address = null;
+        this.isGuestMode = false;
         Logger.info('🔒 Secure storage locked');
     }
 

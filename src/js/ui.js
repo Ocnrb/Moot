@@ -287,7 +287,12 @@ class UIController {
             replyBar: document.getElementById('reply-bar'),
             replyToName: document.getElementById('reply-to-name'),
             replyToText: document.getElementById('reply-to-text'),
-            replyBarClose: document.getElementById('reply-bar-close')
+            replyBarClose: document.getElementById('reply-bar-close'),
+
+            // Mobile navigation
+            sidebar: document.getElementById('sidebar'),
+            chatArea: document.getElementById('chat-area'),
+            closeChannelBtnDesktop: document.getElementById('close-channel-btn-desktop')
         };
 
         // Set element references for UI modules
@@ -433,8 +438,15 @@ class UIController {
             if (hasInput) {
                 this.handleQuickJoin();
             } else {
-                // No input: go to Explore view (deselect channel)
-                this.deselectChannel();
+                // No input: show Explore
+                // Desktop: show inline in central container
+                // Mobile: show modal
+                const isMobile = window.innerWidth < 768;
+                if (isMobile) {
+                    this.showBrowseChannelsModal();
+                } else {
+                    this.deselectChannel();
+                }
             }
         });
 
@@ -614,9 +626,16 @@ class UIController {
             });
         }
 
-        // Close channel button (X)
+        // Close channel button (X) - handles both mobile (left) and desktop (right) buttons
         if (this.elements.closeChannelBtn) {
             this.elements.closeChannelBtn.addEventListener('click', async () => {
+                await this.deselectChannel();
+            });
+        }
+        
+        // Desktop close channel button
+        if (this.elements.closeChannelBtnDesktop) {
+            this.elements.closeChannelBtnDesktop.addEventListener('click', async () => {
                 await this.deselectChannel();
             });
         }
@@ -936,9 +955,12 @@ class UIController {
                 this.elements.channelMenuBtn.classList.remove('hidden');
             }
 
-            // Show close channel button
+            // Show close channel button (both mobile and desktop)
             if (this.elements.closeChannelBtn) {
                 this.elements.closeChannelBtn.classList.remove('hidden');
+            }
+            if (this.elements.closeChannelBtnDesktop) {
+                this.elements.closeChannelBtnDesktop.classList.remove('hidden');
             }
             
             // Show online users container
@@ -965,6 +987,9 @@ class UIController {
             
             // Pre-load DELETE permission in background for faster settings modal
             channelManager.preloadDeletePermission(streamId);
+            
+            // Mobile: navigate to chat view
+            this.openChatView();
         }
     }
 
@@ -994,6 +1019,7 @@ class UIController {
         this.elements.inviteUsersBtn?.classList.add('hidden');
         this.elements.channelMenuBtn?.classList.add('hidden');
         this.elements.closeChannelBtn?.classList.add('hidden');
+        this.elements.closeChannelBtnDesktop?.classList.add('hidden');
         this.elements.onlineHeader?.classList.add('hidden');
         this.elements.onlineHeader?.classList.remove('flex');
         this.elements.onlineSeparator?.classList.add('hidden');
@@ -1013,6 +1039,9 @@ class UIController {
         document.querySelectorAll('.channel-item').forEach(item => {
             item.classList.remove('bg-[#252525]');
         });
+        
+        // Mobile: navigate back to sidebar
+        this.closeChatView();
     }
 
     /**
@@ -1047,6 +1076,7 @@ class UIController {
         this.elements.inviteUsersBtn?.classList.add('hidden');
         this.elements.channelMenuBtn?.classList.add('hidden');
         this.elements.closeChannelBtn?.classList.add('hidden');
+        this.elements.closeChannelBtnDesktop?.classList.add('hidden');
         this.elements.onlineHeader?.classList.add('hidden');
         this.elements.onlineHeader?.classList.remove('flex');
         this.elements.onlineSeparator?.classList.add('hidden');
@@ -1091,6 +1121,7 @@ class UIController {
         this.elements.inviteUsersBtn?.classList.add('hidden');
         this.elements.channelMenuBtn?.classList.add('hidden');
         this.elements.closeChannelBtn?.classList.add('hidden');
+        this.elements.closeChannelBtnDesktop?.classList.add('hidden');
         this.elements.onlineHeader?.classList.add('hidden');
         this.elements.onlineSeparator?.classList.add('hidden');
         
@@ -2170,6 +2201,39 @@ class UIController {
         } finally {
             // Always unlock sending state
             this.isSending = false;
+        }
+    }
+
+    // =========================================
+    // Mobile Navigation Methods
+    // =========================================
+
+    /**
+     * Check if we're on mobile viewport
+     */
+    isMobileView() {
+        return window.innerWidth < 768;
+    }
+
+    /**
+     * Open chat view (mobile: push navigation from sidebar)
+     */
+    openChatView() {
+        if (this.isMobileView()) {
+            this.elements.sidebar?.classList.add('chat-active');
+            this.elements.chatArea?.classList.add('active');
+            document.body.classList.add('chat-open');
+        }
+    }
+
+    /**
+     * Close chat view and return to sidebar (mobile back navigation)
+     */
+    closeChatView() {
+        if (this.isMobileView()) {
+            this.elements.sidebar?.classList.remove('chat-active');
+            this.elements.chatArea?.classList.remove('active');
+            document.body.classList.remove('chat-open');
         }
     }
 

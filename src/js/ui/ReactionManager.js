@@ -328,7 +328,15 @@ class ReactionManager {
             const newBtn = btn.cloneNode(true);
             btn.parentNode.replaceChild(newBtn, btn);
             
+            // Desktop: show on hover
             newBtn.addEventListener('mouseenter', (e) => {
+                const msgId = newBtn.dataset.msgId;
+                this.showReactionPicker(e, msgId, newBtn);
+            });
+            
+            // Mobile: show on tap
+            newBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
                 const msgId = newBtn.dataset.msgId;
                 this.showReactionPicker(e, msgId, newBtn);
             });

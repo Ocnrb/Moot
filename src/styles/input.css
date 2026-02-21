@@ -2,6 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Note: Component styles are in components.css (loaded separately in HTML) */
+
 /* Dark select dropdowns */
 select {
     -webkit-appearance: none;

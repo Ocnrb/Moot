@@ -1236,10 +1236,6 @@ video {
   flex: 1 1 0%;
 }
 
-.flex-shrink {
-  flex-shrink: 1;
-}
-
 .flex-shrink-0 {
   flex-shrink: 0;
 }
@@ -2543,13 +2539,11 @@ video {
   transition-duration: 2000ms;
 }
 
-.ease-in-out {
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-}
-
 .ease-out {
   transition-timing-function: cubic-bezier(0, 0, 0.2, 1);
 }
+
+/* Note: Component styles are in components.css (loaded separately in HTML) */
 
 /* Dark select dropdowns */
 

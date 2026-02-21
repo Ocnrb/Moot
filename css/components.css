@@ -1,0 +1,1344 @@
+/* ===========================================
+   Pombo - Component Styles
+   Extracted from inline styles for better maintainability
+   =========================================== */
+
+/* ----- Base Layout ----- */
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: #0d0d0d;
+    color: #e0e0e0;
+    margin: 0;
+    padding: 0;
+}
+
+.app-container {
+    height: calc(100vh - 3.5rem);
+}
+
+.chat-container {
+    height: calc(100vh - 3.5rem);
+}
+
+.messages-area {
+    height: calc(100% - 120px);
+    background-color: #161616;
+}
+
+/* ----- Message Styles ----- */
+.message-entry {
+    animation: fadeIn 0.3s ease-in-out;
+    max-width: 60%;
+    display: flex;
+    flex-direction: row;
+    align-items: flex-end;
+    gap: 8px;
+    position: relative;
+    width: fit-content;
+}
+
+.own-message {
+    margin-left: auto;
+}
+
+.other-message {
+    margin-right: auto;
+}
+
+/* Desktop: all messages aligned to left, same style as received */
+@media (min-width: 768px) {
+    .own-message {
+        margin-left: 0;
+        margin-right: auto;
+        flex-direction: row;
+    }
+    
+    /* Move avatar to left on desktop */
+    .own-message .message-avatar {
+        order: -1;
+    }
+    
+    /* Flip bubble corners to left-anchor style */
+    .own-message.msg-group-single .message-bubble {
+        border-radius: 1rem 1rem 1rem 0;
+    }
+    
+    .own-message.msg-group-first .message-bubble {
+        border-radius: 1rem 1rem 1rem 0.25rem;
+    }
+    
+    .own-message.msg-group-middle .message-bubble {
+        border-radius: 0.25rem 1rem 1rem 0.25rem;
+    }
+    
+    .own-message.msg-group-last .message-bubble {
+        border-radius: 0.25rem 1rem 1rem 0;
+    }
+}
+
+.message-bubble {
+    padding: 0.2rem 0.7rem;
+    position: relative;
+}
+
+/* ----- Message Grouping - Stack Effect ----- */
+
+/* Single message (not grouped) - only bottom anchor sharp, top fully rounded */
+.own-message.msg-group-single .message-bubble {
+    background-color: #272a2e;
+    color: #f0f0f0;
+    border-radius: 1rem 1rem 0 1rem;
+}
+
+.other-message.msg-group-single .message-bubble {
+    background-color: #1e1e1e;
+    color: #d1d5db;
+    border-radius: 1rem 1rem 1rem 0;
+}
+
+/* First message in group - top corners rounded, bottom-right small (connection) */
+.own-message.msg-group-first .message-bubble {
+    background-color: #272a2e;
+    color: #f0f0f0;
+    border-radius: 1rem 1rem 0.25rem 1rem;
+}
+
+.other-message.msg-group-first .message-bubble {
+    background-color: #1e1e1e;
+    color: #d1d5db;
+    border-radius: 1rem 1rem 1rem 0.25rem;
+}
+
+/* Middle message in group - both right corners small (continuation) */
+.own-message.msg-group-middle .message-bubble {
+    background-color: #272a2e;
+    color: #f0f0f0;
+    border-radius: 1rem 0.25rem 0.25rem 1rem;
+}
+
+.other-message.msg-group-middle .message-bubble {
+    background-color: #1e1e1e;
+    color: #d1d5db;
+    border-radius: 0.25rem 1rem 1rem 0.25rem;
+}
+
+/* Last message in group - bottom corner sharp (anchor) */
+.own-message.msg-group-last .message-bubble {
+    background-color: #272a2e;
+    color: #f0f0f0;
+    border-radius: 1rem 0.25rem 0 1rem;
+}
+
+.other-message.msg-group-last .message-bubble {
+    background-color: #1e1e1e;
+    color: #d1d5db;
+    border-radius: 0.25rem 1rem 1rem 0;
+}
+
+/* Tighter spacing within groups - using margin-top system instead */
+.msg-group-first,
+.msg-group-middle {
+    margin-bottom: 0;
+}
+
+.msg-group-last,
+.msg-group-single {
+    margin-bottom: 0;
+}
+
+/* ----- 3-level spacing system (margin-top) ----- */
+
+/* Stack: same sender consecutive - tight (2-4px) */
+.spacing-stack {
+    margin-top: 0.125rem;
+}
+
+/* Ping-pong: alternating sides - medium (12-16px) */
+.spacing-ping-pong {
+    margin-top: 0.875rem;
+}
+
+/* Same side, different sender - larger (16-24px) */
+.spacing-same-side {
+    margin-top: 1.25rem;
+}
+
+/* Hide sender name in middle/last of group */
+.msg-group-middle .message-sender-row,
+.msg-group-last .message-sender-row {
+    display: none;
+}
+
+/* ----- Message Avatars ----- */
+.message-avatar {
+    width: 46px;
+    height: 46px;
+    flex-shrink: 0;
+    align-self: flex-end;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.message-avatar svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.message-avatar-hidden {
+    opacity: 0;
+}
+
+/* ----- Video & Image Message Styles ----- */
+.message-entry[data-type="video_announce"] .message-bubble {
+    padding: 0.25rem;
+    background: transparent;
+}
+
+.message-entry[data-type="video_announce"] .message-content {
+    font-size: inherit;
+}
+
+.message-entry[data-type="video_announce"].own-message .message-bubble,
+.message-entry[data-type="video_announce"].other-message .message-bubble {
+    background-color: transparent;
+}
+
+.message-entry[data-type="image"] .message-bubble {
+    padding: 0.25rem;
+    background: transparent;
+}
+
+.message-entry[data-type="image"].own-message .message-bubble,
+.message-entry[data-type="image"].other-message .message-bubble {
+    background-color: transparent;
+}
+
+.video-container {
+    max-width: 480px;
+}
+
+/* ----- Message Content ----- */
+.message-content {
+    font-size: 0.95rem;
+    line-height: 1.4rem;
+    word-wrap: break-word;
+}
+
+/* Inline emojis - slightly larger than text */
+.message-content .inline-emoji {
+    font-size: 1.2em;
+    vertical-align: -0.15em;
+    line-height: 1;
+}
+
+/* Emoji-only messages - larger emojis, no bubble */
+.message-entry[data-emoji-only="true"] .message-bubble,
+.message-entry[data-emoji-only="many"] .message-bubble {
+    background: transparent !important;
+    padding: 0.25rem 0.5rem;
+}
+
+.message-entry[data-emoji-only="true"] .message-content {
+    font-size: 2.0rem;
+    line-height: 1.3;
+}
+
+.message-entry[data-emoji-only="many"] .message-content {
+    font-size: 1.6rem;
+    line-height: 1.3;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(5px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ----- Reactions ----- */
+.reactions-container {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.message-footer {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 0px;
+}
+
+.message-footer .message-time {
+    flex-shrink: 0;
+}
+
+.reaction-badge {
+    background-color: #374151;
+    color: #e0e0e0;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.reaction-badge .reaction-emoji {
+    font-size: 1.2rem;
+    line-height: 1;
+}
+
+.reaction-badge:hover {
+    background-color: #4b5563;
+}
+
+.reaction-badge.user-reacted {
+    background-color: #3e527b;
+}
+
+/* ----- Message Actions ----- */
+.react-trigger,
+.reply-trigger {
+    opacity: 0;
+    transition: opacity 0.15s;
+    cursor: pointer;
+    color: #555;
+    user-select: none;
+    position: absolute;
+    display: flex;
+    align-items: center;
+}
+
+.react-trigger {
+    bottom: 4px;
+}
+
+.reply-trigger {
+    bottom: 28px;
+}
+
+.own-message .react-trigger,
+.own-message .reply-trigger {
+    left: -28px;
+}
+
+.other-message .react-trigger,
+.other-message .reply-trigger {
+    right: -28px;
+}
+
+.react-trigger svg,
+.reply-trigger svg {
+    display: block;
+    width: 20px;
+    height: 20px;
+}
+
+.message-bubble:hover .react-trigger,
+.message-bubble:hover .reply-trigger {
+    opacity: 1;
+}
+
+.react-trigger:hover,
+.reply-trigger:hover {
+    color: #888;
+}
+
+/* ----- Reply Preview ----- */
+.reply-preview {
+    background: #252525;
+    border-left: 2px solid #555;
+    padding: 4px 8px;
+    margin-bottom: 6px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: #888;
+    cursor: pointer;
+    max-width: 280px;
+}
+
+.reply-preview:hover {
+    background: #303030;
+}
+
+.reply-preview-name {
+    color: #aaa;
+    font-weight: 500;
+    font-size: 0.75rem;
+}
+
+.reply-preview-text {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+    margin-top: 2px;
+}
+
+/* ----- Reply Bar ----- */
+.reply-bar {
+    background: #1a1a1a;
+    padding: 8px 12px;
+    border-top: 1px solid #333;
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.reply-bar.active {
+    display: flex;
+}
+
+.reply-bar-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+}
+
+.reply-bar-label {
+    font-size: 0.7rem;
+    color: #666;
+}
+
+.reply-bar-name {
+    font-size: 0.75rem;
+    color: #888;
+    font-weight: 500;
+}
+
+.reply-bar-text {
+    font-size: 0.8rem;
+    color: #aaa;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.reply-bar-close {
+    cursor: pointer;
+    color: #555;
+    padding: 4px;
+    border-radius: 4px;
+    transition: all 0.15s;
+}
+
+.reply-bar-close:hover {
+    color: #aaa;
+    background: #333;
+}
+
+/* ----- Message Highlight ----- */
+.message-highlight {
+    animation: highlightPulse 1.5s ease-out;
+}
+
+@keyframes highlightPulse {
+    0%, 100% {
+        background: transparent;
+    }
+    30% {
+        background: rgba(255, 255, 255, 0.1);
+    }
+}
+
+/* ----- Date Separator ----- */
+.date-separator {
+    display: flex;
+    justify-content: center;
+    margin: 1rem 0;
+}
+
+.date-pill {
+    background-color: #252525;
+    color: #888;
+    font-size: 0.75rem;
+    padding: 4px 12px;
+    border-radius: 12px;
+}
+
+/* ----- Reaction Picker ----- */
+.reaction-picker {
+    position: fixed;
+    background-color: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 0.5rem;
+    padding: 0.5rem;
+    z-index: 100;
+    display: none;
+    flex-wrap: wrap;
+    gap: 4px;
+    max-width: 220px;
+}
+
+.reaction-picker span {
+    cursor: pointer;
+    font-size: 1.4rem;
+    padding: 2px;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+}
+
+.reaction-picker span:hover {
+    background-color: #374151;
+}
+
+/* ----- Emoji Picker ----- */
+.emoji-picker {
+    position: absolute;
+    bottom: 50px;
+    left: 10px;
+    background-color: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 0.5rem;
+    padding: 0.5rem;
+    z-index: 10;
+    display: none;
+    flex-wrap: wrap;
+    max-width: 320px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.emoji-picker span {
+    cursor: pointer;
+    margin: 2px;
+    font-size: 1.4rem;
+}
+
+.emoji-picker span:hover {
+    background-color: #374151;
+    border-radius: 4px;
+}
+
+/* ----- Typing Indicator ----- */
+@keyframes bounce {
+    0%, 80%, 100% {
+        transform: scale(0);
+    }
+    40% {
+        transform: scale(1.0);
+    }
+}
+
+.typing-dot {
+    width: 8px;
+    height: 8px;
+    background-color: #888;
+    border-radius: 50%;
+    display: inline-block;
+    margin: 0 2px;
+    animation: bounce 1.4s infinite ease-in-out both;
+}
+
+.typing-dot:nth-child(1) {
+    animation-delay: -0.32s;
+}
+
+.typing-dot:nth-child(2) {
+    animation-delay: -0.16s;
+}
+
+/* ----- Input Buttons ----- */
+.input-button {
+    background-color: #374151;
+    color: white;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 9999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s;
+    cursor: pointer;
+}
+
+.input-button:hover {
+    background-color: #4b5563;
+}
+
+/* ----- Send Button ----- */
+#send-message-btn {
+    background-color: transparent;
+    color: #FF5C00;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: background-color 0.12s, color 0.12s, transform 0.08s;
+}
+
+#send-message-btn svg {
+    display: block;
+}
+
+#send-message-btn:hover {
+    color: #FF7A33;
+    background-color: rgba(255, 92, 0, 0.08);
+}
+
+#send-message-btn:active {
+    transform: translateY(1px);
+}
+
+/* ----- Toast Notifications ----- */
+.toast-container {
+    position: fixed;
+    top: 1.8rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    max-width: 380px;
+    width: calc(100% - 2rem);
+    pointer-events: none;
+}
+
+.toast {
+    position: relative;
+    padding: 0.875rem 1rem;
+    border-radius: 0.75rem;
+    color: #e5e5e5;
+    font-size: 0.8125rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    animation: toastSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    background-color: #1a1a1a;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2);
+    overflow: hidden;
+    pointer-events: auto;
+}
+
+.toast-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+.toast-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.toast-message {
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+.toast-close {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.3);
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.15s;
+    opacity: 0;
+}
+
+.toast:hover .toast-close {
+    opacity: 1;
+}
+
+.toast-close:hover {
+    color: rgba(255, 255, 255, 0.7);
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.toast-progress {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    height: 2px;
+    background: rgba(255, 255, 255, 0.15);
+    animation: toastProgress var(--toast-duration, 3000ms) linear forwards;
+}
+
+/* Toast variants */
+.toast.success .toast-icon {
+    color: #4ade80;
+}
+
+.toast.success .toast-progress {
+    background: #4ade80;
+}
+
+.toast.error .toast-icon {
+    color: #f87171;
+}
+
+.toast.error .toast-progress {
+    background: #f87171;
+}
+
+.toast.info .toast-icon {
+    color: #60a5fa;
+}
+
+.toast.info .toast-progress {
+    background: #60a5fa;
+}
+
+.toast.warning .toast-icon {
+    color: #fbbf24;
+}
+
+.toast.warning .toast-progress {
+    background: #fbbf24;
+}
+
+.toast.invite {
+    border-color: rgba(6, 182, 212, 0.3);
+}
+
+.toast.invite .toast-icon {
+    color: #22d3ee;
+}
+
+.toast.invite .toast-progress {
+    background: #22d3ee;
+}
+
+.toast.loading {
+    border-color: rgba(255, 92, 0, 0.2);
+}
+
+.toast.loading .toast-icon {
+    color: #ff5c00;
+}
+
+.toast.loading .toast-progress {
+    background: linear-gradient(90deg, transparent, #ff5c00, transparent);
+    width: 100% !important;
+    animation: toastLoadingProgress 1.5s ease-in-out infinite;
+}
+
+.toast-exit {
+    animation: toastSlideOut 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes toastSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-16px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes toastSlideOut {
+    from {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(-16px);
+    }
+}
+
+@keyframes toastProgress {
+    from {
+        width: 100%;
+    }
+    to {
+        width: 0%;
+    }
+}
+
+@keyframes toastLoadingProgress {
+    0% {
+        transform: translateX(-100%);
+    }
+    100% {
+        transform: translateX(100%);
+    }
+}
+
+/* ----- Loading Spinner Overlay ----- */
+.loading-overlay {
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.7);
+    z-index: 9998;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.loading-overlay.active {
+    display: flex;
+}
+
+.spinner {
+    width: 48px;
+    height: 48px;
+    border: 4px solid #333;
+    border-top-color: #22d3ee;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.loading-text {
+    color: #e0e0e0;
+    font-size: 0.9rem;
+}
+
+/* ----- Scrollbar ----- */
+::-webkit-scrollbar {
+    width: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: #1f1f1f;
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+    background-color: #4b5563;
+    border-radius: 3px;
+}
+
+/* ----- Online Users ----- */
+.user-item {
+    display: flex;
+    align-items: center;
+    margin-bottom: 4px;
+    font-size: 0.8rem;
+}
+
+#online-users-list::-webkit-scrollbar {
+    width: 4px;
+}
+
+#online-users-list::-webkit-scrollbar-thumb {
+    background-color: #4b5563;
+    border-radius: 2px;
+}
+
+.rotate-90 {
+    transform: rotate(90deg);
+    display: inline-block;
+}
+
+.rotate-180 {
+    transform: rotate(180deg);
+}
+
+/* ----- Custom Tooltip ----- */
+.tooltip {
+    position: relative;
+    cursor: help;
+}
+
+.tooltip::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: #252525;
+    color: #aaa;
+    font-size: 0.7rem;
+    padding: 4px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.15s, visibility 0.15s;
+    pointer-events: none;
+    z-index: 100;
+}
+
+.tooltip::before {
+    content: '';
+    position: absolute;
+    bottom: calc(100% + 2px);
+    left: 50%;
+    transform: translateX(-50%);
+    border: 4px solid transparent;
+    border-top-color: #252525;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.15s, visibility 0.15s;
+    pointer-events: none;
+    z-index: 100;
+}
+
+.tooltip:hover::after,
+.tooltip:hover::before {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* ===========================================
+   RESPONSIVE STYLES - Mobile & Tablet
+   Desktop styles remain unchanged above
+   =========================================== */
+
+/* ----- Chat area visibility classes for mobile ----- */
+.chat-area {
+    transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+/* ===========================================
+   TABLET (768px - 1023px)
+   Split view with narrower sidebar
+   =========================================== */
+@media (max-width: 1023px) {
+    /* Narrower sidebar on tablet */
+    .sidebar {
+        width: 280px;
+    }
+    
+    /* Hide Pombo text */
+    .header-brand-text {
+        display: none;
+    }
+    
+    /* Smaller logo */
+    .header-logo {
+        width: 2.5rem;
+        height: 2.5rem;
+    }
+}
+
+/* ===========================================
+   MOBILE (< 768px)
+   Sidebar = initial view, Chat = push navigation
+   =========================================== */
+@media (max-width: 767px) {
+    /* Use dynamic viewport height for mobile browsers */
+    body {
+        height: 100dvh;
+    }
+    
+    .app-container {
+        height: calc(100dvh - 3.5rem);
+        position: relative;
+        overflow: hidden;
+    }
+    
+    /* Header adjustments */
+    header {
+        padding-left: 0.5rem;
+        padding-right: 0.75rem;
+        height: 3.5rem;
+    }
+    
+    /* Smaller logo on mobile */
+    .header-logo {
+        width: 2rem;
+        height: 2rem;
+    }
+    
+    /* Hide wallet address text */
+    #wallet-info {
+        max-width: 80px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: 0.75rem;
+    }
+    
+    /* ----- SIDEBAR: Full screen initial view ----- */
+    .sidebar {
+        position: absolute;
+        inset: 0;
+        width: 100% !important;
+        max-width: 100%;
+        z-index: 30;
+        border-right: none;
+        transform: translateX(0);
+        transition: transform 0.3s ease;
+    }
+    
+    /* Hide sidebar when chat is open */
+    .sidebar.chat-active {
+        transform: translateX(-100%);
+    }
+    
+    /* ----- CHAT AREA: Push navigation ----- */
+    .chat-area {
+        position: absolute;
+        inset: 0;
+        z-index: 20;
+        transform: translateX(100%);
+        background-color: #121212;
+    }
+    
+    /* Show chat when active */
+    .chat-area.active {
+        transform: translateX(0);
+        z-index: 35;
+    }
+    
+    /* ----- HIDE MAIN HEADER WHEN CHAT IS ACTIVE ----- */
+    body.chat-open header {
+        display: none !important;
+    }
+    
+    body.chat-open .app-container {
+        height: 100dvh;
+    }
+    
+    /* ----- CLOSE BUTTON POSITIONING ----- */
+    /* Show mobile close button (left side) on mobile */
+    .mobile-close-btn {
+        display: flex !important;
+        margin-right: 0.5rem;
+        margin-left: -0.5rem;
+    }
+    
+    /* Hide desktop close button on mobile */
+    .desktop-close-btn {
+        display: none !important;
+    }
+    
+    /* ----- INPUT BUTTONS SMALLER ON MOBILE ----- */
+    .input-btn-wrapper .input-button,
+    .input-btn-wrapper.input-button {
+        width: 2rem;
+        height: 2rem;
+    }
+    
+    .input-btn-wrapper .input-button svg,
+    .input-btn-wrapper.input-button svg {
+        width: 1.125rem;
+        height: 1.125rem;
+    }
+    
+    /* Message input container bottom padding */
+    #message-input-container {
+        padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
+    }
+    
+    /* Hide disconnect button text on mobile */
+    #disconnect-wallet span {
+        display: none;
+    }
+    
+    #disconnect-wallet {
+        padding: 0.5rem;
+    }
+    
+    /* Show sidebar footer buttons on mobile */
+    #contacts-btn,
+    #settings-btn {
+        display: flex !important;
+    }
+    
+    /* Channel list items taller on mobile */
+    #channel-list .channel-item {
+        padding-top: 0.875rem;
+        padding-bottom: 0.875rem;
+    }
+    
+    /* Chat header adjustments */
+    #chat-header {
+        padding: 0.75rem 1rem;
+    }
+    
+    #current-channel-name {
+        font-size: 1rem;
+    }
+    
+    /* Messages take more width on mobile */
+    .message-entry {
+        max-width: 85%;
+    }
+    
+    /* Smaller message avatars */
+    .message-avatar {
+        width: 36px;
+        height: 36px;
+    }
+    
+    /* Message input area - fixed at bottom with keyboard support */
+    #message-input-container {
+        padding: 0.5rem;
+        padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+    }
+    
+    /* Messages container scrollable */
+    #messages-container {
+        flex: 1;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    /* Video container smaller on mobile */
+    .video-container {
+        max-width: 100%;
+    }
+    
+    /* Toast notifications full width */
+    .toast-container {
+        max-width: calc(100% - 1rem);
+        left: 0.5rem;
+        right: 0.5rem;
+        transform: none;
+    }
+    
+    /* Reply preview smaller */
+    .reply-preview {
+        max-width: 200px;
+    }
+    
+    /* ----- FULLSCREEN MODALS ON MOBILE ----- */
+    #new-channel-modal,
+    #settings-modal,
+    #browse-channels-modal,
+    #channel-settings-modal {
+        padding: 0 !important;
+    }
+    
+    #new-channel-modal > div,
+    #settings-modal > div,
+    #browse-channels-modal > div,
+    #channel-settings-modal > div {
+        width: 100% !important;
+        max-width: 100% !important;
+        height: 100% !important;
+        max-height: 100% !important;
+        border-radius: 0 !important;
+        margin: 0 !important;
+    }
+    
+    /* Modal sidebars become horizontal tabs on mobile */
+    #new-channel-modal .flex.min-h-\[400px\],
+    #settings-modal .flex.min-h-\[420px\],
+    #browse-channels-modal .flex.flex-1,
+    #channel-settings-modal .flex.min-h-\[400px\] {
+        flex-direction: column;
+    }
+    
+    /* Modal sidebars horizontal on mobile */
+    #new-channel-modal .w-40,
+    #settings-modal .w-44,
+    #browse-channels-modal .w-36,
+    #channel-settings-modal .w-40 {
+        width: 100% !important;
+        border-right: none !important;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        flex-direction: row !important;
+        overflow-x: auto;
+        padding: 0.5rem !important;
+        flex-shrink: 0;
+        min-height: auto;
+    }
+    
+    /* Hide "Type" label on mobile modals */
+    #new-channel-modal .w-40 > .px-3.mb-2,
+    #browse-channels-modal .w-36 > .px-3.mb-2 {
+        display: none;
+    }
+    
+    /* Modal nav items horizontal */
+    #new-channel-modal .w-40 nav,
+    #settings-modal .w-44 nav,
+    #browse-channels-modal .w-36 nav,
+    #channel-settings-modal .w-40 nav {
+        display: flex !important;
+        flex-direction: row !important;
+        gap: 0.5rem;
+        flex-wrap: nowrap;
+    }
+    
+    #new-channel-modal .w-40 nav button,
+    #settings-modal .w-44 nav button,
+    #browse-channels-modal .w-36 nav button,
+    #channel-settings-modal .w-40 nav button {
+        white-space: nowrap;
+        flex-shrink: 0;
+        width: auto !important;
+    }
+}
+
+
+
+/* ===========================================
+   SMALL MOBILE (< 480px)
+   =========================================== */
+@media (max-width: 479px) {
+    /* Even smaller header */
+    header {
+        height: 3rem;
+        padding-left: 0.375rem;
+        padding-right: 0.5rem;
+    }
+    
+    .app-container {
+        height: calc(100dvh - 3rem);
+    }
+    
+    /* Hide connect button text */
+    #connect-wallet span,
+    #disconnect-wallet span {
+        display: none;
+    }
+    
+    #connect-wallet,
+    #disconnect-wallet {
+        padding: 0.5rem;
+    }
+    
+    /* Messages even wider */
+    .message-entry {
+        max-width: 90%;
+    }
+    
+    /* Smaller avatars */
+    .message-avatar {
+        width: 32px;
+        height: 32px;
+    }
+    
+    /* Channel list items compact */
+    #channel-list .channel-item {
+        padding: 0.625rem 0.75rem;
+    }
+    
+    /* ----- Modals Full-Screen on Small Mobile ----- */
+    .modal-overlay {
+        padding: 0 !important;
+    }
+    
+    .modal-content {
+        width: 100% !important;
+        max-width: 100% !important;
+        height: 100% !important;
+        max-height: 100% !important;
+        border-radius: 0 !important;
+        margin: 0 !important;
+    }
+    
+    /* Modal body becomes column layout */
+    .modal-body {
+        flex-direction: column;
+    }
+    
+    /* Modal sidebar becomes horizontal tabs strip */
+    .modal-sidebar {
+        width: 100% !important;
+        border-right: none !important;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        flex-direction: row;
+        overflow-x: auto;
+        padding: 0.5rem;
+        flex-shrink: 0;
+    }
+    
+    .modal-sidebar nav {
+        display: flex;
+        flex-direction: row;
+        gap: 0.5rem;
+        flex-wrap: nowrap;
+    }
+    
+    .modal-sidebar nav button {
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+    
+    /* Hide "Type" label on small mobile */
+    .modal-sidebar > div:first-child {
+        display: none;
+    }
+}
+
+/* ===========================================
+   MODAL RESPONSIVE STYLES (Tablet: 480-767px)
+   =========================================== */
+@media (min-width: 480px) and (max-width: 767px) {
+    /* Modals take more screen space */
+    .modal-content {
+        max-width: 100%;
+        max-height: 95vh;
+        margin: 0.5rem;
+        border-radius: 1rem;
+    }
+    
+    /* Smaller modal headers */
+    .modal-content h3 {
+        font-size: 1rem;
+    }
+    
+    /* Reduce modal sidebar width */
+    .modal-sidebar {
+        width: 7rem;
+    }
+    
+    /* Hide text labels in modal sidebars, show only icons */
+    .modal-sidebar nav button span {
+        display: none;
+    }
+    
+    .modal-sidebar nav button {
+        justify-content: center;
+        padding: 0.75rem;
+    }
+}
+
+/* ===========================================
+   TOUCH DEVICE OPTIMIZATIONS
+   =========================================== */
+@media (hover: none) and (pointer: coarse) {
+    /* Larger touch targets */
+    .input-button {
+        width: 2.75rem;
+        height: 2.75rem;
+    }
+    
+    /* Always show message actions on touch (no hover) */
+    .react-trigger,
+    .reply-trigger {
+        opacity: 0.5;
+    }
+    
+    /* Larger reaction badges for touch */
+    .reaction-badge {
+        padding: 6px 12px;
+        font-size: 0.875rem;
+    }
+    
+    /* Bigger emoji picker items */
+    .emoji-picker span,
+    .reaction-picker span {
+        font-size: 1.6rem;
+        padding: 4px;
+    }
+}

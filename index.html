@@ -20,260 +20,19 @@
 
     <!-- Tailwind CSS (built from src/styles/input.css) -->
     <link href="./css/output.css" rel="stylesheet">
+    <!-- Component styles (extracted for maintainability) -->
+    <link href="./css/components.css" rel="stylesheet">
 
     <!-- Vendor Bundle: Streamr Client + Ethers.js + QRCode -->
     <script src="./js/vendor.bundle.js"></script>
-
-    <style>
-        body { font-family: 'Inter', sans-serif; background-color: #0d0d0d; color: #e0e0e0; }
-        .app-container { height: calc(100vh - 3.5rem); }
-        .chat-container { height: calc(100vh - 3.5rem); }
-        .messages-area { height: calc(100% - 120px); background-color: #161616; }
-        
-        /* Message styles */
-        .message-entry { animation: fadeIn 0.3s ease-in-out; max-width: 60%; display: flex; flex-direction: row; align-items: flex-end; gap: 8px; position: relative; width: fit-content; }
-        .own-message { margin-left: auto; }
-        .other-message { margin-right: auto; }
-        .message-bubble { padding: 0.2rem 0.7rem; position: relative; }
-        
-        /* Message grouping - Stack Effect */
-        /* Single message (not grouped) - only bottom anchor sharp, top fully rounded */
-        .own-message.msg-group-single .message-bubble { background-color: #272a2e; color: #f0f0f0; border-radius: 1rem 1rem 0 1rem; }
-        .other-message.msg-group-single .message-bubble { background-color: #1e1e1e; color: #d1d5db; border-radius: 1rem 1rem 1rem 0; }
-        
-        /* First message in group - top corners rounded, bottom-right small (connection) */
-        .own-message.msg-group-first .message-bubble { background-color: #272a2e; color: #f0f0f0; border-radius: 1rem 1rem 0.25rem 1rem; }
-        .other-message.msg-group-first .message-bubble { background-color: #1e1e1e; color: #d1d5db; border-radius: 1rem 1rem 1rem 0.25rem; }
-        
-        /* Middle message in group - both right corners small (continuation) */
-        .own-message.msg-group-middle .message-bubble { background-color: #272a2e; color: #f0f0f0; border-radius: 1rem 0.25rem 0.25rem 1rem; }
-        .other-message.msg-group-middle .message-bubble { background-color: #1e1e1e; color: #d1d5db; border-radius: 0.25rem 1rem 1rem 0.25rem; }
-        
-        /* Last message in group - bottom corner sharp (anchor) */
-        .own-message.msg-group-last .message-bubble { background-color: #272a2e; color: #f0f0f0; border-radius: 1rem 0.25rem 0 1rem; }
-        .other-message.msg-group-last .message-bubble { background-color: #1e1e1e; color: #d1d5db; border-radius: 0.25rem 1rem 1rem 0; }
-        
-        /* Tighter spacing within groups - using margin-top system instead */
-        .msg-group-first, .msg-group-middle { margin-bottom: 0; }
-        .msg-group-last, .msg-group-single { margin-bottom: 0; }
-        
-        /* 3-level spacing system (margin-top) */
-        /* Stack: same sender consecutive - tight (2-4px) */
-        .spacing-stack { margin-top: 0.125rem; }
-        /* Ping-pong: alternating sides - medium (12-16px) */
-        .spacing-ping-pong { margin-top: 0.875rem; }
-        /* Same side, different sender - larger (16-24px) */
-        .spacing-same-side { margin-top: 1.25rem; }
-        
-        /* Hide sender name in middle/last of group */
-        .msg-group-middle .message-sender-row, .msg-group-last .message-sender-row { display: none; }
-        
-        /* Message avatars - positioned at bottom corner */
-        .message-avatar { width: 46px; height: 46px; flex-shrink: 0; align-self: flex-end; border-radius: 10px; overflow: hidden; }
-        .message-avatar svg { width: 100%; height: 100%; display: block; }
-        .message-avatar-hidden { opacity: 0; }
-        
-        /* Video message styles - compact design */
-        .message-entry[data-type="video_announce"] .message-bubble { padding: 0.25rem; background: transparent; }
-        .message-entry[data-type="video_announce"] .message-content { font-size: inherit; }
-        .message-entry[data-type="video_announce"].own-message .message-bubble { background-color: transparent; }
-        .message-entry[data-type="video_announce"].other-message .message-bubble { background-color: transparent; }
-        /* Image message styles - frameless like video */
-        .message-entry[data-type="image"] .message-bubble { padding: 0.25rem; background: transparent; }
-        .message-entry[data-type="image"].own-message .message-bubble { background-color: transparent; }
-        .message-entry[data-type="image"].other-message .message-bubble { background-color: transparent; }
-        .video-container { max-width: 480px; }
-        .message-content { font-size: 0.95rem; line-height: 1.4rem; word-wrap: break-word; }
-        /* Inline emojis - slightly larger than text */
-        .message-content .inline-emoji { font-size: 1.2em; vertical-align: -0.15em; line-height: 1; }
-        /* Emoji-only messages - larger emojis, no bubble */
-        .message-entry[data-emoji-only="true"] .message-bubble,
-        .message-entry[data-emoji-only="many"] .message-bubble { background: transparent !important; padding: 0.25rem 0.5rem; }
-        .message-entry[data-emoji-only="true"] .message-content { font-size: 2.0rem; line-height: 1.3; }
-        .message-entry[data-emoji-only="many"] .message-content { font-size: 1.6rem; line-height: 1.3; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-        
-        /* Reactions */
-        .reactions-container { display: flex; gap: 4px; flex-wrap: wrap; }
-        .message-footer { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; margin-top: 0px; }
-        .message-footer .message-time { flex-shrink: 0; }
-        .reaction-badge { background-color: #374151; color: #e0e0e0; padding: 3px 8px; border-radius: 12px; font-size: 0.75rem; cursor: pointer; transition: background-color 0.2s; display: inline-flex; align-items: center; gap: 4px; }
-        .reaction-badge .reaction-emoji { font-size: 1.2rem; line-height: 1; }
-        .reaction-badge:hover { background-color: #4b5563; }
-        .reaction-badge.user-reacted { background-color: #3e527b; }
-        
-        /* Message actions - minimalist triggers at bottom corner */
-        .react-trigger, .reply-trigger { opacity: 0; transition: opacity 0.15s; cursor: pointer; color: #555; user-select: none; position: absolute; display: flex; align-items: center; }
-        .react-trigger { bottom: 4px; }
-        .reply-trigger { bottom: 28px; }
-        .own-message .react-trigger, .own-message .reply-trigger { left: -28px; }
-        .other-message .react-trigger, .other-message .reply-trigger { right: -28px; }
-        .react-trigger svg, .reply-trigger svg { display: block; width: 20px; height: 20px; }
-        .message-bubble:hover .react-trigger, .message-bubble:hover .reply-trigger { opacity: 1; }
-        .react-trigger:hover, .reply-trigger:hover { color: #888; }
-        
-        /* Reply preview in messages */
-        .reply-preview { background: #252525; border-left: 2px solid #555; padding: 4px 8px; margin-bottom: 6px; border-radius: 4px; font-size: 0.8rem; color: #888; cursor: pointer; max-width: 280px; }
-        .reply-preview:hover { background: #303030; }
-        .reply-preview-name { color: #aaa; font-weight: 500; font-size: 0.75rem; }
-        .reply-preview-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; margin-top: 2px; }
-        
-        /* Reply bar above input */
-        .reply-bar { background: #1a1a1a; padding: 8px 12px; border-top: 1px solid #333; display: none; align-items: center; justify-content: space-between; gap: 12px; }
-        .reply-bar.active { display: flex; }
-        .reply-bar-info { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
-        .reply-bar-label { font-size: 0.7rem; color: #666; }
-        .reply-bar-name { font-size: 0.75rem; color: #888; font-weight: 500; }
-        .reply-bar-text { font-size: 0.8rem; color: #aaa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .reply-bar-close { cursor: pointer; color: #555; padding: 4px; border-radius: 4px; transition: all 0.15s; }
-        .reply-bar-close:hover { color: #aaa; background: #333; }
-        
-        /* Message highlight when scrolled to */
-        .message-highlight { animation: highlightPulse 1.5s ease-out; }
-        @keyframes highlightPulse { 0%, 100% { background: transparent; } 30% { background: rgba(255,255,255,0.1); } }
-        
-        /* Date separator pill */
-        .date-separator { display: flex; justify-content: center; margin: 1rem 0; }
-        .date-pill { background-color: #252525; color: #888; font-size: 0.75rem; padding: 4px 12px; border-radius: 12px; }
-        
-        /* Reaction picker */
-        .reaction-picker { position: fixed; background-color: #1e1e1e; border: 1px solid #333; border-radius: 0.5rem; padding: 0.5rem; z-index: 100; display: none; flex-wrap: wrap; gap: 4px; max-width: 220px; }
-        .reaction-picker span { cursor: pointer; font-size: 1.4rem; padding: 2px; border-radius: 4px; transition: background-color 0.2s; }
-        .reaction-picker span:hover { background-color: #374151; }
-        
-        /* Emoji picker */
-        .emoji-picker { position: absolute; bottom: 50px; left: 10px; background-color: #1e1e1e; border: 1px solid #333; border-radius: 0.5rem; padding: 0.5rem; z-index: 10; display: none; flex-wrap: wrap; max-width: 320px; max-height: 200px; overflow-y: auto; }
-        .emoji-picker span { cursor: pointer; margin: 2px; font-size: 1.4rem; }
-        .emoji-picker span:hover { background-color: #374151; border-radius: 4px; }
-        
-        /* Typing indicator */
-        @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1.0); } }
-        .typing-dot { width: 8px; height: 8px; background-color: #888; border-radius: 50%; display: inline-block; margin: 0 2px; animation: bounce 1.4s infinite ease-in-out both; }
-        .typing-dot:nth-child(1) { animation-delay: -0.32s; }
-        .typing-dot:nth-child(2) { animation-delay: -0.16s; }
-        
-        /* Input buttons */
-        .input-button { background-color: #374151; color: white; width: 2.25rem; height: 2.25rem; border-radius: 9999px; display: flex; align-items: center; justify-content: center; transition: background-color 0.2s; cursor: pointer; }
-        .input-button:hover { background-color: #4b5563; }
-
-        /* Send button */
-            #send-message-btn { background-color: transparent; color: #FF5C00; width: 2.25rem; height: 2.25rem; border-radius: 9999px; display: inline-flex; align-items: center; justify-content: center; padding: 0; transition: background-color 0.12s, color 0.12s, transform 0.08s; }
-            #send-message-btn svg { display: block; }
-            #send-message-btn:hover { color: #FF7A33; background-color: rgba(255,92,0,0.08); }
-        #send-message-btn:active { transform: translateY(1px); }
-        
-        /* Toast Notifications -  */
-        .toast-container { position: fixed; top: 1.8rem; left: 50%; transform: translateX(-50%); z-index: 9999; display: flex; flex-direction: column; gap: 0.75rem; max-width: 380px; width: calc(100% - 2rem); pointer-events: none; }
-        .toast { 
-            position: relative;
-            padding: 0.875rem 1rem;
-            border-radius: 0.75rem;
-            color: #e5e5e5;
-            font-size: 0.8125rem;
-            display: flex;
-            align-items: flex-start;
-            gap: 0.75rem;
-            animation: toastSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-            background-color: #1a1a1a;
-            border: 1px solid rgba(255,255,255,0.08);
-            box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.2);
-            overflow: hidden;
-            pointer-events: auto;
-        }
-        .toast-icon {
-            width: 18px;
-            height: 18px;
-            flex-shrink: 0;
-            margin-top: 1px;
-        }
-        .toast-content {
-            flex: 1;
-            min-width: 0;
-        }
-        .toast-message {
-            line-height: 1.4;
-            word-break: break-word;
-        }
-        .toast-close {
-            position: absolute;
-            top: 0.5rem;
-            right: 0.5rem;
-            width: 20px;
-            height: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: rgba(255,255,255,0.3);
-            cursor: pointer;
-            border-radius: 4px;
-            transition: all 0.15s;
-            opacity: 0;
-        }
-        .toast:hover .toast-close { opacity: 1; }
-        .toast-close:hover { color: rgba(255,255,255,0.7); background: rgba(255,255,255,0.1); }
-        .toast-progress {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            height: 2px;
-            background: rgba(255,255,255,0.15);
-            animation: toastProgress var(--toast-duration, 3000ms) linear forwards;
-        }
-        .toast.success .toast-icon { color: #4ade80; }
-        .toast.success .toast-progress { background: #4ade80; }
-        .toast.error .toast-icon { color: #f87171; }
-        .toast.error .toast-progress { background: #f87171; }
-        .toast.info .toast-icon { color: #60a5fa; }
-        .toast.info .toast-progress { background: #60a5fa; }
-        .toast.warning .toast-icon { color: #fbbf24; }
-        .toast.warning .toast-progress { background: #fbbf24; }
-        .toast.invite { border-color: rgba(6,182,212,0.3); }
-        .toast.invite .toast-icon { color: #22d3ee; }
-        .toast.invite .toast-progress { background: #22d3ee; }
-        .toast.loading { border-color: rgba(255,92,0,0.2); }
-        .toast.loading .toast-icon { color: #ff5c00; }
-        .toast.loading .toast-progress { background: linear-gradient(90deg, transparent, #ff5c00, transparent); width: 100% !important; animation: toastLoadingProgress 1.5s ease-in-out infinite; }
-        .toast-exit { animation: toastSlideOut 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-        @keyframes toastSlideIn { from { opacity: 0; transform: translateY(-16px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes toastSlideOut { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-16px); } }
-        @keyframes toastProgress { from { width: 100%; } to { width: 0%; } }
-        @keyframes toastLoadingProgress { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
-        
-        /* Loading Spinner Overlay */
-        .loading-overlay { position: fixed; inset: 0; background-color: rgba(0,0,0,0.7); z-index: 9998; display: none; align-items: center; justify-content: center; flex-direction: column; gap: 1rem; }
-        .loading-overlay.active { display: flex; }
-        .spinner { width: 48px; height: 48px; border: 4px solid #333; border-top-color: #22d3ee; border-radius: 50%; animation: spin 1s linear infinite; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .loading-text { color: #e0e0e0; font-size: 0.9rem; }
-        
-        /* Scrollbar */
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: #1f1f1f; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb { background-color: #4b5563; border-radius: 3px; }
-        
-        /* Online users */
-        .user-item { display: flex; align-items: center; margin-bottom: 4px; font-size: 0.8rem; }
-        #online-users-list::-webkit-scrollbar { width: 4px; }
-        #online-users-list::-webkit-scrollbar-thumb { background-color: #4b5563; border-radius: 2px; }
-        .rotate-90 { transform: rotate(90deg); display: inline-block; }
-        .rotate-180 { transform: rotate(180deg); }
-        
-        /* Custom Tooltip */
-        .tooltip { position: relative; cursor: help; }
-        .tooltip::after { content: attr(data-tooltip); position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); background-color: #252525; color: #aaa; font-size: 0.7rem; padding: 4px 8px; border-radius: 4px; white-space: nowrap; opacity: 0; visibility: hidden; transition: opacity 0.15s, visibility 0.15s; pointer-events: none; z-index: 100; }
-        .tooltip::before { content: ''; position: absolute; bottom: calc(100% + 2px); left: 50%; transform: translateX(-50%); border: 4px solid transparent; border-top-color: #252525; opacity: 0; visibility: hidden; transition: opacity 0.15s, visibility 0.15s; pointer-events: none; z-index: 100; }
-        .tooltip:hover::after, .tooltip:hover::before { opacity: 1; visibility: visible; }
-    </style>
 </head>
 <body class="h-screen overflow-hidden">
-    <!-- remove default browser margin -->
-    <style>body { margin:0; padding:0; }</style>
     <!-- Global header spans full width -->
     <header class="bg-[#0d0d0d] border-b border-[#333] h-14 flex items-center justify-between px-5 flex-shrink-0">
-        <!-- Left side: Logo, status dot, and Pombo name -->
+        <!-- Left side: Logo and brand -->
         <div class="flex items-center gap-3">
             <!-- Logo -->
-            <svg viewBox="0 0 512 512" class="w-12 h-12" fill="#ff5c00">
+            <svg viewBox="0 0 512 512" class="w-12 h-12 header-logo" fill="#ff5c00">
                 <g transform="translate(0,512) scale(0.1,-0.1)">
                     <path d="M3138 4803 c-88 -35 -88 -35 -88 -89 0 -52 1 -54 28 -54 15 -1 43 -3 62 -6 34 -5 37 -2 112 91 78 95 78 95 25 94 -34 -1 -82 -13 -139 -36z m88 -13 c11 0 12 -3 4 -12 -6 -7 -24 -31 -41 -53 -17 -22 -37 -39 -45 -39 -8 1 -20 2 -27 3 -17 1 -42 51 -26 51 6 0 8 4 5 9 -3 5 1 12 10 15 9 4 13 2 8 -5 -4 -7 6 -3 22 8 49 32 69 41 72 32 2 -5 10 -9 18 -9z"/>
                     <path d="M2878 4730 c-63 -5 -101 -14 -142 -34 -144 -70 -260 -256 -272 -434 -8 -122 7 -216 71 -456 55 -203 56 -212 54 -325 -3 -136 -17 -219 -57 -334 -28 -84 -28 -84 141 -25 169 58 169 58 371 -3 202 -62 202 -62 226 -103 13 -23 67 -107 121 -188 99 -148 99 -148 88 -370 -12 -241 5 -204 -312 -685 -24 -36 -545 -362 -612 -383 -22 -7 -87 -30 -145 -50 -485 -176 -450 -165 -1035 -315 -141 -36 -186 -52 -210 -73 -16 -15 -127 -122 -246 -239 -215 -213 -215 -213 173 -213 388 0 388 0 551 217 89 120 165 222 168 226 3 5 116 37 250 71 134 35 254 66 267 70 21 7 22 5 22 -49 0 -56 0 -56 123 -189 67 -73 136 -152 152 -176 29 -42 29 -42 -3 -71 -24 -21 -43 -29 -71 -29 -36 0 -107 -39 -126 -69 -11 -19 86 -13 141 8 51 20 51 20 254 -15 169 -29 224 -34 322 -32 118 3 118 3 96 35 -38 53 -73 63 -216 63 -181 0 -188 4 -320 189 -92 129 -102 147 -92 166 6 12 73 101 148 198 130 167 143 180 242 250 275 192 498 357 504 372 2 7 69 116 147 242 158 252 152 236 164 442 3 58 8 143 11 188 5 76 2 96 -46 270 -148 541 -118 469 -348 838 -113 182 -220 353 -237 382 -35 57 -37 76 -39 360 -1 123 -1 123 -73 124 -40 1 -79 2 -85 3 -9 1 -14 26 -16 79 -2 42 -6 76 -10 76 -4 -1 -46 -5 -94 -9z"/>
@@ -311,15 +70,16 @@
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/>
                     </svg>
-                    Disconnect
+                    <span>Disconnect</span>
                 </button>
             </div>
         </div>
     </header>
+    
     <!-- App Container - Full Height -->
     <div class="flex app-container">
         <!-- Sidebar - Channel List (Full Height) -->
-        <aside class="w-80 bg-[#0d0d0d] border-r border-[#333] flex flex-col flex-shrink-0">
+        <aside id="sidebar" class="sidebar w-80 bg-[#0d0d0d] border-r border-[#333] flex flex-col flex-shrink-0">
             <!-- Channel Controls -->
             <div class="px-3 pb-2 space-y-2.5 pt-4">
                 <div class="flex items-center justify-between">
@@ -395,14 +155,20 @@
             </div>
         </aside>
 
-        <!-- Right Content Area -->
-        <div class="flex-1 flex flex-col min-w-0">
+        <!-- Right Content Area (Chat) -->
+        <div id="chat-area" class="chat-area flex-1 flex flex-col min-w-0">
 
 
             <!-- Main Chat Area -->
             <main class="flex-1 flex flex-col bg-[#161616] overflow-hidden">
             <!-- Chat Header -->
             <div id="chat-header" class="bg-[#0d0d0d] border-b border-[#333] px-5 py-4 flex items-center justify-between">
+                <!-- Close button (mobile: left side) -->
+                <button id="close-channel-btn" class="hidden p-2 hover:bg-gray-700 rounded-lg transition text-gray-400 hover:text-white mobile-close-btn" title="Close channel">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
                 <div class="flex-1">
                     <div class="flex items-center gap-2">
                         <h2 id="current-channel-name" class="text-xl font-semibold">Explore Channels</h2>
@@ -434,7 +200,8 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path>
                         </svg>
                     </button>
-                    <button id="close-channel-btn" class="hidden p-2 hover:bg-gray-700 rounded-lg transition text-gray-400 hover:text-white" title="Close channel">
+                    <!-- Close button (desktop: right side) -->
+                    <button id="close-channel-btn-desktop" class="hidden p-2 hover:bg-gray-700 rounded-lg transition text-gray-400 hover:text-white desktop-close-btn" title="Close channel">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
                         </svg>
@@ -472,15 +239,8 @@
                     <!-- Emoji Picker -->
                     <div id="emoji-picker" class="emoji-picker"></div>
                     
-                    <!-- Emoji Button -->
-                    <button id="emoji-btn" class="input-button text-[#666] hover:text-white transition" title="Emoji">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                        </svg>
-                    </button>
-                    
                     <!-- Attach Button -->
-                    <div class="relative">
+                    <div class="relative input-btn-wrapper">
                         <button id="attach-btn" class="input-button text-[#666] hover:text-white transition" title="Attach">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13"/>
@@ -502,6 +262,13 @@
                             </button>
                         </div>
                     </div>
+                    
+                    <!-- Emoji Button -->
+                    <button id="emoji-btn" class="input-button text-[#666] hover:text-white transition input-btn-wrapper" title="Emoji">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                    </button>
                     
                     <!-- Hidden File Inputs -->
                     <input type="file" id="image-input" class="hidden" accept="image/jpeg,image/png,image/gif,image/webp">

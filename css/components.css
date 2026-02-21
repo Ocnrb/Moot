@@ -37,6 +37,12 @@ body {
     width: fit-content;
 }
 
+/* Only last/single messages get extra padding for avatar overhang */
+.message-entry.msg-group-last,
+.message-entry.msg-group-single {
+    padding-bottom: 12px;
+}
+
 .own-message {
     margin-left: auto;
 }
@@ -48,6 +54,36 @@ body {
 .message-bubble {
     padding: 0.2rem 0.7rem;
     position: relative;
+}
+
+/* ----- Bubble Tail ----- */
+.message-bubble::before {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    width: 12px;
+    height: 12px;
+    background: inherit;
+}
+
+/* Tail for other-message (left side) */
+.other-message .message-bubble::before {
+    left: -5px;
+    border-bottom-right-radius: 8px;
+    clip-path: polygon(100% 0, 100% 100%, 0 100%);
+}
+
+/* Tail for own-message on mobile (right side) */
+.own-message .message-bubble::before {
+    right: -5px;
+    border-bottom-left-radius: 8px;
+    clip-path: polygon(0 0, 100% 100%, 0 100%);
+}
+
+/* Hide tail on first/middle messages (only show where avatar is visible) */
+.msg-group-first .message-bubble::before,
+.msg-group-middle .message-bubble::before {
+    display: none;
 }
 
 /* ----- Message Grouping - Stack Effect ----- */
@@ -133,6 +169,20 @@ body {
     .own-message.msg-group-last .message-bubble {
         border-radius: 0.25rem 1rem 1rem 0;
     }
+    
+    /* Flip tail to left side for own-messages on desktop */
+    .own-message .message-bubble::before {
+        left: -5px;
+        right: auto;
+        border-bottom-right-radius: 8px;
+        border-bottom-left-radius: 0;
+        clip-path: polygon(100% 0, 100% 100%, 0 100%);
+    }
+    
+    /* Hide mobile close button on desktop (use desktop button on right side) */
+    .mobile-close-btn {
+        display: none !important;
+    }
 }
 
 /* Tighter spacing within groups - using margin-top system instead */
@@ -177,6 +227,8 @@ body {
     align-self: flex-end;
     border-radius: 10px;
     overflow: hidden;
+    position: relative;
+    top: 12px; /* Avatar hangs below the bubble ~50% */
 }
 
 .message-avatar svg {
@@ -187,6 +239,7 @@ body {
 
 .message-avatar-hidden {
     opacity: 0;
+    top: 0; /* Reset offset for hidden avatars */
 }
 
 /* ----- Video & Image Message Styles ----- */
@@ -846,6 +899,7 @@ body {
 .user-item {
     display: flex;
     align-items: center;
+    gap: 0.8rem;
     margin-bottom: 4px;
     font-size: 0.8rem;
 }
@@ -969,6 +1023,12 @@ body {
         height: 3.5rem;
     }
     
+    /* Explore tabs take available space and align right on mobile */
+    #explore-type-tabs {
+        flex: 1 !important;
+        justify-content: flex-end !important;
+    }
+    
     /* Smaller logo on mobile */
     .header-logo {
         width: 2rem;
@@ -1050,11 +1110,6 @@ body {
         height: 1.125rem;
     }
     
-    /* Message input container bottom padding */
-    #message-input-container {
-        padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
-    }
-    
     /* Hide disconnect button text on mobile */
     #disconnect-wallet span {
         display: none;
@@ -1072,8 +1127,8 @@ body {
     
     /* Channel list items taller on mobile */
     #channel-list .channel-item {
-        padding-top: 0.875rem;
-        padding-bottom: 0.875rem;
+        padding-top: 1rem;
+        padding-bottom: 1rem;
     }
     
     /* Chat header adjustments */
@@ -1098,8 +1153,8 @@ body {
     
     /* Message input area - fixed at bottom with keyboard support */
     #message-input-container {
-        padding: 0.5rem;
-        padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+        padding: 0.875rem;
+        padding-bottom: calc(0.875rem + env(safe-area-inset-bottom));
     }
     
     /* Messages container scrollable */
@@ -1130,14 +1185,12 @@ body {
     /* ----- FULLSCREEN MODALS ON MOBILE ----- */
     #new-channel-modal,
     #settings-modal,
-    #browse-channels-modal,
     #channel-settings-modal {
         padding: 0 !important;
     }
     
     #new-channel-modal > div,
     #settings-modal > div,
-    #browse-channels-modal > div,
     #channel-settings-modal > div {
         width: 100% !important;
         max-width: 100% !important;
@@ -1150,7 +1203,6 @@ body {
     /* Modal sidebars become horizontal tabs on mobile */
     #new-channel-modal .flex.min-h-\[400px\],
     #settings-modal .flex.min-h-\[420px\],
-    #browse-channels-modal .flex.flex-1,
     #channel-settings-modal .flex.min-h-\[400px\] {
         flex-direction: column;
     }
@@ -1158,7 +1210,6 @@ body {
     /* Modal sidebars horizontal on mobile */
     #new-channel-modal .w-40,
     #settings-modal .w-44,
-    #browse-channels-modal .w-36,
     #channel-settings-modal .w-40 {
         width: 100% !important;
         border-right: none !important;
@@ -1171,15 +1222,13 @@ body {
     }
     
     /* Hide "Type" label on mobile modals */
-    #new-channel-modal .w-40 > .px-3.mb-2,
-    #browse-channels-modal .w-36 > .px-3.mb-2 {
+    #new-channel-modal .w-40 > .px-3.mb-2 {
         display: none;
     }
     
     /* Modal nav items horizontal */
     #new-channel-modal .w-40 nav,
     #settings-modal .w-44 nav,
-    #browse-channels-modal .w-36 nav,
     #channel-settings-modal .w-40 nav {
         display: flex !important;
         flex-direction: row !important;
@@ -1189,7 +1238,6 @@ body {
     
     #new-channel-modal .w-40 nav button,
     #settings-modal .w-44 nav button,
-    #browse-channels-modal .w-36 nav button,
     #channel-settings-modal .w-40 nav button {
         white-space: nowrap;
         flex-shrink: 0;
@@ -1332,10 +1380,18 @@ body {
         height: 2.75rem;
     }
     
-    /* Always show message actions on touch (no hover) */
+    /* Hide message actions by default on touch - show only when tapped */
     .react-trigger,
     .reply-trigger {
-        opacity: 0.5;
+        opacity: 0;
+        pointer-events: none;
+    }
+    
+    /* Show actions when message is active (tapped) */
+    .message-entry.message-active .react-trigger,
+    .message-entry.message-active .reply-trigger {
+        opacity: 0.6;
+        pointer-events: auto;
     }
     
     /* Larger reaction badges for touch */

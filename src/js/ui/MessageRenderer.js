@@ -103,16 +103,16 @@ class MessageRenderer {
     renderReactions(msgId, isOwn) {
         const reactions = this.deps.getMessageReactions?.(msgId);
         if (!reactions || Object.keys(reactions).length === 0) {
-            return `<div class="reactions-container" data-reactions-for="${msgId}"></div>`;
+            return `<div class="reactions-container" data-reactions-for="${escapeAttr(msgId)}"></div>`;
         }
 
         const currentAddress = this.deps.getCurrentAddress?.()?.toLowerCase();
-        let html = `<div class="reactions-container" data-reactions-for="${msgId}">`;
+        let html = `<div class="reactions-container" data-reactions-for="${escapeAttr(msgId)}">`;
         
         for (const [emoji, users] of Object.entries(reactions)) {
             if (users.length > 0) {
                 const userReacted = users.some(u => u.toLowerCase() === currentAddress);
-                html += `<span class="reaction-badge ${userReacted ? 'user-reacted' : ''}" data-emoji="${emoji}" data-msg-id="${msgId}"><span class="reaction-emoji">${emoji}</span>${users.length}</span>`;
+                html += `<span class="reaction-badge ${userReacted ? 'user-reacted' : ''}" data-emoji="${escapeAttr(emoji)}" data-msg-id="${escapeAttr(msgId)}"><span class="reaction-emoji">${emoji}</span>${users.length}</span>`;
             }
         }
         
@@ -134,7 +134,7 @@ class MessageRenderer {
             : '[Message]';
         
         return `
-            <div class="reply-preview" data-reply-to-id="${replyTo.id}">
+            <div class="reply-preview" data-reply-to-id="${escapeAttr(replyTo.id)}">
                 <span class="reply-preview-name">${escapeHtml(displayName)}</span>
                 <span class="reply-preview-text">${previewText}</span>
             </div>
@@ -287,7 +287,7 @@ class MessageRenderer {
                         </svg>
                     </div>
                     <button class="download-file-btn absolute inset-0 flex items-center justify-center bg-black/30 hover:bg-black/40 transition-all" 
-                            data-file-id="${metadata.fileId}">
+                            data-file-id="${safeFileId}">
                         <div class="play-btn-container transform group-hover:scale-105 transition-transform">
                             <div class="w-12 h-12 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center border border-white/30">
                                 <svg class="w-5 h-5 text-white ml-0.5 download-play-icon" fill="currentColor" viewBox="0 0 24 24">
@@ -299,12 +299,12 @@ class MessageRenderer {
                             </div>
                         </div>
                     </button>
-                    <div data-progress-overlay="${metadata.fileId}" class="hidden absolute inset-0 bg-black/70 flex flex-col items-center justify-center">
-                        <div class="text-white text-sm font-medium" data-progress-percent="${metadata.fileId}">0%</div>
+                    <div data-progress-overlay="${safeFileId}" class="hidden absolute inset-0 bg-black/70 flex flex-col items-center justify-center">
+                        <div class="text-white text-sm font-medium" data-progress-percent="${safeFileId}">0%</div>
                         <div class="w-2/3 bg-gray-700 rounded-full h-1.5 mt-1.5">
-                            <div data-progress-fill="${metadata.fileId}" class="bg-blue-500 h-1.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+                            <div data-progress-fill="${safeFileId}" class="bg-blue-500 h-1.5 rounded-full transition-all duration-300" style="width: 0%"></div>
                         </div>
-                        <div class="text-[10px] text-gray-400 mt-1" data-progress-text="${metadata.fileId}">Starting...</div>
+                        <div class="text-[10px] text-gray-400 mt-1" data-progress-text="${safeFileId}">Starting...</div>
                     </div>
                     <div class="absolute top-1.5 left-1.5 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1">
                         <svg class="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
@@ -312,7 +312,7 @@ class MessageRenderer {
                         </svg>
                         ${this.formatFileSize(metadata.fileSize)}
                     </div>
-                    <div class="absolute top-1.5 right-1.5 bg-black/60 text-gray-400 text-[10px] px-1.5 py-0.5 rounded" data-seeder-count="${metadata.fileId}"></div>
+                    <div class="absolute top-1.5 right-1.5 bg-black/60 text-gray-400 text-[10px] px-1.5 py-0.5 rounded" data-seeder-count="${safeFileId}"></div>
                 </div>
                 <div class="mt-1 px-0.5 text-[11px] text-gray-500 truncate" title="${escapeHtml(metadata.fileName)}">
                     ${escapeHtml(metadata.fileName)}
@@ -381,7 +381,7 @@ class MessageRenderer {
         const avatarHtml = `<div class="${avatarClass}">${avatarSvg}</div>`;
 
         return `
-            <div class="message-entry ${isOwn ? 'own-message' : 'other-message'} ${groupClass} ${spacingClass}" data-msg-id="${msgId}" data-sender="${msg.sender || ''}" data-type="${msgType}"${emojiAttr}>
+            <div class="message-entry ${isOwn ? 'own-message' : 'other-message'} ${groupClass} ${spacingClass}" data-msg-id="${escapeAttr(msgId)}" data-sender="${escapeAttr(msg.sender || '')}" data-type="${escapeAttr(msgType)}"${emojiAttr}>
                 ${!isOwn ? avatarHtml : ''}
                 <div class="message-bubble">
                     ${senderRowHtml}
@@ -392,8 +392,8 @@ class MessageRenderer {
                         <span class="message-time text-xs text-gray-500">${time}</span>
                     </div>
                     ${!msg.verified?.valid && msg.signature ? '<div class="text-xs text-red-400 mt-1">⚠️ Invalid signature</div>' : ''}
-                    <span class="reply-trigger reply-btn" data-msg-id="${msgId}" title="Reply"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17l-5-5 5-5"/><path d="M4 12h11a4 4 0 0 1 4 4v4"/></svg></span>
-                    <span class="react-trigger react-btn" data-msg-id="${msgId}" title="React"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg></span>
+                    <span class="reply-trigger reply-btn" data-msg-id="${escapeAttr(msgId)}" title="Reply"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17l-5-5 5-5"/><path d="M4 12h11a4 4 0 0 1 4 4v4"/></svg></span>
+                    <span class="react-trigger react-btn" data-msg-id="${escapeAttr(msgId)}" title="React"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg></span>
                 </div>
                 ${isOwn ? avatarHtml : ''}
             </div>

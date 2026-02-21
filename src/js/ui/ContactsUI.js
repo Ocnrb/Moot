@@ -4,7 +4,7 @@
  */
 
 import { modalManager } from './ModalManager.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, escapeAttr } from './utils.js';
 import { getAvatar } from './AvatarGenerator.js';
 
 class ContactsUI {
@@ -110,7 +110,7 @@ class ContactsUI {
                     </div>
                     <button 
                         class="remove-contact-btn ml-2 text-[#555] hover:text-red-400 p-1.5 transition"
-                        data-address="${contact.address}"
+                        data-address="${escapeAttr(contact.address)}"
                         title="Remove contact"
                     >
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

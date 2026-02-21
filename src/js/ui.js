@@ -277,11 +277,6 @@ class UIController {
             browseChannelsBtn: document.getElementById('browse-channels-btn'),
             browseBtnIcon: document.getElementById('browse-btn-icon'),
             browseBtnText: document.getElementById('browse-btn-text'),
-            browseChannelsModal: document.getElementById('browse-channels-modal'),
-            browseSearchInput: document.getElementById('browse-search-input'),
-            browseLanguageFilter: document.getElementById('browse-language-filter'),
-            browseChannelsList: document.getElementById('browse-channels-list'),
-            closeBrowseBtn: document.getElementById('close-browse-btn'),
             
             // Reply UI
             replyBar: document.getElementById('reply-bar'),
@@ -292,7 +287,11 @@ class UIController {
             // Mobile navigation
             sidebar: document.getElementById('sidebar'),
             chatArea: document.getElementById('chat-area'),
-            closeChannelBtnDesktop: document.getElementById('close-channel-btn-desktop')
+            closeChannelBtnDesktop: document.getElementById('close-channel-btn-desktop'),
+            chatHeaderRight: document.getElementById('chat-header-right'),
+            
+            // Explore type tabs
+            exploreTypeTabs: document.getElementById('explore-type-tabs')
         };
 
         // Set element references for UI modules
@@ -438,15 +437,8 @@ class UIController {
             if (hasInput) {
                 this.handleQuickJoin();
             } else {
-                // No input: show Explore
-                // Desktop: show inline in central container
-                // Mobile: show modal
-                const isMobile = window.innerWidth < 768;
-                if (isMobile) {
-                    this.showBrowseChannelsModal();
-                } else {
-                    this.deselectChannel();
-                }
+                // No input: show Explore (unified for mobile/desktop)
+                this.openExploreView();
             }
         });
 
@@ -481,49 +473,6 @@ class UIController {
             this.elements.joinPasswordField?.classList.toggle('hidden', !e.target.checked);
         });
 
-        // Close browse modal
-        this.elements.closeBrowseBtn?.addEventListener('click', () => {
-            this.hideBrowseChannelsModal();
-        });
-
-        // Browse search filter
-        this.elements.browseSearchInput?.addEventListener('input', (e) => {
-            this.filterBrowseChannels(e.target.value);
-        });
-
-        // Browse type filter tabs
-        this.browseTypeFilter = 'public';
-        this.browseCategoryFilter = '';
-        this.browseLanguageFilterValue = 'en';
-        
-        document.querySelectorAll('.browse-filter-tab').forEach(tab => {
-            tab.addEventListener('click', () => {
-                this.browseTypeFilter = tab.dataset.browseFilter;
-                this.updateBrowseFilterTabs();
-                this.filterBrowseChannels(this.elements.browseSearchInput?.value || '');
-            });
-        });
-        
-        // Browse category chips
-        document.querySelectorAll('.browse-category-chip').forEach(chip => {
-            chip.addEventListener('click', () => {
-                this.browseCategoryFilter = chip.dataset.category;
-                this.updateBrowseCategoryChips();
-                this.filterBrowseChannels(this.elements.browseSearchInput?.value || '');
-            });
-        });
-        
-        // Toggle categories expand/collapse
-        document.getElementById('toggle-categories-btn')?.addEventListener('click', () => {
-            this.toggleCategoriesExpand();
-        });
-        
-        // Browse language filter
-        this.elements.browseLanguageFilter?.addEventListener('change', (e) => {
-            this.browseLanguageFilterValue = e.target.value;
-            this.filterBrowseChannels(this.elements.browseSearchInput?.value || '');
-        });
-
         // Send message
         this.elements.sendMessageBtn.addEventListener('click', () => {
             this.handleSendMessage();
@@ -549,6 +498,27 @@ class UIController {
         // Lazy loading - scroll to top loads more history
         this.elements.messagesArea?.addEventListener('scroll', () => {
             this.handleMessagesScroll();
+        });
+        
+        // Mobile: tap on message to show reply/react buttons
+        this.elements.messagesArea?.addEventListener('click', (e) => {
+            const messageEntry = e.target.closest('.message-entry');
+            const isActionButton = e.target.closest('.reply-trigger, .react-trigger, .reaction-badge');
+            
+            // Don't toggle when clicking action buttons
+            if (isActionButton) return;
+            
+            // Clear any previously active message
+            document.querySelectorAll('.message-entry.message-active').forEach(el => {
+                if (el !== messageEntry) {
+                    el.classList.remove('message-active');
+                }
+            });
+            
+            // Toggle active state on tapped message
+            if (messageEntry) {
+                messageEntry.classList.toggle('message-active');
+            }
         });
         
         // Auto-resize textarea as user types
@@ -629,7 +599,12 @@ class UIController {
         // Close channel button (X) - handles both mobile (left) and desktop (right) buttons
         if (this.elements.closeChannelBtn) {
             this.elements.closeChannelBtn.addEventListener('click', async () => {
-                await this.deselectChannel();
+                // Mobile: always go back to sidebar (channel list)
+                const currentChannel = channelManager.getCurrentChannel();
+                if (currentChannel) {
+                    await this.deselectChannel();
+                }
+                this.closeChatView();
             });
         }
         
@@ -943,6 +918,12 @@ class UIController {
             this.elements.currentChannelInfo.innerHTML = this.getChannelTypeLabel(channel.type, channel.readOnly);
             this.elements.currentChannelInfo.parentElement.classList.remove('hidden');
             this.elements.messageInputContainer.classList.remove('hidden');
+            
+            // Hide explore type tabs
+            this.elements.exploreTypeTabs?.classList.add('hidden');
+            
+            // Restore right header buttons (hidden in Explore on mobile)
+            this.elements.chatHeaderRight?.classList.remove('hidden');
 
             // Handle read-only channels (async - checks actual publish permission)
             await this.updateReadOnlyUI(channel);
@@ -1040,8 +1021,7 @@ class UIController {
             item.classList.remove('bg-[#252525]');
         });
         
-        // Mobile: navigate back to sidebar
-        this.closeChatView();
+        // Note: Do NOT call closeChatView() here - Explore stays in chat-area
     }
 
     /**
@@ -1102,6 +1082,27 @@ class UIController {
     }
 
     /**
+     * Open Explore view (unified for mobile/desktop)
+     * Mobile: navigates to chat-area with Explore
+     * Desktop: shows Explore inline
+     */
+    async openExploreView() {
+        // Deselect any current channel first
+        channelManager.setCurrentChannel(null);
+        
+        // Mobile: open chat area to show Explore
+        this.openChatView();
+        
+        // Show Explore view
+        await this.showExploreView();
+        
+        // Remove selection highlight from channel list
+        document.querySelectorAll('.channel-item').forEach(item => {
+            item.classList.remove('bg-[#252525]');
+        });
+    }
+
+    /**
      * Show Explore view inline in messages area (not as modal)
      * This is the front-page when no channel is selected
      */
@@ -1112,18 +1113,31 @@ class UIController {
         // Remove padding from messages area for edge-to-edge explore view
         this.elements.messagesArea?.classList.remove('p-4');
         
-        // Update header to show Explore context
-        this.elements.currentChannelName.textContent = 'Explore Channels';
+        // Update header to show Explore context (shorter on mobile)
+        const isMobile = this.isMobileView();
+        this.elements.currentChannelName.textContent = isMobile ? 'Explore' : 'Explore Channels';
         this.elements.currentChannelInfo.textContent = '';
         this.elements.currentChannelInfo.parentElement.classList.add('hidden');
         
         // Hide channel-specific buttons
         this.elements.inviteUsersBtn?.classList.add('hidden');
         this.elements.channelMenuBtn?.classList.add('hidden');
-        this.elements.closeChannelBtn?.classList.add('hidden');
-        this.elements.closeChannelBtnDesktop?.classList.add('hidden');
         this.elements.onlineHeader?.classList.add('hidden');
         this.elements.onlineSeparator?.classList.add('hidden');
+        
+        // Close button: show only on mobile (to go back to sidebar), hide on desktop
+        if (isMobile) {
+            this.elements.closeChannelBtn?.classList.remove('hidden');
+            // Hide right header buttons on mobile in Explore (tabs go there)
+            this.elements.chatHeaderRight?.classList.add('hidden');
+        } else {
+            this.elements.closeChannelBtn?.classList.add('hidden');
+            this.elements.chatHeaderRight?.classList.remove('hidden');
+        }
+        this.elements.closeChannelBtnDesktop?.classList.add('hidden');
+        
+        // Show explore type tabs
+        this.elements.exploreTypeTabs?.classList.remove('hidden');
         
         // Render Explore view using ExploreUI module
         const nsfwEnabled = secureStorage.getNsfwEnabled();
@@ -2707,8 +2721,8 @@ class UIController {
             return;
         }
 
-        // First check cache, then query The Graph for channel info
-        let channelInfo = this.cachedPublicChannels?.find(ch => ch.streamId === streamId);
+        // First check cache (from ExploreUI), then query The Graph for channel info
+        let channelInfo = exploreUI.cachedPublicChannels?.find(ch => ch.streamId === streamId);
         
         if (!channelInfo) {
             // Not in cache - query The Graph
@@ -2836,279 +2850,16 @@ class UIController {
     }
 
     /**
-     * Show browse channels modal (uses ModalManager for display)
-     */
-    async showBrowseChannelsModal() {
-        modalManager.show('browse-channels-modal');
-        if (this.elements.browseSearchInput) {
-            this.elements.browseSearchInput.value = '';
-        }
-        
-        // Reset all filters
-        this.browseTypeFilter = 'public';
-        this.browseCategoryFilter = '';
-        this.browseLanguageFilterValue = 'en';
-        
-        // Reset language dropdown
-        if (this.elements.browseLanguageFilter) {
-            this.elements.browseLanguageFilter.value = 'en';
-        }
-        
-        this.updateBrowseFilterTabs();
-        this.updateBrowseCategoryChips();
-        this.resetCategoriesExpand();
-        
-        // Load public channels from registry
-        await this.loadPublicChannels();
-    }
-
-    /**
-     * Hide browse channels modal (delegates to ModalManager)
-     */
-    hideBrowseChannelsModal() {
-        modalManager.hide('browse-channels-modal');
-    }
-
-    /**
-     * Load public channels from registry
-     */
-    async loadPublicChannels() {
-        if (!this.elements.browseChannelsList) return;
-
-        this.elements.browseChannelsList.innerHTML = `
-            <div class="flex flex-col items-center justify-center py-12 text-white/40">
-                <div class="spinner mb-3" style="width: 28px; height: 28px;"></div>
-                <p class="text-sm">Loading channels...</p>
-            </div>
-        `;
-
-        try {
-            const channels = await channelManager.getPublicChannels();
-            this.cachedPublicChannels = channels;
-            // Apply current filter instead of showing all
-            this.filterBrowseChannels(this.elements.browseSearchInput?.value || '');
-        } catch (error) {
-            Logger.error('Failed to load public channels:', error);
-            this.elements.browseChannelsList.innerHTML = `
-                <div class="flex flex-col items-center justify-center py-12 text-white/40">
-                    <svg class="w-12 h-12 mb-3 text-red-400/50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/>
-                    </svg>
-                    <p class="text-sm">Failed to load channels</p>
-                    <p class="text-xs text-white/30 mt-1">${this.escapeHtml(error.message)}</p>
-                </div>
-            `;
-        }
-    }
-
-    /**
-     * Render public channels list
-     */
-    renderPublicChannelsList(channels) {
-        if (!this.elements.browseChannelsList) return;
-
-        if (channels.length === 0) {
-            this.elements.browseChannelsList.innerHTML = `
-                <div class="flex flex-col items-center justify-center py-12 text-white/40">
-                    <svg class="w-12 h-12 mb-3 text-white/20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
-                    </svg>
-                    <p class="text-sm">No channels found</p>
-                    <p class="text-xs text-white/30 mt-1">Try adjusting your filters</p>
-                </div>
-            `;
-            return;
-        }
-        
-        // Category display names
-        const categoryNames = {
-            politics: 'Politics', news: 'News', tech: 'Tech & AI', crypto: 'Crypto',
-            finance: 'Finance', science: 'Science', gaming: 'Gaming', entertainment: 'Entertainment',
-            sports: 'Sports', health: 'Health', education: 'Education', comedy: 'Comedy', 
-            general: 'General', other: 'Other', nsfw: 'NSFW', adult: 'Adult'
-        };
-        
-        // Language display names
-        const languageNames = { 
-            en: 'EN', pt: 'PT', es: 'ES', fr: 'FR', de: 'DE', 
-            it: 'IT', zh: '中文', ja: '日本語', ko: '한국어', ru: 'RU', ar: 'العربية', other: 'Other'
-        };
-
-        this.elements.browseChannelsList.innerHTML = channels.map(ch => {
-            const readOnlyBadge = ch.readOnly 
-                ? '<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-amber-500/15 text-amber-400/80 text-[9px] font-medium rounded">RO</span>' 
-                : '';
-            const categoryBadge = ch.category && ch.category !== 'general'
-                ? `<span class="px-1.5 py-0.5 bg-white/5 text-white/50 text-[9px] font-medium rounded">${this.escapeHtml(categoryNames[ch.category] || ch.category)}</span>`
-                : '';
-            const languageBadge = ch.language
-                ? `<span class="px-1.5 py-0.5 bg-white/5 text-white/40 text-[9px] font-medium rounded">${this.escapeHtml(languageNames[ch.language] || ch.language.toUpperCase())}</span>`
-                : '';
-            const description = ch.description 
-                ? `<p class="text-xs text-white/40 mt-1 line-clamp-2">${this.escapeHtml(ch.description)}</p>` 
-                : '';
-            
-            return `
-            <div class="p-3 bg-white/5 border border-white/5 rounded-xl hover:bg-white/[0.07] hover:border-white/10 transition cursor-pointer browse-channel-item group" data-stream-id="${ch.streamId}" data-type="${ch.type || 'public'}">
-                <div class="flex items-start justify-between gap-3">
-                    <div class="flex-1 min-w-0">
-                        <div class="flex items-center gap-2 flex-wrap">
-                            <h4 class="text-sm font-medium text-white/90 truncate">${this.escapeHtml(ch.name)}</h4>
-                            ${readOnlyBadge}
-                        </div>
-                        ${description}
-                    </div>
-                    <svg class="w-4 h-4 text-white/20 group-hover:text-white/40 flex-shrink-0 mt-0.5 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-                    </svg>
-                </div>
-                <div class="flex items-center gap-1.5 mt-2">
-                    ${categoryBadge}
-                    ${languageBadge}
-                </div>
-            </div>
-            `;
-        }).join('');
-
-        // Add click listeners to the whole item
-        this.elements.browseChannelsList.querySelectorAll('.browse-channel-item').forEach(item => {
-            item.addEventListener('click', async () => {
-                const streamId = item.dataset.streamId;
-                if (streamId) {
-                    await this.joinPublicChannel(streamId);
-                }
-            });
-        });
-    }
-
-    /**
-     * Filter browse channels by search and type
-     */
-    filterBrowseChannels(query) {
-        if (!this.cachedPublicChannels) return;
-        
-        let filtered = this.cachedPublicChannels;
-        
-        // Apply type filter
-        if (this.browseTypeFilter) {
-            filtered = filtered.filter(ch => ch.type === this.browseTypeFilter);
-        }
-        
-        // Apply category filter
-        if (this.browseCategoryFilter) {
-            filtered = filtered.filter(ch => ch.category === this.browseCategoryFilter);
-        }
-        
-        // Apply language filter
-        if (this.browseLanguageFilterValue) {
-            filtered = filtered.filter(ch => ch.language === this.browseLanguageFilterValue);
-        }
-        
-        // Apply search filter
-        if (query) {
-            const q = query.toLowerCase();
-            filtered = filtered.filter(ch => 
-                ch.name.toLowerCase().includes(q) ||
-                ch.streamId.toLowerCase().includes(q) ||
-                (ch.description && ch.description.toLowerCase().includes(q))
-            );
-        }
-        
-        this.renderPublicChannelsList(filtered);
-    }
-
-    /**
-     * Update browse filter tabs UI (sidebar style)
-     */
-    updateBrowseFilterTabs() {
-        document.querySelectorAll('.browse-filter-tab').forEach(tab => {
-            const isActive = tab.dataset.browseFilter === this.browseTypeFilter;
-            if (isActive) {
-                tab.classList.add('bg-white/10', 'text-white');
-                tab.classList.remove('text-white/60', 'hover:text-white/90', 'hover:bg-white/5');
-            } else {
-                tab.classList.remove('bg-white/10', 'text-white');
-                tab.classList.add('text-white/60', 'hover:text-white/90', 'hover:bg-white/5');
-            }
-        });
-    }
-    
-    /**
-     * Update browse category chips UI
-     */
-    updateBrowseCategoryChips() {
-        document.querySelectorAll('.browse-category-chip').forEach(chip => {
-            const isActive = chip.dataset.category === this.browseCategoryFilter;
-            if (isActive) {
-                chip.classList.add('bg-white', 'text-black');
-                chip.classList.remove('bg-white/5', 'text-white/60', 'hover:bg-white/10', 'hover:text-white/80');
-            } else {
-                chip.classList.remove('bg-white', 'text-black');
-                chip.classList.add('bg-white/5', 'text-white/60', 'hover:bg-white/10', 'hover:text-white/80');
-            }
-        });
-    }
-
-    /**
-     * Toggle category chips expand/collapse
-     */
-    toggleCategoriesExpand() {
-        const container = document.getElementById('browse-category-chips');
-        const icon = document.getElementById('toggle-categories-icon');
-        const btn = document.getElementById('toggle-categories-btn');
-        
-        if (!container) return;
-        
-        const isExpanded = container.dataset.expanded === 'true';
-        
-        if (isExpanded) {
-            // Collapse
-            container.classList.add('max-h-[26px]');
-            container.classList.remove('max-h-[200px]');
-            container.dataset.expanded = 'false';
-            icon?.classList.remove('rotate-180');
-            btn?.classList.remove('bg-transparent');
-        } else {
-            // Expand
-            container.classList.remove('max-h-[26px]');
-            container.classList.add('max-h-[200px]');
-            container.dataset.expanded = 'true';
-            icon?.classList.add('rotate-180');
-            btn?.classList.add('bg-transparent');
-        }
-    }
-
-    /**
-     * Reset category chips to collapsed state
-     */
-    resetCategoriesExpand() {
-        const container = document.getElementById('browse-category-chips');
-        const icon = document.getElementById('toggle-categories-icon');
-        const btn = document.getElementById('toggle-categories-btn');
-        
-        if (container) {
-            container.classList.add('max-h-[26px]');
-            container.classList.remove('max-h-[200px]');
-            container.dataset.expanded = 'false';
-        }
-        icon?.classList.remove('rotate-180');
-        btn?.classList.remove('bg-transparent');
-    }
-
-    /**
      * Join a public channel from browse/explore
      * @param {string} streamId - Channel stream ID
-     * @param {Object} channelInfo - Channel metadata (optional, will fallback to cache)
+     * @param {Object} channelInfo - Channel metadata (optional)
      */
     async joinPublicChannel(streamId, channelInfo = null) {
         try {
-            // Use passed channelInfo or fallback to local cache
-            const info = channelInfo || this.cachedPublicChannels?.find(ch => ch.streamId === streamId);
-            
             // If password-protected, ask for password
-            if (info?.type === 'password') {
+            if (channelInfo?.type === 'password') {
                 const password = await this.showPasswordInputModal('Join Password Channel', 
-                    `Enter password for "${info.name}":`);
+                    `Enter password for "${channelInfo.name}":`);
                 
                 if (!password) {
                     return; // User cancelled
@@ -3116,23 +2867,22 @@ class UIController {
                 
                 this.showLoadingToast('Joining channel...', 'This may take a moment');
                 await channelManager.joinChannel(streamId, password, {
-                    name: info?.name,
+                    name: channelInfo?.name,
                     type: 'password',
-                    readOnly: info?.readOnly || false,
-                    createdBy: info?.createdBy
+                    readOnly: channelInfo?.readOnly || false,
+                    createdBy: channelInfo?.createdBy
                 });
             } else {
                 this.showLoadingToast('Joining channel...', 'This may take a moment');
                 await channelManager.joinChannel(streamId, null, {
-                    name: info?.name,
-                    type: info?.type || 'public',
-                    readOnly: info?.readOnly || false,
-                    createdBy: info?.createdBy
+                    name: channelInfo?.name,
+                    type: channelInfo?.type || 'public',
+                    readOnly: channelInfo?.readOnly || false,
+                    createdBy: channelInfo?.createdBy
                 });
             }
             
             this.hideLoadingToast();
-            this.hideBrowseChannelsModal();
             this.renderChannelList();
             this.showNotification('Joined channel successfully!', 'success');
         } catch (error) {

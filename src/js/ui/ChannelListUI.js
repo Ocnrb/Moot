@@ -4,7 +4,7 @@
  */
 
 import { Logger } from '../logger.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, escapeAttr } from './utils.js';
 
 class ChannelListUI {
     constructor() {
@@ -156,8 +156,8 @@ class ChannelListUI {
 
         return `
             <div
-                class="channel-item px-3 py-4 mx-2 rounded-lg cursor-pointer bg-[#151515] border border-[#222] hover:bg-[#1e1e1e] hover:border-[#333] transition group ${activeClass}"
-                data-stream-id="${channel.streamId}"
+                class="channel-item px-3 py-3 mx-2 rounded-lg cursor-pointer bg-[#151515] border border-[#222] hover:bg-[#1e1e1e] hover:border-[#333] transition group ${activeClass}"
+                data-stream-id="${escapeAttr(channel.streamId)}"
                 draggable="true"
             >
                 <div class="flex items-center justify-between">
@@ -177,8 +177,8 @@ class ChannelListUI {
                     </div>
                     <div class="flex items-center gap-1.5 ml-2">
                         ${hasUnread 
-                            ? `<span class="channel-msg-count text-[10px] ${countClass} px-1.5 py-0.5 rounded" data-channel-count="${channel.streamId}">${displayCount}</span>` 
-                            : `<span class="channel-msg-count text-[10px] text-[#666] bg-[#252525] px-1.5 py-0.5 rounded hidden" data-channel-count="${channel.streamId}">0</span>`
+                            ? `<span class="channel-msg-count text-[10px] ${countClass} px-1.5 py-0.5 rounded" data-channel-count="${escapeAttr(channel.streamId)}">${displayCount}</span>` 
+                            : `<span class="channel-msg-count text-[10px] text-[#666] bg-[#252525] px-1.5 py-0.5 rounded hidden" data-channel-count="${escapeAttr(channel.streamId)}">0</span>`
                         }
                         <svg class="w-3.5 h-3.5 text-[#444]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.25 4.5l7.5 7.5-7.5 7.5"></path>

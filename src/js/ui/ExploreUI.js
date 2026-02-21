@@ -3,7 +3,7 @@
  * Handles the Explore view (front-page) for browsing public channels
  */
 
-import { escapeHtml } from './utils.js';
+import { escapeHtml, escapeAttr } from './utils.js';
 
 class ExploreUI {
     constructor() {
@@ -37,94 +37,74 @@ class ExploreUI {
             : '';
 
         return `
-            <div class="explore-view flex h-full bg-[#161616]">
-                <!-- Sidebar: Channel Type -->
-                <div class="w-36 bg-[#0d0d0d] border-r border-[#333] pt-3 flex flex-col flex-shrink-0">
-                    <div class="px-3 mb-2">
-                        <span class="text-[10px] font-medium text-white/30 uppercase tracking-wider">Type</span>
+            <div class="explore-view flex flex-col h-full bg-[#161616]">
+                <!-- Filters Section -->
+                <div class="px-5 pt-3 pb-3 space-y-3">
+                    <!-- Search + Language Filter -->
+                    <div class="flex gap-3">
+                        <div class="flex-1 relative">
+                            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
+                            </svg>
+                            <input
+                                type="text"
+                                id="explore-search-input"
+                                placeholder="Search channels..."
+                                class="w-full bg-white/5 border border-white/10 text-white pl-10 pr-4 py-2.5 rounded-xl text-sm focus:outline-none focus:border-white/30 transition placeholder:text-white/30"
+                            />
+                        </div>
+                        <select id="explore-language-filter" class="bg-white/5 border border-white/10 text-white/80 px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-white/30 transition cursor-pointer">
+                            <option value="" selected>All Languages</option>
+                            <option value="en">English</option>
+                            <option value="pt">Português</option>
+                            <option value="es">Español</option>
+                            <option value="fr">Français</option>
+                            <option value="de">Deutsch</option>
+                            <option value="it">Italiano</option>
+                            <option value="zh">中文</option>
+                            <option value="ja">日本語</option>
+                            <option value="ko">한국어</option>
+                            <option value="ru">Русский</option>
+                            <option value="ar">العربية</option>
+                            <option value="other">Other</option>
+                        </select>
                     </div>
-                    <nav class="space-y-1 px-2 pb-3">
-                        <button type="button" data-browse-filter="public" class="browse-filter-tab w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm text-left transition-all bg-white/10 text-white">
-                            <svg class="w-4 h-4 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418"/></svg>
-                            <span>Public</span>
+
+                    <!-- Category Chips (collapsible) -->
+                    <div class="relative">
+                        <div id="explore-category-chips" class="flex flex-wrap gap-1.5 overflow-hidden max-h-[26px] transition-all duration-200" data-expanded="false">
+                            <button type="button" data-category="" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white text-black">All</button>
+                            <button type="button" data-category="general" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">General</button>
+                            <button type="button" data-category="politics" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Politics</button>
+                            <button type="button" data-category="news" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">News</button>
+                            <button type="button" data-category="tech" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Tech & AI</button>
+                            <button type="button" data-category="crypto" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Crypto</button>
+                            <button type="button" data-category="finance" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Finance</button>
+                            <button type="button" data-category="science" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Science</button>
+                            <button type="button" data-category="gaming" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Gaming</button>
+                            <button type="button" data-category="entertainment" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Entertainment</button>
+                            <button type="button" data-category="sports" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Sports</button>
+                            <button type="button" data-category="health" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Health</button>
+                            <button type="button" data-category="education" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Education</button>
+                            <button type="button" data-category="comedy" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Comedy</button>
+                            ${nsfwChips}
+                        </div>
+                        <button id="explore-toggle-categories-btn" type="button" class="hidden absolute right-0 top-0 h-[26px] px-2 items-center bg-gradient-to-l from-[#161616] via-[#161616] to-transparent pl-6 text-white/40 hover:text-white/60 transition">
+                            <svg id="explore-toggle-categories-icon" class="w-4 h-4 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 9l-7 7-7-7"/>
+                            </svg>
                         </button>
-                        <button type="button" data-browse-filter="password" class="browse-filter-tab w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm text-left transition-all text-white/60 hover:text-white/90 hover:bg-white/5">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>
-                            <span>Private</span>
-                        </button>
-                    </nav>
+                    </div>
                 </div>
 
-                <!-- Content Panel -->
-                <div class="flex-1 flex flex-col overflow-hidden">
-                    <!-- Filters Section -->
-                    <div class="px-5 pt-4 pb-3 space-y-3">
-                        <!-- Search + Language Filter -->
-                        <div class="flex gap-3">
-                            <div class="flex-1 relative">
-                                <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
-                                </svg>
-                                <input
-                                    type="text"
-                                    id="explore-search-input"
-                                    placeholder="Search channels..."
-                                    class="w-full bg-white/5 border border-white/10 text-white pl-10 pr-4 py-2.5 rounded-xl text-sm focus:outline-none focus:border-white/30 transition placeholder:text-white/30"
-                                />
-                            </div>
-                            <select id="explore-language-filter" class="bg-white/5 border border-white/10 text-white/80 px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-white/30 transition cursor-pointer">
-                                <option value="" selected>All Languages</option>
-                                <option value="en">English</option>
-                                <option value="pt">Português</option>
-                                <option value="es">Español</option>
-                                <option value="fr">Français</option>
-                                <option value="de">Deutsch</option>
-                                <option value="it">Italiano</option>
-                                <option value="zh">中文</option>
-                                <option value="ja">日本語</option>
-                                <option value="ko">한국어</option>
-                                <option value="ru">Русский</option>
-                                <option value="ar">العربية</option>
-                                <option value="other">Other</option>
-                            </select>
-                        </div>
+                <!-- Subtle separator -->
+                <div class="mx-5 border-t border-[#333]"></div>
 
-                        <!-- Category Chips (collapsible) -->
-                        <div class="relative">
-                            <div id="explore-category-chips" class="flex flex-wrap gap-1.5 overflow-hidden max-h-[26px] transition-all duration-200" data-expanded="false">
-                                <button type="button" data-category="" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white text-black">All</button>
-                                <button type="button" data-category="general" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">General</button>
-                                <button type="button" data-category="politics" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Politics</button>
-                                <button type="button" data-category="news" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">News</button>
-                                <button type="button" data-category="tech" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Tech & AI</button>
-                                <button type="button" data-category="crypto" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Crypto</button>
-                                <button type="button" data-category="finance" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Finance</button>
-                                <button type="button" data-category="science" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Science</button>
-                                <button type="button" data-category="gaming" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Gaming</button>
-                                <button type="button" data-category="entertainment" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Entertainment</button>
-                                <button type="button" data-category="sports" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Sports</button>
-                                <button type="button" data-category="health" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Health</button>
-                                <button type="button" data-category="education" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Education</button>
-                                <button type="button" data-category="comedy" class="explore-category-chip px-2.5 py-1 rounded-md text-xs font-medium transition bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80">Comedy</button>
-                                ${nsfwChips}
-                            </div>
-                            <button id="explore-toggle-categories-btn" type="button" class="hidden absolute right-0 top-0 h-[26px] px-2 items-center bg-gradient-to-l from-[#161616] via-[#161616] to-transparent pl-6 text-white/40 hover:text-white/60 transition">
-                                <svg id="explore-toggle-categories-icon" class="w-4 h-4 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 9l-7 7-7-7"/>
-                                </svg>
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- Subtle separator -->
-                    <div class="mx-5 border-t border-[#333]"></div>
-
-                    <!-- Channel List -->
-                    <div id="explore-channels-list" class="flex-1 overflow-y-auto px-5 py-3 space-y-2">
-                        <div class="flex flex-col items-center justify-center py-12 text-white/40">
-                            <div class="spinner mb-3" style="width: 28px; height: 28px;"></div>
-                            <p class="text-sm">Loading channels...</p>
-                        </div>
+                <!-- Channel List -->
+                <div id="explore-channels-list" class="flex-1 overflow-y-auto px-5 py-3 space-y-2">
+                    <div class="flex flex-col items-center justify-center py-12 text-white/40">
+                        <div class="spinner mb-3" style="width: 28px; height: 28px;"></div>
+                        <p class="text-sm">Loading channels...</p>
                     </div>
                 </div>
             </div>
@@ -141,8 +121,8 @@ class ExploreUI {
             this.filterChannels(e.target.value);
         });
         
-        // Type filter tabs
-        document.querySelectorAll('.explore-view .browse-filter-tab').forEach(tab => {
+        // Type filter tabs (both in header and explore view)
+        document.querySelectorAll('#explore-type-tabs .browse-filter-tab').forEach(tab => {
             tab.addEventListener('click', () => {
                 this.browseTypeFilter = tab.dataset.browseFilter;
                 this.updateFilterTabs();
@@ -318,7 +298,7 @@ class ExploreUI {
                 : '';
             
             return `
-            <div class="p-3 bg-white/5 border border-white/5 rounded-xl hover:bg-white/[0.07] hover:border-white/10 transition cursor-pointer explore-channel-item group" data-stream-id="${ch.streamId}" data-type="${ch.type || 'public'}">
+            <div class="p-3 bg-white/5 border border-white/5 rounded-xl hover:bg-white/[0.07] hover:border-white/10 transition cursor-pointer explore-channel-item group" data-stream-id="${escapeAttr(ch.streamId)}" data-type="${escapeAttr(ch.type || 'public')}">
                 <div class="flex items-start justify-between gap-3">
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-2 flex-wrap">
@@ -356,14 +336,14 @@ class ExploreUI {
      * Update filter tabs UI state
      */
     updateFilterTabs() {
-        document.querySelectorAll('.explore-view .browse-filter-tab').forEach(tab => {
+        document.querySelectorAll('#explore-type-tabs .browse-filter-tab').forEach(tab => {
             const isActive = tab.dataset.browseFilter === this.browseTypeFilter;
             if (isActive) {
-                tab.classList.add('bg-white/10', 'text-white');
-                tab.classList.remove('text-white/60', 'hover:text-white/90', 'hover:bg-white/5');
+                tab.classList.add('text-[#F6851B]', 'border-[#F6851B]');
+                tab.classList.remove('text-white/40', 'hover:text-white/60', 'border-transparent');
             } else {
-                tab.classList.remove('bg-white/10', 'text-white');
-                tab.classList.add('text-white/60', 'hover:text-white/90', 'hover:bg-white/5');
+                tab.classList.remove('text-[#F6851B]', 'border-[#F6851B]');
+                tab.classList.add('text-white/40', 'hover:text-white/60', 'border-transparent');
             }
         });
     }

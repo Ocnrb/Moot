@@ -14,6 +14,7 @@ import { mediaController } from './media.js';
 import { subscriptionManager } from './subscriptionManager.js';
 import { Logger } from './logger.js';
 import { getAvatar } from './ui/AvatarGenerator.js';
+import { escapeHtml, escapeAttr } from './ui/utils.js';
 
 class App {
     constructor() {
@@ -1348,12 +1349,12 @@ class App {
                                 </svg>
                             </div>
                             <div class="flex-1 min-w-0">
-                                <div class="text-[14px] font-medium text-white truncate">${inviteData.name}</div>
+                                <div class="text-[14px] font-medium text-white truncate">${escapeHtml(inviteData.name)}</div>
                                 <div class="text-[12px] text-[#666]">${this.getChannelTypeLabel(inviteData.type)}</div>
                             </div>
                         </div>
                         <div class="pt-2 border-t border-[#282828]">
-                            <div class="text-[11px] text-[#555] font-mono break-all">${inviteData.streamId}</div>
+                            <div class="text-[11px] text-[#555] font-mono break-all">${escapeHtml(inviteData.streamId)}</div>
                         </div>
                     </div>
                 </div>

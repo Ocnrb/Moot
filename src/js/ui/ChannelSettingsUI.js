@@ -5,6 +5,7 @@
 
 import { Logger } from '../logger.js';
 import { modalManager } from './ModalManager.js';
+import { escapeHtml, escapeAttr } from './utils.js';
 
 class ChannelSettingsUI {
     constructor() {
@@ -229,7 +230,7 @@ class ChannelSettingsUI {
                         <h3 class="text-lg font-medium text-white/90">Leave Channel</h3>
                     </div>
                     <p class="text-sm text-white/50 mb-4">
-                        Are you sure you want to leave <span class="text-white/80 font-medium">"${currentChannel.name}"</span>?
+                        Are you sure you want to leave <span class="text-white/80 font-medium">"${escapeHtml(currentChannel.name)}"</span>?
                     </p>
                     <p class="text-xs text-white/30 bg-white/5 rounded-lg px-3 py-2">
                         You can rejoin later if you have the invite link.
@@ -365,7 +366,7 @@ class ChannelSettingsUI {
             const canManage = !isMe && (isOwner || (currentUserCanGrant && !memberIsOwner && !isCreator && !memberIsAdmin));
             const menuBtn = canManage 
                 ? `<button class="member-menu-btn text-white/30 hover:text-white/60 p-1.5 rounded-lg hover:bg-white/5 transition" 
-                          data-address="${address}" data-can-grant="${canGrant}" data-current-is-owner="${isOwner}" title="Manage member">
+                          data-address="${escapeAttr(address)}" data-can-grant="${canGrant}" data-current-is-owner="${isOwner}" title="Manage member">
                     <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                         <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z"/>
                     </svg>
@@ -637,7 +638,7 @@ class ChannelSettingsUI {
                     <button id="cancel-remove-member-btn" class="flex-1 px-4 py-3 text-sm text-white/60 hover:text-white hover:bg-white/5 transition">
                         Cancel
                     </button>
-                    <button id="confirm-remove-member-btn" class="flex-1 px-4 py-3 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 border-l border-white/5 transition" data-address="${address}">
+                    <button id="confirm-remove-member-btn" class="flex-1 px-4 py-3 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 border-l border-white/5 transition" data-address="${escapeAttr(address)}">
                         Remove
                     </button>
                 </div>

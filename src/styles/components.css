@@ -45,37 +45,6 @@ body {
     margin-right: auto;
 }
 
-/* Desktop: all messages aligned to left, same style as received */
-@media (min-width: 768px) {
-    .own-message {
-        margin-left: 0;
-        margin-right: auto;
-        flex-direction: row;
-    }
-    
-    /* Move avatar to left on desktop */
-    .own-message .message-avatar {
-        order: -1;
-    }
-    
-    /* Flip bubble corners to left-anchor style */
-    .own-message.msg-group-single .message-bubble {
-        border-radius: 1rem 1rem 1rem 0;
-    }
-    
-    .own-message.msg-group-first .message-bubble {
-        border-radius: 1rem 1rem 1rem 0.25rem;
-    }
-    
-    .own-message.msg-group-middle .message-bubble {
-        border-radius: 0.25rem 1rem 1rem 0.25rem;
-    }
-    
-    .own-message.msg-group-last .message-bubble {
-        border-radius: 0.25rem 1rem 1rem 0;
-    }
-}
-
 .message-bubble {
     padding: 0.2rem 0.7rem;
     position: relative;
@@ -133,6 +102,37 @@ body {
     background-color: #1e1e1e;
     color: #d1d5db;
     border-radius: 0.25rem 1rem 1rem 0;
+}
+
+/* Desktop: all messages aligned to left, same style as received */
+@media (min-width: 768px) {
+    .own-message {
+        margin-left: 0;
+        margin-right: auto;
+        flex-direction: row;
+    }
+    
+    /* Move avatar to left on desktop */
+    .own-message .message-avatar {
+        order: -1;
+    }
+    
+    /* Flip bubble corners to left-anchor style */
+    .own-message.msg-group-single .message-bubble {
+        border-radius: 1rem 1rem 1rem 0;
+    }
+    
+    .own-message.msg-group-first .message-bubble {
+        border-radius: 1rem 1rem 1rem 0.25rem;
+    }
+    
+    .own-message.msg-group-middle .message-bubble {
+        border-radius: 0.25rem 1rem 1rem 0.25rem;
+    }
+    
+    .own-message.msg-group-last .message-bubble {
+        border-radius: 0.25rem 1rem 1rem 0;
+    }
 }
 
 /* Tighter spacing within groups - using margin-top system instead */

@@ -3,14 +3,14 @@
   "version": "1.0.0",
   "description": "P2P Decentralized Chat",
   "scripts": {
-    "build:css": "npx tailwindcss -i ./src/styles/input.css -o ./css/output.css && copy .\\src\\styles\\components.css .\\css\\components.css",
+    "build:css": "npx tailwindcss -i ./src/styles/input.css -o ./css/output.css && npx shx cp src/styles/components.css css/components.css",
     "watch:css": "npx tailwindcss -i ./src/styles/input.css -o ./css/output.css --watch",
     "build:js": "webpack --mode production",
     "watch:js": "webpack --mode development --watch",
     "build": "npm run build:css && npm run build:js",
     "watch": "npm run watch:css & npm run watch:js",
-    "build:minify": "npx tailwindcss -i ./src/styles/input.css -o ./css/output.css --minify && copy .\\src\\styles\\components.css .\\css\\components.css && webpack --mode production",
-    "clean": "if exist js rmdir /s /q js && if exist css rmdir /s /q css",
+    "build:minify": "npx tailwindcss -i ./src/styles/input.css -o ./css/output.css --minify && npx shx cp src/styles/components.css css/components.css && webpack --mode production",
+    "clean": "npx shx rm -rf js css",
     "serve": "npm run build && npx serve ."
   },
   "dependencies": {

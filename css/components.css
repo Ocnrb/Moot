@@ -336,6 +336,15 @@ body {
     right: -28px;
 }
 
+/* Desktop: own-message buttons also on right (all messages left-aligned) */
+@media (min-width: 768px) {
+    .own-message .react-trigger,
+    .own-message .reply-trigger {
+        left: auto;
+        right: -28px;
+    }
+}
+
 .react-trigger svg,
 .reply-trigger svg {
     display: block;

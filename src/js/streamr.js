@@ -1588,9 +1588,9 @@ class StreamrController {
             
             // Helper to check if message looks like a text message
             const isTextMessage = (msg) => {
-                // Has explicit text type
-                if (msg?.type === 'text') return true;
-                // OR has text message structure (id, text, sender, timestamp)
+                // Has explicit text type ('text' or 'message')
+                if (msg?.type === 'text' || msg?.type === 'message') return true;
+                // OR has text message structure (id, text, sender, timestamp) without explicit type
                 if (msg?.id && msg?.text && msg?.sender && msg?.timestamp && !msg?.type) return true;
                 return false;
             };

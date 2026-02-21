@@ -2271,7 +2271,7 @@ class UIController {
             type: 'message',
             text: text,
             sender: authManager.getAddress(),
-            senderName: identityManager.getDisplayName(authManager.getAddress()),
+            senderName: await identityManager.getDisplayName(authManager.getAddress()),
             timestamp: Date.now(),
             id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
         };
@@ -2983,6 +2983,9 @@ class UIController {
             if (this.previewChannel) {
                 await this.exitPreviewMode(false); // Don't navigate away
             }
+
+            // Clear current channel selection (preview is not a "real" selection)
+            channelManager.setCurrentChannel(null);
 
             this.showLoadingToast('Loading channel...', 'Connecting to stream');
 

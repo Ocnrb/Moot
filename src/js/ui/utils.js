@@ -11,12 +11,14 @@ import { getAddressColor } from './AvatarGenerator.js';
  * @returns {string} - Escaped string
  */
 export function escapeHtml(str) {
-    if (!str) return '';
-    return str.replace(/&/g, '&amp;')
-              .replace(/</g, '&lt;')
-              .replace(/>/g, '&gt;')
-              .replace(/"/g, '&quot;')
-              .replace(/'/g, '&#39;');
+    if (str === null || str === undefined) return '';
+    // Ensure str is a string (handles objects, numbers, etc.)
+    const s = typeof str === 'string' ? str : String(str);
+    return s.replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
 }
 
 /**
@@ -65,4 +67,33 @@ export function isValidMediaUrl(url) {
  */
 export function addressToColor(address) {
     return getAddressColor(address);
+}
+
+/**
+ * Convert URLs in text to clickable links
+ * MUST be called on already HTML-escaped text to prevent XSS
+ * @param {string} escapedText - HTML-escaped text
+ * @returns {string} - Text with URLs converted to anchor tags
+ */
+export function linkify(escapedText) {
+    if (!escapedText) return '';
+    
+    // URL regex pattern - matches http, https URLs
+    // Works on escaped text where < > are already &lt; &gt;
+    const urlPattern = /(https?:\/\/[^\s<>"'`()\[\]{}]+)/gi;
+    
+    return escapedText.replace(urlPattern, (url) => {
+        // Decode HTML entities for the href (browser will encode as needed)
+        const decodedUrl = url
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'");
+        
+        // Truncate display text if too long
+        const displayUrl = url.length > 50 ? url.substring(0, 47) + '...' : url;
+        
+        return `<a href="${decodedUrl}" target="_blank" rel="noopener noreferrer" class="text-[#F6851B] hover:underline break-all">${displayUrl}</a>`;
+    });
 }

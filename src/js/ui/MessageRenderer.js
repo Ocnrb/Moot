@@ -3,7 +3,7 @@
  * Handles rendering of messages, content types, and related UI
  */
 
-import { escapeHtml, escapeAttr, formatAddress, addressToColor } from './utils.js';
+import { escapeHtml, escapeAttr, formatAddress, addressToColor, linkify } from './utils.js';
 import { GroupPosition, shouldShowSenderName } from './MessageGrouper.js';
 import { getAvatar } from './AvatarGenerator.js';
 
@@ -338,7 +338,8 @@ class MessageRenderer {
                 
             default:
                 const escapedText = escapeHtml(msg.text || '');
-                const withLineBreaks = escapedText.replace(/\n/g, '<br>');
+                const withLinks = linkify(escapedText);
+                const withLineBreaks = withLinks.replace(/\n/g, '<br>');
                 return this.wrapInlineEmojis(withLineBreaks);
         }
     }

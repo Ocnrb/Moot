@@ -1188,7 +1188,8 @@ class UIController {
         const state = historyManager.getInitialState();
         
         if (!state || state.view === 'explore') {
-            // Default view - replace state to set initial history entry
+            // Default view - show explore and set initial history entry
+            await this.showExploreView();
             historyManager.replaceState({ view: 'explore' });
             return;
         }
@@ -1218,6 +1219,7 @@ class UIController {
                 break;
 
             default:
+                await this.showExploreView();
                 historyManager.replaceState({ view: 'explore' });
                 break;
         }

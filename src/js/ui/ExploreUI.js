@@ -168,6 +168,10 @@ class ExploreUI {
         if (langDropdown) {
             langDropdown.value = this.browseLanguageFilterValue;
         }
+        
+        // Sync tab and chip UI to match reset state
+        this.updateFilterTabs();
+        this.updateCategoryChips();
     }
 
     /**

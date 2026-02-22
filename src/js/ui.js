@@ -974,7 +974,14 @@ class UIController {
             this.elements.onlineSeparator?.classList.remove('hidden');
             
             // Push to browser history for back/forward navigation
-            historyManager.pushState({ view: 'channel', streamId });
+            // Use replaceState if coming from another channel (avoids channel->channel->channel stack)
+            const currentState = window.history.state;
+            if (currentState?.view === 'channel') {
+                // Replace instead of push to avoid channel-to-channel stacking
+                historyManager.replaceState({ view: 'channel', streamId });
+            } else {
+                historyManager.pushState({ view: 'channel', streamId });
+            }
 
             // Load reactions from channel state
             this.loadChannelReactions(streamId);
@@ -1146,7 +1153,17 @@ class UIController {
      */
     async navigateToState(state) {
         if (!state || !state.view) {
-            await this.showExploreView();
+            // Clear any preview state first
+            if (this.previewChannel) {
+                await this.exitPreviewMode(false);
+            }
+            
+            // On mobile, go back to sidebar; on desktop, show explore
+            if (this.isMobileView()) {
+                this.closeChatView();
+            } else {
+                await this.showExploreView();
+            }
             return;
         }
 
@@ -1160,8 +1177,17 @@ class UIController {
                     if (channel) {
                         await this._selectChannelWithoutHistory(state.streamId);
                     } else {
-                        // Channel not in list - show explore
-                        await this.showExploreView();
+                        // Channel not in list - clear preview and go back
+                        if (this.previewChannel) {
+                            await this.exitPreviewMode(false);
+                        }
+                        
+                        // Go back to explore/sidebar
+                        if (this.isMobileView()) {
+                            this.closeChatView();
+                        } else {
+                            await this.showExploreView();
+                        }
                         this.showNotification('Channel not found in your list', 'warning');
                     }
                 }
@@ -1175,7 +1201,18 @@ class UIController {
 
             case 'explore':
             default:
-                await this.showExploreView();
+                // Clear preview state if active
+                if (this.previewChannel) {
+                    await this.exitPreviewMode(false);
+                }
+                
+                // On mobile, back to explore means close chat view (show sidebar)
+                // User can then click Explore button if they want explore view
+                if (this.isMobileView()) {
+                    this.closeChatView();
+                } else {
+                    await this.showExploreView();
+                }
                 break;
         }
     }
@@ -1300,41 +1337,17 @@ class UIController {
      * Enter preview mode without pushing to history (for popstate handling)
      * @private
      */
+    /**
+     * Enter preview mode without pushing to history (for popstate handling)
+     * @private
+     */
     async _enterPreviewWithoutHistory(streamId, channelInfo) {
-        try {
-            if (channelManager.getChannel(streamId)) {
-                await this._selectChannelWithoutHistory(streamId);
-                return;
-            }
-
-            if (this.previewChannel) {
-                await this.exitPreviewMode(false);
-            }
-
-            channelManager.setCurrentChannel(null);
-            this.showLoadingToast('Loading channel...', 'Connecting to stream');
-
-            this.previewChannel = {
-                streamId,
-                channelInfo,
-                name: channelInfo?.name || streamId.split('/')[1]?.replace(/-\d$/, '') || streamId,
-                type: channelInfo?.type || 'public',
-                readOnly: channelInfo?.readOnly || false,
-                messages: []
-            };
-
-            await subscriptionManager.setPreviewChannel(streamId);
-            this.hideLoadingToast();
-            this._showPreviewUI();
-            this.openChatView();
-
-            Logger.info('Entered preview mode for:', streamId);
-        } catch (error) {
-            this.hideLoadingToast();
-            this.previewChannel = null;
-            Logger.error('Failed to enter preview mode:', error);
-            this.showNotification('Failed to load channel: ' + error.message, 'error');
+        // Delegate to enterPreviewMode with history disabled
+        if (channelManager.getChannel(streamId)) {
+            await this._selectChannelWithoutHistory(streamId);
+            return;
         }
+        await this._enterPreviewCore(streamId, channelInfo, false);
     }
 
     /**
@@ -1342,6 +1355,16 @@ class UIController {
      * This is the front-page when no channel is selected
      */
     async showExploreView() {
+        // Clear any active preview state first
+        if (this.previewChannel) {
+            try {
+                await subscriptionManager.clearPreviewChannel();
+            } catch (e) {
+                Logger.warn('Error clearing preview:', e.message);
+            }
+            this.previewChannel = null;
+        }
+        
         // Hide message input (not needed in Explore view)
         this.elements.messageInputContainer?.classList.add('hidden');
         
@@ -1354,8 +1377,9 @@ class UIController {
         this.elements.currentChannelInfo.textContent = '';
         this.elements.currentChannelInfo.parentElement.classList.add('hidden');
         
-        // Hide channel-specific buttons
+        // Hide channel-specific buttons (including Join button from preview)
         this.elements.inviteUsersBtn?.classList.add('hidden');
+        this.elements.joinChannelBtn?.classList.add('hidden');
         this.elements.channelMenuBtn?.classList.add('hidden');
         this.elements.onlineHeader?.classList.add('hidden');
         this.elements.onlineSeparator?.classList.add('hidden');
@@ -3165,6 +3189,10 @@ class UIController {
             
             this.hideLoadingToast();
             this.renderChannelList();
+            
+            // Automatically enter the channel after joining
+            await this.selectChannel(streamId);
+            
             this.showNotification('Joined channel successfully!', 'success');
         } catch (error) {
             this.hideLoadingToast();
@@ -3179,17 +3207,27 @@ class UIController {
      * @param {Object} channelInfo - Channel metadata
      */
     async enterPreviewMode(streamId, channelInfo = null) {
-        try {
-            // Check if channel is already in user's list
-            if (channelManager.getChannel(streamId)) {
-                // Already joined - just select it normally
-                await this.selectChannel(streamId);
-                return;
-            }
+        // Check if channel is already in user's list
+        if (channelManager.getChannel(streamId)) {
+            // Already joined - just select it normally
+            await this.selectChannel(streamId);
+            return;
+        }
+        await this._enterPreviewCore(streamId, channelInfo, true);
+    }
 
+    /**
+     * Core preview mode logic shared by enterPreviewMode and _enterPreviewWithoutHistory
+     * @param {string} streamId - Channel stream ID  
+     * @param {Object} channelInfo - Channel metadata (optional)
+     * @param {boolean} pushHistory - Whether to push to browser history
+     * @private
+     */
+    async _enterPreviewCore(streamId, channelInfo, pushHistory) {
+        try {
             // Exit any existing preview first (only one preview at a time)
             if (this.previewChannel) {
-                await this.exitPreviewMode(false); // Don't navigate away
+                await this.exitPreviewMode(false);
             }
 
             // Clear current channel selection (preview is not a "real" selection)
@@ -3197,11 +3235,20 @@ class UIController {
 
             this.showLoadingToast('Loading channel...', 'Connecting to stream');
 
+            // If no channelInfo, try to fetch from The Graph
+            if (!channelInfo) {
+                try {
+                    channelInfo = await graphAPI.getChannelInfo(streamId);
+                } catch (e) {
+                    Logger.warn('Could not get channel info from Graph:', e.message);
+                }
+            }
+
             // Store preview state
             this.previewChannel = {
                 streamId,
                 channelInfo,
-                name: channelInfo?.name || streamId.split('/')[1]?.replace(/-\d$/, '') || streamId,
+                name: this._getChannelDisplayName(streamId, channelInfo),
                 type: channelInfo?.type || 'public',
                 readOnly: channelInfo?.readOnly || false,
                 messages: []
@@ -3218,8 +3265,15 @@ class UIController {
             // Mobile: navigate to chat view
             this.openChatView();
             
-            // Push to browser history
-            historyManager.pushState({ view: 'preview', streamId });
+            // Push to browser history if requested
+            if (pushHistory) {
+                const currentState = window.history.state;
+                if (currentState?.view === 'preview' || currentState?.view === 'channel') {
+                    historyManager.replaceState({ view: 'preview', streamId });
+                } else {
+                    historyManager.pushState({ view: 'preview', streamId });
+                }
+            }
 
             Logger.info('Entered preview mode for:', streamId);
         } catch (error) {
@@ -3228,6 +3282,23 @@ class UIController {
             Logger.error('Failed to enter preview mode:', error);
             this.showNotification('Failed to load channel: ' + error.message, 'error');
         }
+    }
+
+    /**
+     * Get display name for a channel, with fallbacks
+     * @param {string} streamId - Channel stream ID
+     * @param {Object} channelInfo - Channel metadata (optional)
+     * @returns {string} - Display name
+     * @private
+     */
+    _getChannelDisplayName(streamId, channelInfo) {
+        if (channelInfo?.name) return channelInfo.name;
+        // Extract name from streamId (format: address/name-N)
+        const namePart = streamId.split('/')[1];
+        if (namePart) {
+            return namePart.replace(/-\d$/, '');
+        }
+        return streamId;
     }
 
     /**

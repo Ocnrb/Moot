@@ -1629,7 +1629,7 @@ class ChannelManager {
         
         // DEDUPLICATION: Create unique key for this reaction operation
         // Prevents duplicate sends on rapid clicks
-        const reactionKey = `${messageStreamId}:${messageId}:${emoji}:${action}`;
+        const reactionKey = `${streamId}:${messageId}:${emoji}:${action}`;
         
         if (this.pendingReactions.has(reactionKey)) {
             Logger.debug('Reaction already pending, skipping duplicate:', reactionKey);
@@ -1639,7 +1639,7 @@ class ChannelManager {
         this.pendingReactions.add(reactionKey);
         
         try {
-            const channel = this.channels.get(messageStreamId);
+            const channel = this.channels.get(streamId);
             if (!channel) return;
 
             const reaction = {
@@ -1653,7 +1653,7 @@ class ChannelManager {
 
             // Send to MESSAGE stream (stored) via publishReaction
             await streamrController.publishReaction(
-                messageStreamId,
+                streamId,
                 reaction,
                 channel.password
             );

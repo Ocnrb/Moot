@@ -1329,7 +1329,6 @@ class UIController {
             channelManager.preloadDeletePermission(streamId);
             
             this.openChatView();
-            this.highlightSelectedChannel(streamId);
         }
     }
 
@@ -3460,8 +3459,19 @@ class UIController {
     handlePreviewMessage(message) {
         if (!this.previewChannel) return;
 
-        // Filter out non-content messages (presence, typing, reactions)
-        if (message?.type === 'presence' || message?.type === 'typing' || message?.type === 'reaction') {
+        // Filter out non-content messages (presence, typing)
+        if (message?.type === 'presence' || message?.type === 'typing') {
+            return;
+        }
+
+        // Handle reactions in preview mode
+        if (message?.type === 'reaction') {
+            reactionManager.handleIncomingReaction(
+                message.messageId,
+                message.emoji,
+                message.user,
+                message.action || 'add'
+            );
             return;
         }
 

@@ -488,4 +488,3 @@ class GraphAPI {
 
 // Export singleton instance
 export const graphAPI = new GraphAPI();
-

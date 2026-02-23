@@ -338,52 +338,67 @@ class ChannelManager {
                 return this.channels.get(messageStreamId);
             }
 
-            // Check permissions via Streamr SDK FIRST (real-time on-chain check)
-            Logger.debug('Checking channel permissions via SDK...');
-            const permissions = await streamrController.checkPermissions(messageStreamId);
+            // Determine type: use provided, detect via Graph API, or infer from password
+            let channelType = options.type;
+            let members = [];
+            let createdBy = options.createdBy || null;
+            
+            // OPTIMIZATION: Run SDK permission check and Graph API calls in PARALLEL
+            // This significantly speeds up the join process
+            Logger.debug('Checking permissions and channel info in parallel...');
+            
+            const needGraphData = !channelType || !createdBy;
+            
+            const [permissions, graphResult] = await Promise.all([
+                // 1. SDK permission check (blockchain RPC calls)
+                streamrController.checkPermissions(messageStreamId),
+                
+                // 2. Graph API calls (only if needed) - detectStreamType and getStreamMembers
+                //    share cached getStreamPermissions() internally, so they're efficient together
+                needGraphData ? (async () => {
+                    try {
+                        const [detectedType, streamMembers] = await Promise.all([
+                            !channelType ? graphAPI.detectStreamType(messageStreamId) : Promise.resolve(channelType),
+                            graphAPI.getStreamMembers(messageStreamId)
+                        ]);
+                        return { success: true, detectedType, streamMembers };
+                    } catch (graphError) {
+                        Logger.warn('Graph API failed, falling back to inference:', graphError.message);
+                        return { success: false, error: graphError };
+                    }
+                })() : Promise.resolve({ success: true, detectedType: channelType, streamMembers: [] })
+            ]);
+            
             Logger.debug('Permissions result:', permissions);
 
             // If user has no subscribe permission at all, they cannot join
             if (!permissions.canSubscribe) {
                 throw new Error('You do not have permission to access this channel. This is a private channel and you are not a member.');
             }
-
-            // Determine type: use provided, detect via Graph API, or infer from password
-            let channelType = options.type;
-            let members = [];
-            let createdBy = options.createdBy || null;
             
-            if (!channelType || !createdBy) {
-                // Try to detect type and get owner from The Graph
-                Logger.debug('Detecting channel type via The Graph...');
-                try {
-                    // Clear cache first to get fresh data
-                    graphAPI.clearCache();
-                    
-                    if (!channelType) {
-                        channelType = await graphAPI.detectStreamType(messageStreamId);
-                        Logger.debug('Detected type:', channelType);
-                    }
-                    
-                    // Always get stream members to find owner (for storage enabling)
-                    const streamMembers = await graphAPI.getStreamMembers(messageStreamId);
-                    if (streamMembers && streamMembers.length > 0) {
-                        const owner = streamMembers.find(m => m.isOwner);
-                        if (!createdBy && owner) {
-                            createdBy = owner.address;
-                            Logger.debug('Found owner from Graph:', createdBy?.slice(0,10));
-                        }
-                        // For native channels, also get member list
-                        if (channelType === 'native') {
-                            members = streamMembers.map(m => m.address);
-                            Logger.debug('Got', members.length, 'members');
-                        }
-                    }
-                } catch (graphError) {
-                    Logger.warn('Graph API failed, falling back to inference:', graphError.message);
-                    // Default to native for safety - it's better to assume private than public
-                    channelType = password ? 'password' : 'native';
+            // Process Graph API results
+            if (graphResult.success) {
+                if (!channelType) {
+                    channelType = graphResult.detectedType;
+                    Logger.debug('Detected type:', channelType);
                 }
+                
+                const streamMembers = graphResult.streamMembers;
+                if (streamMembers && streamMembers.length > 0) {
+                    const owner = streamMembers.find(m => m.isOwner);
+                    if (!createdBy && owner) {
+                        createdBy = owner.address;
+                        Logger.debug('Found owner from Graph:', createdBy?.slice(0,10));
+                    }
+                    // For native channels, also get member list
+                    if (channelType === 'native') {
+                        members = streamMembers.map(m => m.address);
+                        Logger.debug('Got', members.length, 'members');
+                    }
+                }
+            } else {
+                // Default to native for safety - it's better to assume private than public
+                channelType = password ? 'password' : 'native';
             }
             
             // Final fallback - default to native (private) instead of public
@@ -433,13 +448,14 @@ class ChannelManager {
 
             // Add to channels map (keyed by messageStreamId)
             this.channels.set(messageStreamId, channel);
-            await this.saveChannels();
             
-            // Add to channel order (new channels go to top)
-            await secureStorage.addToChannelOrder(messageStreamId);
-
-            // Subscribe to both streams
-            await this.subscribeToChannel(messageStreamId, password);
+            // OPTIMIZATION: Run storage saves and subscription in parallel
+            // Channel is already in memory, so subscription can start immediately
+            await Promise.all([
+                this.saveChannels(),
+                secureStorage.addToChannelOrder(messageStreamId),
+                this.subscribeToChannel(messageStreamId, password)
+            ]);
 
             // Notify handlers about channel join (for media seeding re-announcement)
             // Include permissions info so UI can show appropriate feedback
@@ -485,21 +501,24 @@ class ChannelManager {
         try {
             Logger.debug('Syncing channel from The Graph:', messageStreamId);
             
-            // Get stream data from The Graph
-            const streamData = await graphAPI.getStream(messageStreamId);
+            // OPTIMIZATION: Fetch all Graph data in parallel
+            const [streamData, type, members] = await Promise.all([
+                graphAPI.getStream(messageStreamId),
+                graphAPI.detectStreamType(messageStreamId),
+                graphAPI.getStreamMembers(messageStreamId)
+            ]);
+            
             if (!streamData) {
                 Logger.warn('Stream not found in The Graph');
                 return channel;
             }
 
             // Update type based on permissions
-            const type = await graphAPI.detectStreamType(messageStreamId);
             if (type !== 'unknown') {
                 channel.type = type;
             }
 
-            // Get members
-            const members = await graphAPI.getStreamMembers(messageStreamId);
+            // Update members
             channel.members = members.map(m => m.address);
 
             // Get owner

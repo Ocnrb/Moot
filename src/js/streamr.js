@@ -24,9 +24,33 @@ const STREAM_CONFIG = {
     // Streamr's official storage node (will be set from SDK after load)
     NODE_ADDRESS: null, // Set dynamically in init()
     
-    // LogStore Virtual Storage Node (backup option)
+    // LogStore Virtual Storage Node
     LOGSTORE_NODE: '0x17f98084757a75add72bf6c5b5a6f69008c28a57',
     
+    // Storage Providers Configuration
+    STORAGE_PROVIDERS: {
+        STREAMR: {
+            id: 'streamr',
+            name: 'Streamr Germany',
+            description: 'Official Streamr storage with configurable retention',
+            supportsTTL: true,
+            defaultDays: 180,
+            // Node address set dynamically from SDK
+            getNodeAddress: () => STREAM_CONFIG.NODE_ADDRESS
+        },
+        LOGSTORE: {
+            id: 'logstore',
+            name: 'LogStore',
+            description: 'Optimized cache with potential permanent storage',
+            supportsTTL: false,
+            defaultDays: null, // No TTL - data persists indefinitely
+            getNodeAddress: () => STREAM_CONFIG.LOGSTORE_NODE
+        }
+    },
+    
+    // Default storage provider
+    DEFAULT_STORAGE_PROVIDER: 'streamr',
+
     // Number of messages to load on join (reduced for lazy loading)
     INITIAL_MESSAGES: 30,
     
@@ -1318,10 +1342,13 @@ class StreamrController {
      * The ephemeralStream (-2) is intentionally NOT stored for privacy
      * 
      * @param {string} messageStreamId - Message Stream ID (must end with -1)
+     * @param {Object} options - Storage options
+     * @param {string} options.storageProvider - 'streamr' or 'logstore' (default: from config)
+     * @param {number} options.storageDays - Retention days (only for Streamr, default: 180)
      * @param {number} retries - Number of retry attempts
-     * @returns {Promise<boolean>} - Success status
+     * @returns {Promise<{success: boolean, provider: string, storageDays: number|null}>} - Result
      */
-    async enableStorage(messageStreamId, retries = 7) {
+    async enableStorage(messageStreamId, options = {}, retries = 7) {
         if (!this.client) {
             throw new Error('Client not initialized');
         }
@@ -1329,19 +1356,60 @@ class StreamrController {
         // Safety check: only enable storage for message streams
         if (!isMessageStream(messageStreamId)) {
             Logger.warn('enableStorage called on non-message stream, ignoring:', messageStreamId);
-            return false;
+            return { success: false, provider: null, storageDays: null };
         }
         
-        // Ensure NODE_ADDRESS is set
-        const nodeAddress = STREAM_CONFIG.NODE_ADDRESS || STREAM_CONFIG.LOGSTORE_NODE;
+        // Determine storage provider
+        const providerId = options.storageProvider || STREAM_CONFIG.DEFAULT_STORAGE_PROVIDER;
+        const providerConfig = providerId === 'logstore' 
+            ? STREAM_CONFIG.STORAGE_PROVIDERS.LOGSTORE 
+            : STREAM_CONFIG.STORAGE_PROVIDERS.STREAMR;
+        
+        // Get node address for the provider
+        const nodeAddress = providerConfig.getNodeAddress() || STREAM_CONFIG.LOGSTORE_NODE;
+        
+        // Determine storage days (only applicable for Streamr)
+        const storageDays = providerConfig.supportsTTL 
+            ? (options.storageDays || providerConfig.defaultDays)
+            : null;
+        
+        Logger.debug('Enabling storage:', { 
+            streamId: messageStreamId, 
+            provider: providerId, 
+            nodeAddress: nodeAddress.slice(0, 12) + '...',
+            storageDays 
+        });
         
         for (let attempt = 1; attempt <= retries; attempt++) {
             try {
                 Logger.debug(`Adding to storage node (attempt ${attempt}/${retries})...`);
                 const stream = await this.client.getStream(messageStreamId);
+                
+                // Add to storage node
                 await stream.addToStorageNode(nodeAddress);
-                Logger.info('Storage enabled for message stream:', messageStreamId, '(node:', nodeAddress.slice(0, 10) + '...)');
-                return true;
+                
+                // Set storage days if supported by provider
+                if (storageDays && providerConfig.supportsTTL) {
+                    try {
+                        await stream.setStorageDayCount(storageDays);
+                        Logger.debug('Storage days set to:', storageDays);
+                    } catch (ttlError) {
+                        Logger.warn('Could not set storage days (continuing):', ttlError.message);
+                    }
+                }
+                
+                Logger.info('Storage enabled:', {
+                    stream: messageStreamId,
+                    provider: providerId,
+                    days: storageDays
+                });
+                
+                return { 
+                    success: true, 
+                    provider: providerId, 
+                    storageDays: storageDays,
+                    nodeAddress: nodeAddress
+                };
             } catch (error) {
                 Logger.warn(`Storage attempt ${attempt} failed:`, error.message);
                 
@@ -1351,11 +1419,53 @@ class StreamrController {
                     await new Promise(r => setTimeout(r, delay));
                 } else {
                     Logger.error('All storage attempts failed for:', messageStreamId);
-                    return false;
+                    return { success: false, provider: providerId, storageDays: null };
                 }
             }
         }
-        return false;
+        return { success: false, provider: providerId, storageDays: null };
+    }
+
+    /**
+     * Update storage days for a stream (only works with Streamr storage node)
+     * @param {string} messageStreamId - Message Stream ID
+     * @param {number} days - Number of days to retain messages
+     * @returns {Promise<boolean>} - Success status
+     */
+    async setStorageDays(messageStreamId, days) {
+        if (!this.client) {
+            throw new Error('Client not initialized');
+        }
+        
+        try {
+            const stream = await this.client.getStream(messageStreamId);
+            await stream.setStorageDayCount(days);
+            Logger.info('Storage days updated:', { streamId: messageStreamId, days });
+            return true;
+        } catch (error) {
+            Logger.error('Failed to set storage days:', error.message);
+            return false;
+        }
+    }
+
+    /**
+     * Get current storage days for a stream
+     * @param {string} messageStreamId - Message Stream ID
+     * @returns {Promise<number|null>} - Storage days or null
+     */
+    async getStorageDays(messageStreamId) {
+        if (!this.client) {
+            throw new Error('Client not initialized');
+        }
+        
+        try {
+            const stream = await this.client.getStream(messageStreamId);
+            const days = await stream.getStorageDayCount();
+            return days;
+        } catch (error) {
+            Logger.warn('Failed to get storage days:', error.message);
+            return null;
+        }
     }
 
     /**

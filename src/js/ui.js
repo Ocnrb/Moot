@@ -386,6 +386,20 @@ class UIController {
             this.toggleReadOnly();
         });
 
+        // Storage provider tabs
+        this.currentStorageProvider = 'streamr'; // default
+        document.querySelectorAll('.storage-provider-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                this.selectStorageProvider(tab.dataset.storage);
+            });
+        });
+
+        // Storage days slider
+        const storageDaysSlider = document.getElementById('storage-days-input');
+        storageDaysSlider?.addEventListener('input', () => {
+            this.updateStorageDaysDisplay(storageDaysSlider.value);
+        });
+
         // Online users dropdown toggle
         this.elements.onlineHeader?.addEventListener('click', () => {
             this.elements.onlineUsersList?.classList.toggle('hidden');
@@ -426,6 +440,19 @@ class UIController {
         });
         document.getElementById('close-channel-types-btn-footer')?.addEventListener('click', () => {
             modalManager.hide('channel-types-modal');
+        });
+
+        // Storage info modal
+        document.querySelectorAll('.storage-learn-more-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                modalManager.show('storage-info-modal');
+            });
+        });
+        document.getElementById('close-storage-info-btn')?.addEventListener('click', () => {
+            modalManager.hide('storage-info-modal');
+        });
+        document.getElementById('close-storage-info-btn-footer')?.addEventListener('click', () => {
+            modalManager.hide('storage-info-modal');
         });
 
         // Quick join input (sidebar) - Enter to join
@@ -2388,6 +2415,12 @@ class UIController {
         // Classification for Closed channels (stored locally only)
         const classification = type === 'native' ? (this.currentClassification || 'personal') : null;
 
+        // Storage provider selection
+        const storageProvider = this.currentStorageProvider || 'streamr';
+        const storageDays = storageProvider === 'streamr' 
+            ? parseInt(document.getElementById('storage-days-input')?.value || '180', 10)
+            : null;
+
         if (!name) {
             alert('Please enter a channel name');
             return;
@@ -2409,7 +2442,9 @@ class UIController {
             language,
             category,
             classification,
-            readOnly: this.currentReadOnly || false
+            readOnly: this.currentReadOnly || false,
+            storageProvider,
+            storageDays
         };
 
         Logger.debug('Creating channel:', { name, type, password: password ? '***' : null, members, options });
@@ -2570,6 +2605,13 @@ class UIController {
         this.switchClassificationTab('personal');
         // Reset read-only toggle
         this.setReadOnly(false);
+        // Reset storage provider to Streamr (default)
+        this.selectStorageProvider('streamr');
+        const storageDaysSlider = document.getElementById('storage-days-input');
+        if (storageDaysSlider) {
+            storageDaysSlider.value = '180';
+            this.updateStorageDaysDisplay(180);
+        }
         
         // Fetch and display gas estimates
         this.updateGasEstimates();
@@ -2793,6 +2835,63 @@ class UIController {
         }
         
         this.currentReadOnly = enabled;
+    }
+
+    /**
+     * Select storage provider (streamr or logstore)
+     */
+    selectStorageProvider(provider) {
+        this.currentStorageProvider = provider;
+        
+        // Update tab styles
+        document.querySelectorAll('.storage-provider-tab').forEach(tab => {
+            if (tab.dataset.storage === provider) {
+                tab.classList.remove('bg-white/5', 'text-white/50', 'border-white/5');
+                tab.classList.add('bg-white/10', 'text-white', 'border-white/10');
+            } else {
+                tab.classList.remove('bg-white/10', 'text-white', 'border-white/10');
+                tab.classList.add('bg-white/5', 'text-white/50', 'border-white/5');
+            }
+        });
+        
+        // Show/hide storage days section based on provider
+        const storageDaysSection = document.getElementById('storage-days-section');
+        const logstoreInfo = document.getElementById('logstore-info');
+        
+        if (provider === 'streamr') {
+            storageDaysSection?.classList.remove('hidden');
+            logstoreInfo?.classList.add('hidden');
+        } else {
+            storageDaysSection?.classList.add('hidden');
+            logstoreInfo?.classList.remove('hidden');
+        }
+    }
+
+    /**
+     * Update storage days slider display and progress
+     */
+    updateStorageDaysDisplay(days) {
+        days = parseInt(days, 10);
+        const label = document.getElementById('storage-days-value');
+        const slider = document.getElementById('storage-days-input');
+        
+        // Format label
+        if (days === 1) {
+            label.textContent = '1 day';
+        } else if (days < 30) {
+            label.textContent = `${days} days`;
+        } else if (days < 365) {
+            const months = Math.round(days / 30);
+            label.textContent = months === 1 ? '1 month' : `${months} months`;
+        } else {
+            label.textContent = '1 year';
+        }
+        
+        // Update slider progress (CSS variable)
+        if (slider) {
+            const progress = ((days - 1) / (365 - 1)) * 100;
+            slider.style.setProperty('--slider-progress', `${progress}%`);
+        }
     }
 
     /**
@@ -4299,7 +4398,8 @@ class UIController {
      */
     initSettingsCarousel() {
         const carousel = document.getElementById('settings-carousel');
-        if (!carousel) return;
+        const modal = document.getElementById('settings-modal');
+        if (!carousel || !modal) return;
 
         const tabElements = carousel.querySelectorAll('.carousel-tab');
 
@@ -4317,33 +4417,39 @@ class UIController {
             });
         });
 
-        // Add swipe support on entire modal content area
-        const modalContent = document.querySelector('#settings-modal .flex-1.p-6');
+        // Add swipe support on entire modal
         let touchStartX = 0;
+        let touchStartY = 0;
+        let isSwiping = false;
         
-        modalContent?.addEventListener('touchstart', (e) => {
-            touchStartX = e.touches[0].clientX;
-        }, { passive: true });
+        const modalContainer = modal.querySelector('.bg-\\[\\#141414\\]');
+        if (!modalContainer) return;
 
-        modalContent?.addEventListener('touchend', (e) => {
-            const touchEndX = e.changedTouches[0].clientX;
-            const diff = touchStartX - touchEndX;
-            if (Math.abs(diff) > 50) {
-                this.navigateSettingsCarousel(diff > 0 ? 1 : -1);
+        modalContainer.addEventListener('touchstart', (e) => {
+            // Don't interfere with scrollable elements
+            const target = e.target;
+            if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') {
+                isSwiping = false;
+                return;
             }
-        }, { passive: true });
-
-        // Also on carousel area
-        carousel.addEventListener('touchstart', (e) => {
             touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+            isSwiping = true;
         }, { passive: true });
 
-        carousel.addEventListener('touchend', (e) => {
+        modalContainer.addEventListener('touchend', (e) => {
+            if (!isSwiping || !this.isMobileView()) return;
+            
             const touchEndX = e.changedTouches[0].clientX;
-            const diff = touchStartX - touchEndX;
-            if (Math.abs(diff) > 50) {
-                this.navigateSettingsCarousel(diff > 0 ? 1 : -1);
+            const touchEndY = e.changedTouches[0].clientY;
+            const diffX = touchStartX - touchEndX;
+            const diffY = touchStartY - touchEndY;
+            
+            // Only trigger if horizontal swipe is dominant (not scrolling vertically)
+            if (Math.abs(diffX) > 50 && Math.abs(diffX) > Math.abs(diffY) * 1.5) {
+                this.navigateSettingsCarousel(diffX > 0 ? 1 : -1);
             }
+            isSwiping = false;
         }, { passive: true });
     }
 

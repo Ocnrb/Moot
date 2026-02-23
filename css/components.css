@@ -3,6 +3,51 @@
    Extracted from inline styles for better maintainability
    =========================================== */
 
+/* ----- Storage Slider ----- */
+.storage-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    background: linear-gradient(to right, #F6851B 0%, #F6851B var(--slider-progress, 49.3%), rgba(255,255,255,0.1) var(--slider-progress, 49.3%), rgba(255,255,255,0.1) 100%);
+}
+
+.storage-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #F6851B;
+    cursor: pointer;
+    border: 2px solid #0d0d0d;
+    box-shadow: 0 2px 6px rgba(246, 133, 27, 0.4);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.storage-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.15);
+    box-shadow: 0 2px 10px rgba(246, 133, 27, 0.6);
+}
+
+.storage-slider::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #F6851B;
+    cursor: pointer;
+    border: 2px solid #0d0d0d;
+    box-shadow: 0 2px 6px rgba(246, 133, 27, 0.4);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.storage-slider::-moz-range-thumb:hover {
+    transform: scale(1.15);
+    box-shadow: 0 2px 10px rgba(246, 133, 27, 0.6);
+}
+
+.storage-slider::-moz-range-track {
+    background: transparent;
+}
+
 /* ----- Base Layout ----- */
 body {
     font-family: 'Inter', sans-serif;
@@ -1157,6 +1202,11 @@ body {
     #message-input-container {
         padding: 0.875rem;
         padding-bottom: calc(0.875rem + env(safe-area-inset-bottom));
+    }
+    
+    /* Safe area padding utility */
+    .pb-safe {
+        padding-bottom: calc(1rem + env(safe-area-inset-bottom));
     }
     
     /* Messages container scrollable */

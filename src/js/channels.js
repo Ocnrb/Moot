@@ -208,7 +208,10 @@ class ChannelManager {
      * @param {string} type - Channel type: 'public', 'password', 'native'
      * @param {string} password - Password for encrypted channels (optional)
      * @param {string[]} members - Member addresses for native private channels (optional)
-     * @param {Object} options - Additional options { exposure: 'visible'|'hidden' }
+     * @param {Object} options - Additional options
+     * @param {string} options.exposure - 'visible' or 'hidden'
+     * @param {string} options.storageProvider - 'streamr' or 'logstore' (default: 'streamr')
+     * @param {number} options.storageDays - Retention days (for Streamr, default: 180)
      * @returns {Promise<Object>} - Created channel
      */
     async createChannel(name, type, password = null, members = [], options = {}) {
@@ -235,10 +238,14 @@ class ChannelManager {
             });
 
             // Enable storage ONLY for message stream (ephemeral stream intentionally not stored)
-            let storageEnabled = false;
+            // Pass storage options (provider, days)
+            let storageResult = { success: false, provider: null, storageDays: null };
             try {
-                storageEnabled = await streamrController.enableStorage(streamInfo.messageStreamId);
-                Logger.debug('Storage enabled for messageStream:', storageEnabled);
+                storageResult = await streamrController.enableStorage(streamInfo.messageStreamId, {
+                    storageProvider: options.storageProvider,
+                    storageDays: options.storageDays
+                });
+                Logger.debug('Storage result:', storageResult);
             } catch (storageError) {
                 Logger.warn('Failed to enable storage (continuing without history):', storageError.message);
             }
@@ -267,7 +274,10 @@ class ChannelManager {
                 members: channelMembers,
                 messages: [],
                 reactions: {}, // messageId -> { emoji -> [users] }
-                storageEnabled: storageEnabled,
+                storageEnabled: storageResult.success,
+                // Storage configuration
+                storageProvider: storageResult.provider || 'streamr',
+                storageDays: storageResult.storageDays,
                 // Exposure and metadata (for visible channels)
                 exposure: exposure,
                 description: exposure === 'visible' ? (options.description || '') : '',
@@ -898,9 +908,15 @@ class ChannelManager {
             if (currentAddress && ownerAddress && currentAddress === ownerAddress) {
                 Logger.debug('Owner subscribing - trying to enable storage for messageStream:', messageStreamId);
                 try {
-                    const enabled = await streamrController.enableStorage(messageStreamId);
-                    if (enabled) {
+                    // Use the channel's storage configuration if available
+                    const storageResult = await streamrController.enableStorage(messageStreamId, {
+                        storageProvider: channel.storageProvider,
+                        storageDays: channel.storageDays
+                    });
+                    if (storageResult.success) {
                         channel.storageEnabled = true;
+                        channel.storageProvider = storageResult.provider;
+                        channel.storageDays = storageResult.storageDays;
                         await this.saveChannels();
                         Logger.info('Storage enabled by owner for messageStream');
                     }

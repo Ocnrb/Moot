@@ -35,6 +35,55 @@ class SettingsUI {
     }
 
     /**
+     * Show progress modal for encryption/decryption operations
+     */
+    showProgressModal(title, subtitle) {
+        const modal = document.createElement('div');
+        modal.className = 'fixed inset-0 bg-black/80 flex items-center justify-center z-50';
+        modal.innerHTML = `
+            <div class="bg-[#111111] rounded-xl w-[300px] overflow-hidden shadow-2xl border border-[#222]">
+                <div class="px-5 pt-5 pb-2">
+                    <h3 class="text-[14px] font-medium text-white">${title}</h3>
+                    <p class="text-[11px] text-[#666] mt-0.5">${subtitle}</p>
+                </div>
+                <div class="px-5 pb-5 pt-3">
+                    <div class="flex items-center justify-between mb-1.5">
+                        <span class="text-[10px] text-[#666]">Progress</span>
+                        <span class="text-[10px] font-medium text-white" id="progress-label">0%</span>
+                    </div>
+                    <div class="h-1.5 bg-[#1a1a1a] rounded-full overflow-hidden">
+                        <div id="progress-bar" class="h-full bg-white transition-all duration-300 ease-out" style="width: 0%"></div>
+                    </div>
+                    <p class="text-[10px] text-[#555] text-center mt-3">This may take a few seconds...</p>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        return modal;
+    }
+
+    /**
+     * Update progress modal
+     */
+    updateProgressModal(modal, progress) {
+        const percent = Math.round(progress * 100);
+        const progressBar = modal.querySelector('#progress-bar');
+        const progressLabel = modal.querySelector('#progress-label');
+        
+        if (progressBar) progressBar.style.width = `${percent}%`;
+        if (progressLabel) progressLabel.textContent = `${percent}%`;
+    }
+
+    /**
+     * Hide progress modal
+     */
+    hideProgressModal(modal) {
+        if (modal && modal.parentNode) {
+            document.body.removeChild(modal);
+        }
+    }
+
+    /**
      * Initialize export private key UI handlers
      */
     initExportPrivateKeyUI() {
@@ -173,7 +222,7 @@ class SettingsUI {
         const importBtn = document.getElementById('import-data-btn');
         const importFileInput = document.getElementById('import-data-file');
 
-        // Export encrypted data
+        // Export account backup (uses account password with scrypt)
         if (exportBtn) {
             exportBtn.addEventListener('click', async () => {
                 try {
@@ -182,46 +231,57 @@ class SettingsUI {
                         return;
                     }
 
+                    // Get account password (same as keystore password)
                     const password = await showPasswordPrompt(
-                        'Encrypt Backup',
-                        'Enter a password to encrypt your backup.\nYou will need this password to restore.',
-                        true
+                        'Export Account Backup',
+                        'Enter your account password to create a backup.',
+                        false
                     );
                     if (!password) return;
 
-                    const stats = this.secureStorage.getStats();
-                    const confirmed = confirm(
-                        'Export encrypted backup?\n\n' +
-                        `📁 Channels: ${stats.channels}\n` +
-                        `👤 Contacts: ${stats.contacts}\n\n` +
-                        'Your data will be encrypted with the password you provided.\n' +
-                        'Note: Messages are stored on Streamr and will be loaded on demand.'
+                    // Get current account's keystore
+                    const address = this.authManager.getAddress();
+                    const keystoreJson = this.authManager.exportKeystore(address);
+                    if (!keystoreJson) {
+                        this.showNotification('No keystore found for this account', 'error');
+                        return;
+                    }
+                    const keystore = JSON.parse(keystoreJson);
+
+                    // Show progress modal
+                    const progressModal = this.showProgressModal(
+                        'Creating Backup',
+                        'Encrypting with scrypt (same as Keystore V3)...'
                     );
-                    if (!confirmed) return;
 
-                    const encryptedData = await this.secureStorage.exportEncrypted(password);
-                    const keystores = this.authManager.exportKeystores();
-                    
-                    const fullBackup = {
-                        format: 'pombo-full-backup',
-                        version: 2,
-                        exportedAt: new Date().toISOString(),
-                        keystores: keystores,
-                        encryptedData: encryptedData
-                    };
+                    try {
+                        // Verify password and create backup with scrypt
+                        const backup = await this.secureStorage.exportAccountBackup(
+                            keystore,
+                            password,
+                            (progress) => this.updateProgressModal(progressModal, progress)
+                        );
 
-                    const json = JSON.stringify(fullBackup, null, 2);
-                    const blob = new Blob([json], { type: 'application/json' });
-                    const url = URL.createObjectURL(blob);
-                    
-                    const timestamp = new Date().toISOString().slice(0, 10);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `pombo-backup-encrypted-${timestamp}.json`;
-                    a.click();
-                    
-                    URL.revokeObjectURL(url);
-                    this.showNotification('Encrypted backup exported!', 'success');
+                        this.hideProgressModal(progressModal);
+
+                        // Download backup file
+                        const json = JSON.stringify(backup, null, 2);
+                        const blob = new Blob([json], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        
+                        const timestamp = new Date().toISOString().slice(0, 10);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `pombo-account-backup-${timestamp}.json`;
+                        a.click();
+                        
+                        URL.revokeObjectURL(url);
+                        this.showNotification('Account backup exported!', 'success');
+                    } catch (exportError) {
+                        this.hideProgressModal(progressModal);
+                        // Check if password was wrong (scrypt will fail silently, but we can detect)
+                        this.showNotification('Failed to export: ' + exportError.message, 'error');
+                    }
                 } catch (error) {
                     this.Logger?.error('Export failed:', error);
                     this.showNotification('Failed to export: ' + error.message, 'error');
@@ -243,7 +303,11 @@ class SettingsUI {
                     const text = await file.text();
                     const data = JSON.parse(text);
                     
-                    if (data.format === 'pombo-full-backup' && data.version === 2) {
+                    if (data.format === 'pombo-account-backup' && data.version === 3) {
+                        // New scrypt-encrypted account backup
+                        await this.handleAccountBackupImport(data, showPasswordPrompt);
+                    }
+                    else if (data.format === 'pombo-full-backup' && data.version === 2) {
                         await this.handleEncryptedImport(data, showPasswordPrompt);
                     } 
                     else if (data.format === 'pombo-encrypted-backup') {
@@ -403,6 +467,110 @@ class SettingsUI {
             deleteBtn.addEventListener('mouseleave', resetProgress);
             deleteBtn.addEventListener('touchend', resetProgress);
             deleteBtn.addEventListener('touchcancel', resetProgress);
+        }
+    }
+
+    /**
+     * Handle new account backup import (pombo-account-backup v3)
+     * This imports data (channels, contacts) from a backup into the current account
+     */
+    async handleAccountBackupImport(backup, showPasswordPrompt) {
+        if (!this.secureStorage.isStorageUnlocked()) {
+            this.showNotification('Please unlock account to import data', 'error');
+            return;
+        }
+
+        const password = await showPasswordPrompt(
+            'Decrypt Backup',
+            'Enter the password used for this backup.',
+            false
+        );
+        if (!password) return;
+
+        // Show progress modal
+        const progressModal = this.showProgressModal(
+            'Decrypting Backup',
+            'Using scrypt decryption...'
+        );
+
+        try {
+            // Decrypt the backup
+            const result = await this.secureStorage.importAccountBackup(
+                backup,
+                password,
+                (progress) => this.updateProgressModal(progressModal, progress)
+            );
+
+            this.hideProgressModal(progressModal);
+
+            // Check if backup is from a different account
+            const currentAddress = this.authManager.getAddress()?.toLowerCase();
+            const backupAddress = result.address?.toLowerCase();
+            
+            if (backupAddress && currentAddress && backupAddress !== currentAddress) {
+                const confirmed = confirm(
+                    `This backup is from a different account:\n\n` +
+                    `Backup: ${backupAddress.slice(0, 8)}...${backupAddress.slice(-6)}\n` +
+                    `Current: ${currentAddress.slice(0, 8)}...${currentAddress.slice(-6)}\n\n` +
+                    `Import channels and contacts to your current account?`
+                );
+                if (!confirmed) return;
+            }
+
+            // Import data into current account's secure storage
+            const data = result.data;
+            let channelsImported = 0;
+            let contactsImported = 0;
+
+            // Import channels
+            if (data.channels && data.channels.length > 0) {
+                const existingIds = new Set((this.secureStorage.cache.channels || []).map(c => c.messageStreamId || c.streamId));
+                for (const channel of data.channels) {
+                    const chId = channel.messageStreamId || channel.streamId;
+                    if (chId && !existingIds.has(chId)) {
+                        this.secureStorage.cache.channels.push(channel);
+                        channelsImported++;
+                    }
+                }
+            }
+
+            // Import trusted contacts
+            if (data.trustedContacts) {
+                for (const [addr, contact] of Object.entries(data.trustedContacts)) {
+                    if (!this.secureStorage.cache.trustedContacts[addr]) {
+                        this.secureStorage.cache.trustedContacts[addr] = contact;
+                        contactsImported++;
+                    }
+                }
+            }
+
+            // Import username (only if not set)
+            if (data.username && !this.secureStorage.cache.username) {
+                this.secureStorage.cache.username = data.username;
+            }
+
+            // Save
+            await this.secureStorage.saveToStorage();
+
+            this.showNotification(
+                `Imported: ${channelsImported} channels, ${contactsImported} contacts`,
+                'success'
+            );
+
+            if (channelsImported > 0) {
+                this.channelManager.loadChannels();
+                this.deps.renderChannelList?.();
+            }
+
+            // Reload trusted contacts in identity manager
+            if (contactsImported > 0) {
+                this.identityManager?.loadTrustedContacts?.();
+            }
+
+        } catch (error) {
+            this.hideProgressModal(progressModal);
+            this.Logger?.error('Account backup import failed:', error);
+            this.showNotification('Failed to import: ' + error.message, 'error');
         }
     }
 

@@ -132,6 +132,9 @@ class App {
      * This function is "sovereign" - it must fully reset the app state
      */
     async disconnectWallet() {
+        // Check if guest before disconnecting (for notification)
+        const wasGuest = authManager.isGuestMode();
+        
         try {
             // 1. Stop presence tracking first to stop publishing
             channelManager.stopPresenceTracking();
@@ -159,7 +162,12 @@ class App {
             uiController.updateNetworkStatus('Disconnected', false);
             uiController.renderChannelList(); // Clear channel list
             uiController.resetToDisconnectedState(); // Reset all UI state
-            uiController.showNotification('Account disconnected', 'info');
+            
+            if (wasGuest) {
+                uiController.showNotification('Guest session ended - all data has been cleared', 'info');
+            } else {
+                uiController.showNotification('Account disconnected', 'info');
+            }
             
             Logger.info('Account disconnected - full cleanup complete');
         } catch (error) {
@@ -477,7 +485,7 @@ class App {
                     </div>
                     
                     <!-- Options -->
-                    <div class="px-5 pb-5 space-y-2">
+                    <div class="px-5 pb-3 space-y-2">
                         <button id="create-btn" class="w-full bg-white hover:bg-[#f0f0f0] rounded-lg p-3.5 text-left transition-all">
                             <div class="flex items-center gap-3">
                                 <div class="w-9 h-9 rounded-lg bg-[#111] flex items-center justify-center">
@@ -505,6 +513,17 @@ class App {
                                 </div>
                             </div>
                         </button>
+                    </div>
+                    
+                    <!-- Restore link (discreet) -->
+                    <div class="px-5 pb-4 flex justify-end">
+                        <button id="restore-btn" class="flex items-center gap-1.5 text-[#555] hover:text-[#888] transition text-[11px]">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"/>
+                            </svg>
+                            restore
+                        </button>
+                        <input type="file" id="restore-file-input" accept=".json" class="hidden">
                     </div>
                 </div>
             `;
@@ -556,7 +575,120 @@ class App {
                     reject(e);
                 }
             });
+
+            // Restore from backup
+            const restoreBtn = modal.querySelector('#restore-btn');
+            const restoreFileInput = modal.querySelector('#restore-file-input');
+            
+            restoreBtn.addEventListener('click', () => {
+                restoreFileInput.click();
+            });
+
+            restoreFileInput.addEventListener('change', async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                
+                cleanup();
+                try {
+                    await this.restoreFromBackup(file);
+                    resolve();
+                } catch (err) {
+                    if (err.message !== 'cancelled') {
+                        uiController.showNotification('Restore failed: ' + err.message, 'error');
+                    }
+                    reject(err);
+                }
+            });
         });
+    }
+
+    /**
+     * Restore account from backup file
+     * @param {File} file - The backup JSON file
+     */
+    async restoreFromBackup(file) {
+        const text = await file.text();
+        const backup = JSON.parse(text);
+
+        // Validate backup format
+        if (backup.format !== 'pombo-account-backup' || backup.version !== 3) {
+            throw new Error('Invalid backup format. Only pombo-account-backup v3 is supported.');
+        }
+
+        // Get password to decrypt
+        const password = await this.showSecureInput(
+            'Restore Account',
+            'Enter the backup password:',
+            'password'
+        );
+        if (!password) throw new Error('cancelled');
+
+        // Show progress modal
+        const progressModal = this.showProgressModal('Restoring Account', 'Decrypting with scrypt...');
+
+        try {
+            // Decrypt using the password (this verifies the password)
+            const result = await secureStorage.importAccountBackup(
+                backup,
+                password,
+                (progress) => this.updateProgressModal(progressModal, progress)
+            );
+
+            this.hideProgressModal(progressModal);
+
+            // Save the keystore to localStorage
+            const keystoreAddress = backup.keystore.address.toLowerCase();
+            const wallets = JSON.parse(localStorage.getItem('pombo_wallets') || '{}');
+            if (!wallets[keystoreAddress]) {
+                wallets[keystoreAddress] = {
+                    name: result.data?.username || `Restored ${keystoreAddress.slice(0, 8)}`,
+                    keystore: backup.keystore,
+                    createdAt: Date.now(),
+                    lastUsed: Date.now(),
+                    restored: true
+                };
+                localStorage.setItem('pombo_wallets', JSON.stringify(wallets));
+            }
+
+            // Now unlock the wallet with the same password
+            await this.loadWalletWithProgress(password, keystoreAddress);
+
+            // Import data into secure storage
+            const data = result.data;
+            if (data) {
+                // Import channels
+                if (data.channels && data.channels.length > 0) {
+                    const existingIds = new Set((secureStorage.cache.channels || []).map(c => c.messageStreamId || c.streamId));
+                    for (const channel of data.channels) {
+                        const chId = channel.messageStreamId || channel.streamId;
+                        if (chId && !existingIds.has(chId)) {
+                            secureStorage.cache.channels.push(channel);
+                        }
+                    }
+                }
+
+                // Import trusted contacts
+                if (data.trustedContacts) {
+                    for (const [addr, contact] of Object.entries(data.trustedContacts)) {
+                        if (!secureStorage.cache.trustedContacts[addr]) {
+                            secureStorage.cache.trustedContacts[addr] = contact;
+                        }
+                    }
+                }
+
+                // Import username
+                if (data.username && !secureStorage.cache.username) {
+                    secureStorage.cache.username = data.username;
+                }
+
+                await secureStorage.saveToStorage();
+            }
+
+            uiController.showNotification('Account restored successfully!', 'success');
+        } catch (error) {
+            this.hideProgressModal(progressModal);
+            throw error;
+        }
     }
 
     /**
@@ -656,27 +788,29 @@ class App {
 
             const result = authManager.generateLocalWallet();
 
-            // Show wallet created modal with secure private key display
-            await this.showNewWalletModal(result.address, result.privateKey);
-
-            // Ask if user wants to save encrypted
-            const saveChoice = await this.showConfirmModal(
-                'Save Account?',
-                'Would you like to save this account encrypted with a password?'
-            );
-
-            if (saveChoice) {
-                const password = await this.showSecureInput(
-                    'Encrypt Account',
-                    'Enter a password to encrypt your account:',
-                    'password'
-                );
-                if (password) {
-                    await this.saveWalletWithProgress(password);
-                }
+            // Show new account setup modal (password + display name + confirm)
+            const setupResult = await this.showNewAccountSetupModal(result.address, result.privateKey);
+            
+            // User cancelled - connect as guest instead
+            if (setupResult === 'cancelled') {
+                await this.connectAsGuest();
+                uiController.showNotification('Continuing as Guest - your data won\'t be saved', 'info');
+                return;
+            }
+            
+            if (setupResult) {
+                // Save wallet with password
+                await this.saveWalletWithProgress(setupResult.password, setupResult.displayName);
             }
 
             await this.onWalletConnected(result.address, result.signer);
+
+            // Save display name to secureStorage (after it's initialized)
+            if (setupResult?.displayName && secureStorage.isStorageUnlocked()) {
+                secureStorage.cache.username = setupResult.displayName;
+                await secureStorage.saveToStorage();
+            }
+
             uiController.showNotification('Account created!', 'success');
         } catch (error) {
             throw error;
@@ -684,117 +818,277 @@ class App {
     }
 
     /**
-     * Show new wallet modal with secure private key reveal
+     * Show new account setup modal (Step 1: Password + Display Name, Step 2: Confirm)
+     * @param {string} address - Account address
+     * @param {string} privateKey - Private key
+     * @returns {Promise<{password: string, displayName: string}|null>}
      */
-    async showNewWalletModal(address, privateKey) {
+    async showNewAccountSetupModal(address, privateKey) {
         return new Promise((resolve) => {
             const modal = document.createElement('div');
-            modal.className = 'fixed inset-0 bg-black/80 flex items-center justify-center z-50';
+            modal.className = 'fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4';
             modal.innerHTML = `
-                <div class="bg-[#111111] rounded-xl w-[360px] overflow-hidden shadow-2xl border border-[#222]">
-                    <!-- Success Header -->
-                    <div class="px-5 pt-5 pb-3">
-                        <div class="flex items-center gap-3">
-                            <div class="w-8 h-8 rounded-lg bg-[#1a2f1a] flex items-center justify-center">
-                                <svg class="w-4 h-4 text-[#4ade80]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4.5 12.75l6 6 9-13.5"/>
-                                </svg>
+                <div class="bg-[#141414] rounded-2xl w-[420px] max-w-[95vw] shadow-2xl border border-white/5 overflow-hidden">
+                    <!-- Step 1: Account Created -->
+                    <div id="step-1">
+                        <!-- Header -->
+                        <div class="flex items-center justify-between px-6 py-4 border-b border-white/5">
+                            <div class="flex items-center gap-3">
+                                <div class="w-9 h-9 rounded-xl bg-[#1a2f1a] flex items-center justify-center">
+                                    <svg class="w-4 h-4 text-[#4ade80]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4.5 12.75l6 6 9-13.5"/>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 class="text-lg font-medium text-white/90">Account Created</h3>
+                                    <p class="text-xs text-white/40">Set up your account</p>
+                                </div>
                             </div>
+                        </div>
+                        
+                        <!-- Content -->
+                        <div class="p-6 space-y-4">
+                            <!-- Address -->
                             <div>
-                                <h3 class="text-[15px] font-medium text-white">Account Created</h3>
-                                <p class="text-[11px] text-[#666]">Save your private key</p>
+                                <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Address</label>
+                                <div class="bg-white/5 border border-white/10 rounded-xl px-4 py-3 font-mono text-sm text-white/60 break-all">
+                                    ${address}
+                                </div>
+                            </div>
+                            
+                            <!-- Private Key -->
+                            <div>
+                                <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Private Key</label>
+                                <div class="bg-white/5 border border-white/10 rounded-xl px-4 py-3 relative">
+                                    <div id="pk-hidden" class="font-mono text-sm text-white/30 select-none">••••••••••••••••••••••••••••••••••••</div>
+                                    <div id="pk-revealed" class="font-mono text-sm text-white/60 break-all hidden">${privateKey}</div>
+                                    <button id="toggle-pk" class="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/80 transition">
+                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/>
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <button id="copy-pk" class="mt-2 w-full bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 text-sm font-medium py-2.5 rounded-xl transition flex items-center justify-center gap-2">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184"/>
+                                    </svg>
+                                    Copy Private Key
+                                </button>
+                            </div>
+                            
+                            <!-- Warning -->
+                            <div class="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4">
+                                <div class="flex gap-3">
+                                    <svg class="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+                                    </svg>
+                                    <div>
+                                        <p class="text-amber-400 text-sm font-medium">Save your private key!</p>
+                                        <p class="text-amber-400/60 text-xs mt-1">Store it safely offline. This is the only way to recover your account.</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Display Name -->
+                            <div>
+                                <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Display Name</label>
+                                <input type="text" id="display-name-input" 
+                                    class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-white/30 transition placeholder:text-white/20"
+                                    placeholder="Your name (optional)" maxlength="32" autocomplete="off">
+                            </div>
+                            
+                            <!-- Password -->
+                            <div>
+                                <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Password</label>
+                                <div class="relative">
+                                    <input type="password" id="password-input" 
+                                        class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-white/30 transition placeholder:text-white/20 pr-11"
+                                        placeholder="Min 12 chars, upper, lower, number" autocomplete="new-password">
+                                    <button id="toggle-password" class="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/80 transition">
+                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/>
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <!-- Password strength indicators -->
+                                <div id="password-strength" class="mt-3 space-y-1.5 text-xs">
+                                    <div id="check-length" class="flex items-center gap-2 text-white/30">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <circle cx="12" cy="12" r="10" stroke-width="1.5"/>
+                                        </svg>
+                                        At least 12 characters
+                                    </div>
+                                    <div id="check-upper" class="flex items-center gap-2 text-white/30">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <circle cx="12" cy="12" r="10" stroke-width="1.5"/>
+                                        </svg>
+                                        Uppercase letter
+                                    </div>
+                                    <div id="check-lower" class="flex items-center gap-2 text-white/30">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <circle cx="12" cy="12" r="10" stroke-width="1.5"/>
+                                        </svg>
+                                        Lowercase letter
+                                    </div>
+                                    <div id="check-number" class="flex items-center gap-2 text-white/30">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <circle cx="12" cy="12" r="10" stroke-width="1.5"/>
+                                        </svg>
+                                        Number
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                    
-                    <!-- Address -->
-                    <div class="px-5 pb-2">
-                        <label class="block text-[10px] text-[#666] mb-1 uppercase tracking-wide">Address</label>
-                        <div class="bg-[#1a1a1a] rounded-lg px-3 py-2.5 font-mono text-[11px] text-[#888] break-all border border-[#282828]">
-                            ${address}
-                        </div>
-                    </div>
-                    
-                    <!-- Private Key -->
-                    <div class="px-5 pb-3">
-                        <label class="block text-[10px] text-[#666] mb-1 uppercase tracking-wide">Private Key</label>
-                        <div class="bg-[#1a1a1a] rounded-lg px-3 py-2.5 border border-[#282828] relative">
-                            <div id="pk-hidden" class="font-mono text-[11px] text-[#444] select-none">••••••••••••••••••••••••••••••••••••</div>
-                            <div id="pk-revealed" class="font-mono text-[11px] text-[#888] break-all hidden">${privateKey}</div>
-                            <button id="toggle-pk" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#555] hover:text-white transition">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/>
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-                                </svg>
+                        
+                        <!-- Footer -->
+                        <div class="px-6 py-4 border-t border-white/5 flex gap-3">
+                            <button id="cancel-btn" class="flex-1 bg-white/5 hover:bg-white/10 text-white/70 text-sm font-medium py-3 rounded-xl transition border border-white/10">
+                                Cancel
+                            </button>
+                            <button id="continue-btn" disabled class="flex-1 bg-white/10 text-white/30 text-sm font-medium py-3 rounded-xl transition cursor-not-allowed">
+                                Continue
                             </button>
                         </div>
-                        <button id="copy-pk" class="mt-2 w-full bg-[#1a1a1a] hover:bg-[#202020] border border-[#282828] text-white text-[12px] font-medium py-2 rounded-lg transition flex items-center justify-center gap-2">
-                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184"/>
-                            </svg>
-                            Copy Private Key
-                        </button>
                     </div>
                     
-                    <!-- Warning -->
-                    <div class="mx-5 mb-3 bg-[#1f1a0f] border border-[#3d3215] rounded-lg p-3">
-                        <div class="flex gap-2.5">
-                            <svg class="w-4 h-4 text-[#f59e0b] flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
-                            </svg>
+                    <!-- Step 2: Confirm Password -->
+                    <div id="step-2" class="hidden">
+                        <!-- Header -->
+                        <div class="flex items-center justify-between px-6 py-4 border-b border-white/5">
                             <div>
-                                <p class="text-[#f59e0b] text-[12px] font-medium">Save your private key!</p>
-                                <p class="text-[#a67c00] text-[10px] mt-0.5">Store it safely offline. This is the only way to recover your account.</p>
+                                <h3 class="text-lg font-medium text-white/90">Confirm Password</h3>
+                                <p class="text-xs text-white/40 mt-0.5">Re-enter your password to confirm</p>
                             </div>
                         </div>
-                    </div>
-                    
-                    <!-- Continue Button -->
-                    <div class="px-5 pb-5">
-                        <button id="continue-btn" class="w-full bg-white hover:bg-[#f0f0f0] text-black text-[13px] font-medium py-2.5 rounded-lg transition">
-                            Continue
-                        </button>
+                        
+                        <!-- Content -->
+                        <div class="p-6">
+                            <div class="relative">
+                                <input type="password" id="confirm-password-input" 
+                                    class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-white/30 transition placeholder:text-white/20 pr-11"
+                                    placeholder="Re-enter password" autocomplete="new-password">
+                                <button id="toggle-confirm-password" class="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/80 transition">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/>
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                    </svg>
+                                </button>
+                            </div>
+                            <p id="password-error" class="hidden text-xs text-red-400 mt-2">Passwords don't match</p>
+                        </div>
+                        
+                        <!-- Footer -->
+                        <div class="px-6 py-4 border-t border-white/5 flex gap-3">
+                            <button id="back-btn" class="flex-1 bg-white/5 hover:bg-white/10 text-white/70 text-sm font-medium py-3 rounded-xl transition border border-white/10">
+                                Back
+                            </button>
+                            <button id="confirm-btn" class="flex-1 bg-white hover:bg-white/90 text-black text-sm font-medium py-3 rounded-xl transition">
+                                Continue
+                            </button>
+                        </div>
                     </div>
                 </div>
             `;
 
             document.body.appendChild(modal);
 
-            const toggleBtn = modal.querySelector('#toggle-pk');
+            // Elements - Step 1
+            const step1 = modal.querySelector('#step-1');
+            const step2 = modal.querySelector('#step-2');
+            const togglePkBtn = modal.querySelector('#toggle-pk');
             const pkHidden = modal.querySelector('#pk-hidden');
             const pkRevealed = modal.querySelector('#pk-revealed');
-            const copyBtn = modal.querySelector('#copy-pk');
+            const copyPkBtn = modal.querySelector('#copy-pk');
+            const displayNameInput = modal.querySelector('#display-name-input');
+            const passwordInput = modal.querySelector('#password-input');
+            const togglePasswordBtn = modal.querySelector('#toggle-password');
+            const cancelBtn = modal.querySelector('#cancel-btn');
             const continueBtn = modal.querySelector('#continue-btn');
+            
+            // Password strength elements
+            const checkLength = modal.querySelector('#check-length');
+            const checkUpper = modal.querySelector('#check-upper');
+            const checkLower = modal.querySelector('#check-lower');
+            const checkNumber = modal.querySelector('#check-number');
+            
+            // Elements - Step 2
+            const confirmPasswordInput = modal.querySelector('#confirm-password-input');
+            const toggleConfirmPasswordBtn = modal.querySelector('#toggle-confirm-password');
+            const backBtn = modal.querySelector('#back-btn');
+            const confirmBtn = modal.querySelector('#confirm-btn');
+            const passwordError = modal.querySelector('#password-error');
 
-            let isRevealed = false;
-            toggleBtn.addEventListener('click', () => {
-                isRevealed = !isRevealed;
-                pkHidden.classList.toggle('hidden', isRevealed);
-                pkRevealed.classList.toggle('hidden', !isRevealed);
+            // SVG icons
+            const checkIcon = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`;
+            const emptyIcon = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="1.5"/></svg>`;
+
+            // Validation state
+            let isValid = { length: false, upper: false, lower: false, number: false };
+
+            const updateCheckmark = (element, valid) => {
+                element.innerHTML = valid ? checkIcon : emptyIcon;
+                element.innerHTML += element.textContent;
+                const text = element.textContent;
+                element.innerHTML = (valid ? checkIcon : emptyIcon) + ` <span>${text}</span>`;
+                element.className = `flex items-center gap-2 ${valid ? 'text-emerald-400' : 'text-white/30'}`;
+            };
+
+            const validatePassword = () => {
+                const pwd = passwordInput.value;
+                isValid.length = pwd.length >= 12;
+                isValid.upper = /[A-Z]/.test(pwd);
+                isValid.lower = /[a-z]/.test(pwd);
+                isValid.number = /[0-9]/.test(pwd);
+
+                // Update UI
+                checkLength.className = `flex items-center gap-2 ${isValid.length ? 'text-emerald-400' : 'text-white/30'}`;
+                checkLength.innerHTML = (isValid.length ? checkIcon : emptyIcon) + ' At least 12 characters';
+                
+                checkUpper.className = `flex items-center gap-2 ${isValid.upper ? 'text-emerald-400' : 'text-white/30'}`;
+                checkUpper.innerHTML = (isValid.upper ? checkIcon : emptyIcon) + ' Uppercase letter';
+                
+                checkLower.className = `flex items-center gap-2 ${isValid.lower ? 'text-emerald-400' : 'text-white/30'}`;
+                checkLower.innerHTML = (isValid.lower ? checkIcon : emptyIcon) + ' Lowercase letter';
+                
+                checkNumber.className = `flex items-center gap-2 ${isValid.number ? 'text-emerald-400' : 'text-white/30'}`;
+                checkNumber.innerHTML = (isValid.number ? checkIcon : emptyIcon) + ' Number';
+
+                // Enable/disable continue button
+                const allValid = isValid.length && isValid.upper && isValid.lower && isValid.number;
+                continueBtn.disabled = !allValid;
+                continueBtn.className = allValid 
+                    ? 'flex-1 bg-white hover:bg-white/90 text-black text-sm font-medium py-3 rounded-xl transition'
+                    : 'flex-1 bg-white/10 text-white/30 text-sm font-medium py-3 rounded-xl transition cursor-not-allowed';
+            };
+
+            // Cancel button - return 'cancelled'
+            cancelBtn.addEventListener('click', () => {
+                document.body.removeChild(modal);
+                resolve('cancelled');
             });
 
-            copyBtn.addEventListener('click', async () => {
+            // Toggle private key visibility
+            let isPkRevealed = false;
+            togglePkBtn.addEventListener('click', () => {
+                isPkRevealed = !isPkRevealed;
+                pkHidden.classList.toggle('hidden', isPkRevealed);
+                pkRevealed.classList.toggle('hidden', !isPkRevealed);
+            });
+
+            // Copy private key
+            copyPkBtn.addEventListener('click', async () => {
                 try {
                     await navigator.clipboard.writeText(privateKey);
-                    copyBtn.innerHTML = `
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-                        </svg>
-                        Copied!
-                    `;
-                    copyBtn.classList.remove('bg-gray-800', 'hover:bg-gray-700');
-                    copyBtn.classList.add('bg-green-600');
+                    copyPkBtn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Copied!`;
+                    copyPkBtn.classList.add('text-emerald-400');
                     setTimeout(() => {
-                        copyBtn.innerHTML = `
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
-                            </svg>
-                            Copy Private Key
-                        `;
-                        copyBtn.classList.add('bg-gray-800', 'hover:bg-gray-700');
-                        copyBtn.classList.remove('bg-green-600');
+                        copyPkBtn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184"/></svg> Copy Private Key`;
+                        copyPkBtn.classList.remove('text-emerald-400');
                     }, 2000);
                 } catch (err) {
+                    // Fallback
                     const textarea = document.createElement('textarea');
                     textarea.value = privateKey;
                     textarea.style.position = 'fixed';
@@ -806,53 +1100,424 @@ class App {
                 }
             });
 
+            // Toggle password visibility
+            togglePasswordBtn.addEventListener('click', () => {
+                passwordInput.type = passwordInput.type === 'password' ? 'text' : 'password';
+            });
+
+            // Password validation on input
+            passwordInput.addEventListener('input', validatePassword);
+
+            // Continue to step 2
             continueBtn.addEventListener('click', () => {
+                if (continueBtn.disabled) return;
+                step1.classList.add('hidden');
+                step2.classList.remove('hidden');
+                confirmPasswordInput.focus();
+            });
+
+            // Toggle confirm password visibility
+            toggleConfirmPasswordBtn.addEventListener('click', () => {
+                confirmPasswordInput.type = confirmPasswordInput.type === 'password' ? 'text' : 'password';
+            });
+
+            // Back to step 1
+            backBtn.addEventListener('click', () => {
+                step2.classList.add('hidden');
+                step1.classList.remove('hidden');
+                confirmPasswordInput.value = '';
+                passwordError.classList.add('hidden');
+            });
+
+            // Confirm password
+            confirmBtn.addEventListener('click', () => {
+                if (confirmPasswordInput.value !== passwordInput.value) {
+                    passwordError.classList.remove('hidden');
+                    confirmPasswordInput.classList.add('border-red-400');
+                    return;
+                }
+
+                const result = {
+                    password: passwordInput.value,
+                    displayName: displayNameInput.value.trim() || null
+                };
+
+                // Clear sensitive data
+                passwordInput.value = '';
+                confirmPasswordInput.value = '';
+
                 document.body.removeChild(modal);
-                resolve();
+                resolve(result);
+            });
+
+            // Hide error on input
+            confirmPasswordInput.addEventListener('input', () => {
+                passwordError.classList.add('hidden');
+                confirmPasswordInput.classList.remove('border-red-400');
+            });
+
+            // Enter key support
+            confirmPasswordInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') confirmBtn.click();
+            });
+
+            passwordInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter' && !continueBtn.disabled) continueBtn.click();
             });
         });
     }
 
     /**
-     * Show confirmation modal
+     * Show Import Private Key modal with password setup
+     * @returns {Promise<{privateKey: string, password: string|null}|null>}
      */
-    async showConfirmModal(title, message) {
+    async showImportPrivateKeyModal() {
         return new Promise((resolve) => {
             const modal = document.createElement('div');
-            modal.className = 'fixed inset-0 bg-black/80 flex items-center justify-center z-50';
+            modal.className = 'fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4';
             modal.innerHTML = `
-                <div class="bg-[#111111] rounded-xl w-[320px] overflow-hidden shadow-2xl border border-[#222]">
-                    <div class="px-5 pt-5 pb-3">
-                        <h3 class="text-[15px] font-medium text-white mb-1">${title}</h3>
-                        <p class="text-[#888] text-[12px]">${message}</p>
+                <div class="bg-[#141414] rounded-2xl w-[420px] max-w-[95vw] shadow-2xl border border-white/5 overflow-hidden">
+                    <!-- Step 1: Import Private Key -->
+                    <div id="step-1">
+                        <!-- Header -->
+                        <div class="flex items-center justify-between px-6 py-4 border-b border-white/5">
+                            <div class="flex items-center gap-3">
+                                <div class="w-9 h-9 rounded-xl bg-[#1a1f2e] flex items-center justify-center">
+                                    <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 class="text-lg font-medium text-white/90">Import Private Key</h3>
+                                    <p class="text-xs text-white/40">Restore your account</p>
+                                </div>
+                            </div>
+                            <button id="close-btn" class="text-white/40 hover:text-white/80 transition p-1">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12"/>
+                                </svg>
+                            </button>
+                        </div>
+                        
+                        <!-- Content -->
+                        <div class="p-6 space-y-4">
+                            <!-- Private Key Input -->
+                            <div>
+                                <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Private Key</label>
+                                <div class="relative">
+                                    <input type="password" id="private-key-input" 
+                                        class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-sm font-mono focus:outline-none focus:border-white/30 transition placeholder:text-white/20 pr-11"
+                                        placeholder="64 hex characters (with or without 0x)" autocomplete="off" spellcheck="false">
+                                    <button id="toggle-pk" class="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/80 transition">
+                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/>
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <p id="pk-error" class="hidden text-xs text-red-400 mt-2">Invalid format - must be 64 hex characters</p>
+                            </div>
+                            
+                            <!-- Divider -->
+                            <div class="border-t border-white/5 pt-4">
+                                <p class="text-xs text-white/40 mb-3">Set a password to save this account locally</p>
+                            </div>
+                            
+                            <!-- Password -->
+                            <div>
+                                <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Password</label>
+                                <div class="relative">
+                                    <input type="password" id="password-input" 
+                                        class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-white/30 transition placeholder:text-white/20 pr-11"
+                                        placeholder="Min 12 chars, upper, lower, number" autocomplete="new-password">
+                                    <button id="toggle-password" class="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/80 transition">
+                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/>
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <!-- Password strength indicators -->
+                                <div id="password-strength" class="mt-3 space-y-1.5 text-xs">
+                                    <div id="check-length" class="flex items-center gap-2 text-white/30">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <circle cx="12" cy="12" r="10" stroke-width="1.5"/>
+                                        </svg>
+                                        At least 12 characters
+                                    </div>
+                                    <div id="check-upper" class="flex items-center gap-2 text-white/30">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <circle cx="12" cy="12" r="10" stroke-width="1.5"/>
+                                        </svg>
+                                        Uppercase letter
+                                    </div>
+                                    <div id="check-lower" class="flex items-center gap-2 text-white/30">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <circle cx="12" cy="12" r="10" stroke-width="1.5"/>
+                                        </svg>
+                                        Lowercase letter
+                                    </div>
+                                    <div id="check-number" class="flex items-center gap-2 text-white/30">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <circle cx="12" cy="12" r="10" stroke-width="1.5"/>
+                                        </svg>
+                                        Number
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Footer -->
+                        <div class="px-6 py-4 border-t border-white/5 flex gap-3">
+                            <button id="skip-btn" class="flex-1 bg-white/5 hover:bg-white/10 text-white/70 text-sm font-medium py-3 rounded-xl transition border border-white/10">
+                                Continue without saving
+                            </button>
+                            <button id="save-btn" disabled class="flex-1 bg-white/10 text-white/30 text-sm font-medium py-3 rounded-xl transition cursor-not-allowed">
+                                Save
+                            </button>
+                        </div>
                     </div>
-                    <div class="px-5 pb-5 flex gap-2">
-                        <button id="confirm-no" class="flex-1 bg-[#1a1a1a] hover:bg-[#202020] text-white text-[13px] font-medium py-2.5 rounded-lg transition border border-[#282828]">
-                            No
-                        </button>
-                        <button id="confirm-yes" class="flex-1 bg-white hover:bg-[#f0f0f0] text-black text-[13px] font-medium py-2.5 rounded-lg transition">
-                            Yes
-                        </button>
+                    
+                    <!-- Step 2: Confirm Password -->
+                    <div id="step-2" class="hidden">
+                        <!-- Header -->
+                        <div class="flex items-center justify-between px-6 py-4 border-b border-white/5">
+                            <div>
+                                <h3 class="text-lg font-medium text-white/90">Confirm Password</h3>
+                                <p class="text-xs text-white/40 mt-0.5">Re-enter your password to confirm</p>
+                            </div>
+                        </div>
+                        
+                        <!-- Content -->
+                        <div class="p-6">
+                            <div class="relative">
+                                <input type="password" id="confirm-password-input" 
+                                    class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-white/30 transition placeholder:text-white/20 pr-11"
+                                    placeholder="Re-enter password" autocomplete="new-password">
+                                <button id="toggle-confirm-password" class="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/80 transition">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/>
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                    </svg>
+                                </button>
+                            </div>
+                            <p id="password-error" class="hidden text-xs text-red-400 mt-2">Passwords don't match</p>
+                        </div>
+                        
+                        <!-- Footer -->
+                        <div class="px-6 py-4 border-t border-white/5 flex gap-3">
+                            <button id="back-btn" class="flex-1 bg-white/5 hover:bg-white/10 text-white/70 text-sm font-medium py-3 rounded-xl transition border border-white/10">
+                                Back
+                            </button>
+                            <button id="confirm-btn" class="flex-1 bg-white hover:bg-white/90 text-black text-sm font-medium py-3 rounded-xl transition">
+                                Save
+                            </button>
+                        </div>
                     </div>
                 </div>
             `;
 
             document.body.appendChild(modal);
 
-            modal.querySelector('#confirm-yes').addEventListener('click', () => {
+            // Elements - Step 1
+            const step1 = modal.querySelector('#step-1');
+            const step2 = modal.querySelector('#step-2');
+            const closeBtn = modal.querySelector('#close-btn');
+            const privateKeyInput = modal.querySelector('#private-key-input');
+            const togglePkBtn = modal.querySelector('#toggle-pk');
+            const pkError = modal.querySelector('#pk-error');
+            const passwordInput = modal.querySelector('#password-input');
+            const togglePasswordBtn = modal.querySelector('#toggle-password');
+            const skipBtn = modal.querySelector('#skip-btn');
+            const saveBtn = modal.querySelector('#save-btn');
+            
+            // Password strength elements
+            const checkLength = modal.querySelector('#check-length');
+            const checkUpper = modal.querySelector('#check-upper');
+            const checkLower = modal.querySelector('#check-lower');
+            const checkNumber = modal.querySelector('#check-number');
+            
+            // Elements - Step 2
+            const confirmPasswordInput = modal.querySelector('#confirm-password-input');
+            const toggleConfirmPasswordBtn = modal.querySelector('#toggle-confirm-password');
+            const backBtn = modal.querySelector('#back-btn');
+            const confirmBtn = modal.querySelector('#confirm-btn');
+            const passwordError = modal.querySelector('#password-error');
+
+            // SVG icons
+            const checkIcon = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`;
+            const emptyIcon = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="1.5"/></svg>`;
+
+            // Validation state
+            let isValid = { length: false, upper: false, lower: false, number: false };
+            let isPkValid = false;
+
+            // Normalize private key - add 0x if missing
+            const normalizePrivateKey = (pk) => {
+                pk = pk.trim();
+                if (/^[a-fA-F0-9]{64}$/.test(pk)) {
+                    return '0x' + pk;
+                }
+                return pk;
+            };
+
+            const validatePrivateKey = () => {
+                const pk = normalizePrivateKey(privateKeyInput.value);
+                // Valid: 64 hex chars with or without 0x prefix
+                isPkValid = /^0x[a-fA-F0-9]{64}$/.test(pk);
+                pkError.classList.toggle('hidden', isPkValid || privateKeyInput.value.trim().length === 0);
+                privateKeyInput.classList.toggle('border-red-400', !isPkValid && privateKeyInput.value.trim().length > 0);
+                updateSaveButton();
+            };
+
+            const validatePassword = () => {
+                const pwd = passwordInput.value;
+                isValid.length = pwd.length >= 12;
+                isValid.upper = /[A-Z]/.test(pwd);
+                isValid.lower = /[a-z]/.test(pwd);
+                isValid.number = /[0-9]/.test(pwd);
+
+                // Update UI
+                checkLength.className = `flex items-center gap-2 ${isValid.length ? 'text-emerald-400' : 'text-white/30'}`;
+                checkLength.innerHTML = (isValid.length ? checkIcon : emptyIcon) + ' At least 12 characters';
+                
+                checkUpper.className = `flex items-center gap-2 ${isValid.upper ? 'text-emerald-400' : 'text-white/30'}`;
+                checkUpper.innerHTML = (isValid.upper ? checkIcon : emptyIcon) + ' Uppercase letter';
+                
+                checkLower.className = `flex items-center gap-2 ${isValid.lower ? 'text-emerald-400' : 'text-white/30'}`;
+                checkLower.innerHTML = (isValid.lower ? checkIcon : emptyIcon) + ' Lowercase letter';
+                
+                checkNumber.className = `flex items-center gap-2 ${isValid.number ? 'text-emerald-400' : 'text-white/30'}`;
+                checkNumber.innerHTML = (isValid.number ? checkIcon : emptyIcon) + ' Number';
+
+                updateSaveButton();
+            };
+
+            const updateSaveButton = () => {
+                const allValid = isPkValid && isValid.length && isValid.upper && isValid.lower && isValid.number;
+                saveBtn.disabled = !allValid;
+                saveBtn.className = allValid 
+                    ? 'flex-1 bg-white hover:bg-white/90 text-black text-sm font-medium py-3 rounded-xl transition'
+                    : 'flex-1 bg-white/10 text-white/30 text-sm font-medium py-3 rounded-xl transition cursor-not-allowed';
+            };
+
+            const updateSkipButton = () => {
+                skipBtn.disabled = !isPkValid;
+                skipBtn.className = isPkValid 
+                    ? 'flex-1 bg-white/5 hover:bg-white/10 text-white/70 text-sm font-medium py-3 rounded-xl transition border border-white/10'
+                    : 'flex-1 bg-white/5 text-white/30 text-sm font-medium py-3 rounded-xl transition border border-white/10 cursor-not-allowed';
+            };
+
+            // Close button - return null
+            closeBtn.addEventListener('click', () => {
                 document.body.removeChild(modal);
-                resolve(true);
+                resolve(null);
             });
-            modal.querySelector('#confirm-no').addEventListener('click', () => {
-                document.body.removeChild(modal);
-                resolve(false);
-            });
+
+            // Click outside to close
             modal.addEventListener('click', (e) => {
                 if (e.target === modal) {
                     document.body.removeChild(modal);
-                    resolve(false);
+                    resolve(null);
                 }
             });
+
+            // Toggle private key visibility
+            togglePkBtn.addEventListener('click', () => {
+                privateKeyInput.type = privateKeyInput.type === 'password' ? 'text' : 'password';
+            });
+
+            // Private key validation on input
+            privateKeyInput.addEventListener('input', () => {
+                validatePrivateKey();
+                updateSkipButton();
+            });
+
+            // Toggle password visibility
+            togglePasswordBtn.addEventListener('click', () => {
+                passwordInput.type = passwordInput.type === 'password' ? 'text' : 'password';
+            });
+
+            // Password validation on input
+            passwordInput.addEventListener('input', validatePassword);
+
+            // Skip - continue without saving
+            skipBtn.addEventListener('click', () => {
+                if (!isPkValid) return;
+                const privateKey = normalizePrivateKey(privateKeyInput.value);
+                privateKeyInput.value = '';
+                passwordInput.value = '';
+                document.body.removeChild(modal);
+                resolve({ privateKey, password: null });
+            });
+
+            // Save - go to step 2
+            saveBtn.addEventListener('click', () => {
+                if (saveBtn.disabled) return;
+                step1.classList.add('hidden');
+                step2.classList.remove('hidden');
+                confirmPasswordInput.focus();
+            });
+
+            // Toggle confirm password visibility
+            toggleConfirmPasswordBtn.addEventListener('click', () => {
+                confirmPasswordInput.type = confirmPasswordInput.type === 'password' ? 'text' : 'password';
+            });
+
+            // Back to step 1
+            backBtn.addEventListener('click', () => {
+                step2.classList.add('hidden');
+                step1.classList.remove('hidden');
+                confirmPasswordInput.value = '';
+                passwordError.classList.add('hidden');
+            });
+
+            // Confirm password and complete
+            confirmBtn.addEventListener('click', () => {
+                if (confirmPasswordInput.value !== passwordInput.value) {
+                    passwordError.classList.remove('hidden');
+                    confirmPasswordInput.classList.add('border-red-400');
+                    return;
+                }
+
+                const result = {
+                    privateKey: normalizePrivateKey(privateKeyInput.value),
+                    password: passwordInput.value
+                };
+
+                // Clear sensitive data
+                privateKeyInput.value = '';
+                passwordInput.value = '';
+                confirmPasswordInput.value = '';
+
+                document.body.removeChild(modal);
+                resolve(result);
+            });
+
+            // Hide error on input
+            confirmPasswordInput.addEventListener('input', () => {
+                passwordError.classList.add('hidden');
+                confirmPasswordInput.classList.remove('border-red-400');
+            });
+
+            // Enter key support
+            confirmPasswordInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') confirmBtn.click();
+            });
+
+            passwordInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter' && !saveBtn.disabled) saveBtn.click();
+            });
+
+            privateKeyInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    if (!saveBtn.disabled) saveBtn.click();
+                    else if (isPkValid) skipBtn.click();
+                }
+            });
+
+            // Focus on private key input
+            setTimeout(() => privateKeyInput.focus(), 100);
         });
     }
 
@@ -1025,12 +1690,10 @@ class App {
      */
     async importPrivateKey() {
         try {
-            const privateKey = await this.showSecureInput(
-                'Import Private Key',
-                'Enter your private key (starts with 0x):',
-                'password'
-            );
-            if (!privateKey) return;
+            const importResult = await this.showImportPrivateKeyModal();
+            if (!importResult) return;
+
+            const { privateKey, password } = importResult;
 
             // If upgrading from Guest, disconnect first to cleanup client
             // Do this AFTER getting the private key so user doesn't get disconnected if they cancel
@@ -1041,20 +1704,9 @@ class App {
 
             const result = authManager.importPrivateKey(privateKey);
 
-            // Ask if user wants to save encrypted
-            const save = await this.showConfirmModal(
-                'Save Account?',
-                'Would you like to save this account encrypted with a password?'
-            );
-            if (save) {
-                const password = await this.showSecureInput(
-                    'Encrypt Account',
-                    'Enter a password:',
-                    'password'
-                );
-                if (password) {
-                    await this.saveWalletWithProgress(password);
-                }
+            // Save encrypted if password was provided
+            if (password) {
+                await this.saveWalletWithProgress(password);
             }
 
             await this.onWalletConnected(result.address, result.signer);

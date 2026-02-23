@@ -186,11 +186,20 @@ class SubscriptionManager {
 
     /**
      * Handle message received on preview channel
+     * After promote, forwards to channelManager if channel exists there
      * @private
      */
     _handlePreviewMessage(msg) {
+        // If channel was promoted to channelManager, forward there instead
+        const streamId = this.previewChannelId || this.activeChannelId;
+        if (streamId && channelManager.getChannel(streamId)) {
+            // Channel exists in manager - use proper handler
+            channelManager.handleTextMessage(streamId, msg);
+            return;
+        }
+        
+        // Still in preview mode - forward to UI
         Logger.debug('Preview message callback:', msg?.id, msg?.type || 'text');
-        // Forward to UI controller for rendering
         if (window.uiController && window.uiController.handlePreviewMessage) {
             window.uiController.handlePreviewMessage(msg);
         } else {
@@ -200,20 +209,22 @@ class SubscriptionManager {
 
     /**
      * Handle ephemeral message on preview channel (typing, presence)
+     * After promote, continues to work because channelManager handles these
      * @private
      */
     _handlePreviewEphemeral(msg) {
-        if (!this.previewChannelId) return;
+        const streamId = this.previewChannelId || this.activeChannelId;
+        if (!streamId) return;
         
         Logger.debug('Preview ephemeral:', msg.type);
         
         // Process presence messages so online users work in preview mode
         if (msg.type === 'presence') {
-            channelManager.handlePresenceMessage(this.previewChannelId, msg);
+            channelManager.handlePresenceMessage(streamId, msg);
         } else if (msg.type === 'typing') {
             // Could notify UI of typing indicators if needed
             channelManager.notifyHandlers('typing', { 
-                streamId: this.previewChannelId, 
+                streamId: streamId, 
                 user: msg.user 
             });
         }
@@ -290,7 +301,7 @@ class SubscriptionManager {
 
     /**
      * Promote preview channel to active (after user joins)
-     * Keeps subscription alive, just changes state
+     * OPTIMIZED: Keeps the existing subscription, handlers auto-forward to channelManager
      * @param {string} messageStreamId - The preview channel to promote
      */
     async promotePreviewToActive(messageStreamId) {
@@ -299,31 +310,18 @@ class SubscriptionManager {
             return;
         }
 
-        Logger.info('Promoting preview to active:', messageStreamId);
+        Logger.info('Promoting preview to active (keeping subscription):', messageStreamId);
 
         // Stop preview presence broadcasting
         this._stopPreviewPresence();
 
-        // IMPORTANT: Unsubscribe from preview first so channelManager can 
-        // re-subscribe with proper handlers (handleTextMessage, handleControlMessage)
-        const ephemeralStreamId = deriveEphemeralId(messageStreamId);
-        try {
-            await streamrController.unsubscribeFromDualStream(messageStreamId, ephemeralStreamId);
-        } catch (error) {
-            Logger.warn('Error unsubscribing preview streams:', error.message);
-        }
-
-        // Transfer state
+        // Transfer state - keep subscription alive!
+        // The preview handlers (_handlePreviewMessage, _handlePreviewEphemeral) 
+        // automatically forward to channelManager when channel exists there
         this.activeChannelId = messageStreamId;
         this.previewChannelId = null;
-
-        // Re-subscribe through channelManager with proper handlers
-        // The channel should now exist in channelManager after join
-        try {
-            await channelManager.subscribeToChannel(messageStreamId, null);
-        } catch (error) {
-            Logger.warn('Re-subscribe after promote:', error.message);
-        }
+        
+        Logger.debug('Preview promoted - subscription reused, handlers auto-forward');
     }
 
     /**

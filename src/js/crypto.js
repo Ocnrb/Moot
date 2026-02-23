@@ -33,7 +33,7 @@ class CryptoManager {
             {
                 name: 'PBKDF2',
                 salt: salt,
-                iterations: 100000,
+                iterations: 310000,
                 hash: 'SHA-256'
             },
             keyMaterial,

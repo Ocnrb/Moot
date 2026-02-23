@@ -19,7 +19,7 @@ class SecureStorage {
         this.cache = null;            // Decrypted data cache
         this.isGuestMode = false;     // Guest mode - no persistence
         this.STORAGE_PREFIX = 'pombo_secure_';
-        this.PBKDF2_ITERATIONS = 100000;
+        this.PBKDF2_ITERATIONS = 310000;
     }
 
     /**
@@ -713,6 +713,205 @@ class SecureStorage {
             hasUsername: !!this.cache.username,
             hasApiKey: !!this.cache.graphApiKey,
             version: this.cache.version
+        };
+    }
+
+    // ==================== Account Backup with Scrypt ====================
+
+    /**
+     * Export complete account backup using scrypt (same security as Keystore V3)
+     * Uses the same password as the account keystore
+     * @param {Object} keystore - The account's Keystore V3 object
+     * @param {string} password - Account password (verified against keystore before calling)
+     * @param {Function} progressCallback - Optional progress callback (0-1)
+     * @returns {Promise<Object>} - Complete backup object
+     */
+    async exportAccountBackup(keystore, password, progressCallback = null) {
+        if (!this.isUnlocked || !this.cache) {
+            throw new Error('Storage not unlocked');
+        }
+
+        // Prepare data to encrypt
+        const dataToBackup = {
+            version: 3,
+            exportedAt: new Date().toISOString(),
+            address: this.address,
+            data: {
+                channels: this.cache.channels || [],
+                trustedContacts: this.cache.trustedContacts || {},
+                ensCache: this.cache.ensCache || {},
+                username: this.cache.username,
+                graphApiKey: this.cache.graphApiKey
+            }
+        };
+
+        // Generate random salt for scrypt (different from keystore's salt)
+        const salt = ethers.randomBytes(32);
+        const iv = ethers.randomBytes(16);
+
+        // Scrypt parameters (same as Keystore V3)
+        const N = 131072;  // 2^17
+        const r = 8;
+        const p = 1;
+        const dkLen = 32;
+
+        // Derive key using scrypt
+        Logger.debug('Deriving backup encryption key with scrypt...');
+        let derivedKey;
+        if (progressCallback) {
+            derivedKey = await ethers.scrypt(password, salt, N, r, p, dkLen, (progress) => {
+                progressCallback(progress * 0.5); // 0-50% for key derivation
+            });
+        } else {
+            derivedKey = await ethers.scrypt(password, salt, N, r, p, dkLen);
+        }
+
+        // Convert hex string to bytes for Web Crypto
+        const keyBytes = ethers.getBytes(derivedKey);
+
+        // Import key for AES-GCM
+        const cryptoKey = await crypto.subtle.importKey(
+            'raw',
+            keyBytes,
+            { name: 'AES-GCM' },
+            false,
+            ['encrypt']
+        );
+
+        // Encrypt data
+        if (progressCallback) progressCallback(0.6);
+        const plaintext = new TextEncoder().encode(JSON.stringify(dataToBackup));
+        const ciphertext = await crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv: iv },
+            cryptoKey,
+            plaintext
+        );
+
+        if (progressCallback) progressCallback(0.9);
+
+        Logger.info('📤 Account backup created with scrypt encryption');
+
+        return {
+            format: 'pombo-account-backup',
+            version: 3,
+            exportedAt: new Date().toISOString(),
+            // Include the keystore (already encrypted with scrypt)
+            keystore: keystore,
+            // Include encrypted data (also scrypt-protected)
+            encryptedData: {
+                kdf: 'scrypt',
+                kdfparams: {
+                    n: N,
+                    r: r,
+                    p: p,
+                    dklen: dkLen,
+                    salt: ethers.hexlify(salt)
+                },
+                cipher: 'aes-256-gcm',
+                cipherparams: {
+                    iv: ethers.hexlify(iv)
+                },
+                ciphertext: ethers.hexlify(new Uint8Array(ciphertext))
+            }
+        };
+    }
+
+    /**
+     * Import complete account backup
+     * @param {Object} backup - Backup object from exportAccountBackup
+     * @param {string} password - Account password
+     * @param {Function} progressCallback - Optional progress callback (0-1)
+     * @returns {Promise<Object>} - { wallet, summary }
+     */
+    async importAccountBackup(backup, password, progressCallback = null) {
+        if (backup.format !== 'pombo-account-backup' || backup.version !== 3) {
+            throw new Error('Invalid backup format. Expected pombo-account-backup v3');
+        }
+
+        // Step 1: Decrypt keystore to recover wallet (verifies password)
+        Logger.debug('Decrypting keystore from backup...');
+        let wallet;
+        try {
+            if (progressCallback) {
+                wallet = await ethers.Wallet.fromEncryptedJson(
+                    JSON.stringify(backup.keystore),
+                    password,
+                    (progress) => progressCallback(progress * 0.4) // 0-40%
+                );
+            } else {
+                wallet = await ethers.Wallet.fromEncryptedJson(
+                    JSON.stringify(backup.keystore),
+                    password
+                );
+            }
+        } catch (error) {
+            throw new Error('Incorrect password or corrupted backup');
+        }
+
+        // Step 2: Decrypt data using scrypt
+        const enc = backup.encryptedData;
+        const salt = ethers.getBytes(enc.kdfparams.salt);
+        const iv = ethers.getBytes(enc.cipherparams.iv);
+        const ciphertext = ethers.getBytes(enc.ciphertext);
+
+        Logger.debug('Deriving data decryption key with scrypt...');
+        let derivedKey;
+        if (progressCallback) {
+            derivedKey = await ethers.scrypt(
+                password, 
+                salt, 
+                enc.kdfparams.n, 
+                enc.kdfparams.r, 
+                enc.kdfparams.p, 
+                enc.kdfparams.dklen,
+                (progress) => progressCallback(0.4 + progress * 0.4) // 40-80%
+            );
+        } else {
+            derivedKey = await ethers.scrypt(
+                password, 
+                salt, 
+                enc.kdfparams.n, 
+                enc.kdfparams.r, 
+                enc.kdfparams.p, 
+                enc.kdfparams.dklen
+            );
+        }
+
+        const keyBytes = ethers.getBytes(derivedKey);
+
+        // Import key for AES-GCM
+        const cryptoKey = await crypto.subtle.importKey(
+            'raw',
+            keyBytes,
+            { name: 'AES-GCM' },
+            false,
+            ['decrypt']
+        );
+
+        // Decrypt data
+        if (progressCallback) progressCallback(0.85);
+        let decryptedData;
+        try {
+            const plaintext = await crypto.subtle.decrypt(
+                { name: 'AES-GCM', iv: iv },
+                cryptoKey,
+                ciphertext
+            );
+            decryptedData = JSON.parse(new TextDecoder().decode(plaintext));
+        } catch (error) {
+            throw new Error('Failed to decrypt backup data');
+        }
+
+        if (progressCallback) progressCallback(1.0);
+
+        Logger.info('📥 Account backup decrypted successfully');
+
+        return {
+            wallet: wallet,
+            keystore: backup.keystore,
+            data: decryptedData.data,
+            address: decryptedData.address,
+            exportedAt: decryptedData.exportedAt
         };
     }
 }

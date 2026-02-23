@@ -1566,7 +1566,6 @@ class UIController {
     loadChannelReactions(streamId) {
         const reactions = channelManager.getChannelReactions(streamId);
         reactionManager.loadFromChannelState(reactions);
-        Logger.debug('Loaded reactions for channel:', Object.keys(reactions).length, 'messages with reactions');
     }
 
     /**
@@ -3363,6 +3362,7 @@ class UIController {
                 type: channelInfo?.type || 'public',
                 readOnly: channelInfo?.readOnly || false,
                 messages: []
+                // Note: reactions are handled by reactionManager (global state)
             };
 
             // Subscribe to channel stream temporarily (without persisting)
@@ -3485,6 +3485,7 @@ class UIController {
 
     /**
      * Add preview channel to user's list (convert preview to joined)
+     * OPTIMIZED: Uses persistChannelFromPreview() which skips redundant checks
      */
     async addPreviewToList() {
         if (!this.previewChannel) {
@@ -3493,23 +3494,28 @@ class UIController {
         }
 
         try {
-            const { streamId, channelInfo, name, type, readOnly } = this.previewChannel;
+            const { streamId, channelInfo, name, type, readOnly, messages } = this.previewChannel;
 
             this.showLoadingToast('Adding channel...', 'Saving to your list');
 
-            // Add channel to channelManager (this persists it)
-            await channelManager.joinChannel(streamId, null, {
+            // OPTIMIZATION: Use fast path - channel already subscribed via preview
+            // persistChannelFromPreview() only saves to storage, skips subscription
+            // IMPORTANT: Transfer messages and reactions from preview so they're not lost!
+            // Reactions are stored in reactionManager (global), not previewChannel
+            await channelManager.persistChannelFromPreview(streamId, {
                 name: name,
                 type: type,
                 readOnly: readOnly,
-                createdBy: channelInfo?.createdBy
+                createdBy: channelInfo?.createdBy,
+                messages: messages || [],  // Transfer preview messages
+                reactions: reactionManager.exportAsObject() // Export reactions from reactionManager
             });
 
             // Clear preview state
             const previewStreamId = streamId;
             this.previewChannel = null;
 
-            // Transfer subscription from preview to active
+            // Transfer subscription handlers from preview to channelManager
             await subscriptionManager.promotePreviewToActive(previewStreamId);
 
             this.hideLoadingToast();
@@ -4182,18 +4188,21 @@ class UIController {
         return new Promise((resolve) => {
             const modal = document.createElement('div');
             modal.className = 'fixed inset-0 bg-black/80 flex items-center justify-center z-50';
+            // Security: escape user-provided content to prevent XSS
+            const safeTitle = this.escapeHtml(title);
+            const safeDescription = this.escapeHtml(description);
             modal.innerHTML = `
                 <div class="bg-[#111111] rounded-xl w-[360px] overflow-hidden shadow-2xl border border-[#222]">
                     <div class="px-5 pt-5 pb-3">
                         <div class="flex items-center justify-between">
-                            <h3 class="text-[15px] font-medium text-white">${title}</h3>
+                            <h3 class="text-[15px] font-medium text-white">${safeTitle}</h3>
                             <button id="close-modal" class="text-[#666] hover:text-white transition p-1 -mr-1">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12"/>
                                 </svg>
                             </button>
                         </div>
-                        <p class="text-[11px] text-[#666] mt-1 whitespace-pre-line">${description}</p>
+                        <p class="text-[11px] text-[#666] mt-1 whitespace-pre-line">${safeDescription}</p>
                     </div>
                     <div class="px-5 pb-4 space-y-3">
                         <div class="relative">

@@ -74,6 +74,20 @@ class ReactionManager {
     }
 
     /**
+     * Export all reactions as Object (for transferring to channel state)
+     * @returns {Object} - Reactions object { messageId -> { emoji -> [users] } }
+     */
+    exportAsObject() {
+        if (!this.messageReactions) return {};
+        
+        const result = {};
+        for (const [messageId, emojiMap] of this.messageReactions.entries()) {
+            result[messageId] = emojiMap;
+        }
+        return result;
+    }
+
+    /**
      * Add or toggle a reaction
      * @param {string} msgId - Message ID
      * @param {string} emoji - Emoji to toggle

@@ -486,6 +486,84 @@ class ChannelManager {
     }
 
     /**
+     * OPTIMIZED: Persist a channel from preview mode (already subscribed)
+     * This is much faster than joinChannel() because:
+     * - Skips permission checks (preview already worked = has permission)
+     * - Skips Graph API calls (uses info from preview)
+     * - Skips subscription (already subscribed via preview)
+     * 
+     * @param {string} messageStreamId - Message Stream ID
+     * @param {Object} previewInfo - Info from preview: { name, type, createdBy, readOnly, messages, reactions }
+     * @returns {Promise<Object>} - Persisted channel
+     */
+    async persistChannelFromPreview(messageStreamId, previewInfo = {}) {
+        try {
+            const ephemeralStreamId = deriveEphemeralId(messageStreamId);
+            
+            // Check if already joined
+            if (this.channels.has(messageStreamId)) {
+                Logger.debug('Channel already in list');
+                return this.channels.get(messageStreamId);
+            }
+
+            Logger.debug('Persisting channel from preview:', messageStreamId);
+
+            // Extract info from preview (already validated by successful preview)
+            const channelType = previewInfo.type || 'public';
+            const channelName = previewInfo.name || messageStreamId.split('/')[1]?.replace(/-\d$/, '') || messageStreamId;
+            const classification = channelType === 'native' ? (previewInfo.classification || 'personal') : null;
+
+            // IMPORTANT: Transfer messages and reactions from preview
+            const previewMessages = Array.isArray(previewInfo.messages) ? previewInfo.messages : [];
+            const previewReactions = previewInfo.reactions || {};
+
+            const channel = {
+                messageStreamId: messageStreamId,
+                ephemeralStreamId: ephemeralStreamId,
+                streamId: messageStreamId,
+                name: channelName,
+                type: channelType,
+                createdAt: Date.now(),
+                createdBy: previewInfo.createdBy || null,
+                password: null, // Preview doesn't support password channels yet
+                members: [],
+                messages: previewMessages,  // Transfer messages from preview
+                reactions: previewReactions, // Transfer reactions from preview
+                classification: classification,
+                readOnly: previewInfo.readOnly || false,
+                historyLoaded: previewMessages.length > 0,  // Mark as loaded if we have messages
+                hasMoreHistory: true,
+                loadingHistory: false,
+                oldestTimestamp: previewMessages.length > 0 ? previewMessages[0]?.timestamp : null
+            };
+
+            // Add to channels map
+            this.channels.set(messageStreamId, channel);
+            
+            // Save to storage (parallel)
+            await Promise.all([
+                this.saveChannels(),
+                secureStorage.addToChannelOrder(messageStreamId)
+            ]);
+
+            // Notify handlers
+            this.notifyHandlers('channelJoined', { 
+                streamId: messageStreamId, 
+                messageStreamId,
+                ephemeralStreamId,
+                channel,
+                fromPreview: true
+            });
+
+            Logger.info('Channel persisted from preview:', messageStreamId);
+            return channel;
+        } catch (error) {
+            Logger.error('Failed to persist channel from preview:', error);
+            throw error;
+        }
+    }
+
+    /**
      * Sync channel info from The Graph (members, type, owner)
      * Use this to refresh on-chain data for a channel
      * @param {string} messageStreamId - Message Stream ID

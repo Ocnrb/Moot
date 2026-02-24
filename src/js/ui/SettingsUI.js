@@ -322,20 +322,11 @@ class SettingsUI {
                     const data = JSON.parse(text);
                     
                     if (data.format === 'pombo-account-backup' && data.version === 3) {
-                        // New scrypt-encrypted account backup
+                        // Scrypt-encrypted account backup
                         await this.handleAccountBackupImport(data, showPasswordPrompt);
                     }
-                    else if (data.format === 'pombo-full-backup' && data.version === 2) {
-                        await this.handleEncryptedImport(data, showPasswordPrompt);
-                    } 
-                    else if (data.format === 'pombo-encrypted-backup') {
-                        await this.handleEncryptedDataImport(data, showPasswordPrompt);
-                    }
-                    else if (data.format === 'pombo-keystores') {
-                        await this.handleKeystoresImport(data);
-                    }
                     else {
-                        throw new Error('Unknown backup format');
+                        throw new Error('Unknown backup format. Only pombo-account-backup v3 is supported.');
                     }
                 } catch (error) {
                     this.Logger?.error('Import failed:', error);
@@ -590,88 +581,6 @@ class SettingsUI {
             this.Logger?.error('Account backup import failed:', error);
             this.showNotification('Failed to import: ' + error.message, 'error');
         }
-    }
-
-    /**
-     * Handle encrypted full backup import
-     */
-    async handleEncryptedImport(data, showPasswordPrompt) {
-        const keystoresCount = Object.keys(data.keystores?.keystores || {}).length;
-        
-        const password = await showPasswordPrompt(
-            'Decrypt Backup',
-            'Enter the password used to encrypt this backup.',
-            false
-        );
-        if (!password) return;
-
-        if (!this.secureStorage.isStorageUnlocked()) {
-            this.showNotification('Please unlock account to import data', 'error');
-            return;
-        }
-
-        let keystoresSummary = { keystoresImported: 0 };
-        if (data.keystores && keystoresCount > 0) {
-            keystoresSummary = this.authManager.importKeystores(data.keystores, true);
-        }
-
-        const dataSummary = await this.secureStorage.importEncrypted(data.encryptedData, password, true);
-
-        this.showNotification(
-            `Imported: ${keystoresSummary.keystoresImported} wallets, ` +
-            `${dataSummary.channelsImported} channels, ` +
-            `${dataSummary.contactsImported} contacts`,
-            'success'
-        );
-
-        if (dataSummary.channelsImported > 0) {
-            this.channelManager.loadChannels();
-            this.deps.renderChannelList?.();
-        }
-    }
-
-    /**
-     * Handle encrypted data only import
-     */
-    async handleEncryptedDataImport(data, showPasswordPrompt) {
-        const password = await showPasswordPrompt(
-            'Decrypt Backup',
-            'Enter the password used to encrypt this backup.',
-            false
-        );
-        if (!password) return;
-
-        if (!this.secureStorage.isStorageUnlocked()) {
-            this.showNotification('Please unlock account to import data', 'error');
-            return;
-        }
-
-        const summary = await this.secureStorage.importEncrypted(data, password, true);
-
-        this.showNotification(
-            `Imported: ${summary.channelsImported} channels, ${summary.contactsImported} contacts`,
-            'success'
-        );
-
-        if (summary.channelsImported > 0) {
-            this.channelManager.loadChannels();
-            this.deps.renderChannelList?.();
-        }
-    }
-
-    /**
-     * Handle keystores only import
-     */
-    async handleKeystoresImport(data) {
-        const confirmed = confirm(
-            'Import wallets from backup?\n\n' +
-            `Wallets found: ${Object.keys(data.keystores || {}).length}\n\n` +
-            'This will merge with existing wallets.'
-        );
-        if (!confirmed) return;
-
-        const summary = this.authManager.importKeystores(data, true);
-        this.showNotification(`Imported ${summary.keystoresImported} wallets`, 'success');
     }
 
     /**

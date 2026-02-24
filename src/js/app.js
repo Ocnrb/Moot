@@ -638,41 +638,52 @@ class App {
             this.hideProgressModal(progressModal);
 
             // Save the keystore to localStorage (using same key as authManager)
-            const keystoreAddress = backup.keystore.address.toLowerCase();
+            // Note: Keystore V3 address doesn't include 0x prefix, but we need it normalized
+            const rawAddress = backup.keystore.address.toLowerCase();
+            const keystoreAddress = rawAddress.startsWith('0x') ? rawAddress : `0x${rawAddress}`;
             const wallets = JSON.parse(localStorage.getItem('eth_chat_keystores') || '{}');
             if (!wallets[keystoreAddress]) {
                 wallets[keystoreAddress] = {
                     name: result.data?.username || `Restored ${keystoreAddress.slice(0, 8)}`,
                     keystore: backup.keystore,
                     createdAt: Date.now(),
-                    lastUsed: Date.now(),
-                    restored: true
+                    lastUsed: Date.now()
                 };
                 localStorage.setItem('eth_chat_keystores', JSON.stringify(wallets));
             }
 
             // Now unlock the wallet with the same password
+            // First unlock the wallet (this initializes secureStorage)
             await this.loadWalletWithProgress(password, keystoreAddress);
 
-            // Import data into secure storage
+            // Now import data into secure storage (which is now unlocked)
             const data = result.data;
+            let dataImported = false;
             if (data) {
                 // Import channels
                 if (data.channels && data.channels.length > 0) {
-                    const existingIds = new Set((secureStorage.cache.channels || []).map(c => c.messageStreamId || c.streamId));
+                    if (!secureStorage.cache.channels) {
+                        secureStorage.cache.channels = [];
+                    }
+                    const existingIds = new Set(secureStorage.cache.channels.map(c => c.messageStreamId || c.streamId));
                     for (const channel of data.channels) {
                         const chId = channel.messageStreamId || channel.streamId;
                         if (chId && !existingIds.has(chId)) {
                             secureStorage.cache.channels.push(channel);
+                            dataImported = true;
                         }
                     }
                 }
 
                 // Import trusted contacts
                 if (data.trustedContacts) {
+                    if (!secureStorage.cache.trustedContacts) {
+                        secureStorage.cache.trustedContacts = {};
+                    }
                     for (const [addr, contact] of Object.entries(data.trustedContacts)) {
                         if (!secureStorage.cache.trustedContacts[addr]) {
                             secureStorage.cache.trustedContacts[addr] = contact;
+                            dataImported = true;
                         }
                     }
                 }
@@ -680,9 +691,17 @@ class App {
                 // Import username
                 if (data.username && !secureStorage.cache.username) {
                     secureStorage.cache.username = data.username;
+                    dataImported = true;
                 }
 
+                // Save to storage
                 await secureStorage.saveToStorage();
+
+                // If data was imported, reload channels and re-render UI
+                if (dataImported) {
+                    channelManager.loadChannels();
+                    uiController.renderChannelList();
+                }
             }
 
             uiController.showNotification('Account restored successfully!', 'success');

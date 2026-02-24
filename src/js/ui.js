@@ -223,8 +223,6 @@ class UIController {
             channelNameInput: document.getElementById('channel-name-input'),
             channelPasswordInput: document.getElementById('channel-password-input'),
             channelMembersInput: document.getElementById('channel-members-input'),
-            passwordField: document.getElementById('password-field'),
-            membersField: document.getElementById('members-field'),
             // Exposure/visibility fields
             exposureSection: document.getElementById('exposure-section'),
             visibleFields: document.getElementById('visible-fields'),

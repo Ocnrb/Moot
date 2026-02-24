@@ -184,6 +184,7 @@ class AuthManager {
             this.address = wallet.address;
             this.signer = wallet;
             this.currentWalletName = walletData.name;
+            this.isGuest = false; // Reset guest flag - this is a real account
             
             // Update last used timestamp
             wallets[walletAddress].lastUsed = Date.now();
@@ -549,66 +550,6 @@ class AuthManager {
             }
             throw error;
         }
-    }
-
-    /**
-     * Export keystores only (already encrypted with scrypt)
-     * @returns {Object} - Keystores data
-     */
-    exportKeystores() {
-        const data = {
-            format: 'pombo-keystores',
-            version: 1,
-            exportedAt: new Date().toISOString(),
-            keystores: {}
-        };
-
-        // Export all keystores (they're already encrypted)
-        const wallets = this.loadAllKeystores();
-        for (const [address, walletData] of Object.entries(wallets)) {
-            data.keystores[address] = {
-                name: walletData.name,
-                keystore: walletData.keystore,
-                createdAt: walletData.createdAt
-            };
-        }
-
-        return data;
-    }
-
-    /**
-     * Import keystores from backup
-     * @param {Object} data - Keystores backup
-     * @param {boolean} merge - Merge with existing (true) or replace (false)
-     * @returns {Object} - Import summary
-     */
-    importKeystores(data, merge = true) {
-        if (!data || data.format !== 'pombo-keystores') {
-            throw new Error('Invalid keystores backup format');
-        }
-
-        const summary = { keystoresImported: 0 };
-
-        if (data.keystores) {
-            const existingWallets = merge ? this.loadAllKeystores() : {};
-            
-            for (const [address, walletData] of Object.entries(data.keystores)) {
-                if (!merge || !existingWallets[address]) {
-                    existingWallets[address] = {
-                        name: walletData.name,
-                        keystore: walletData.keystore,
-                        createdAt: walletData.createdAt || Date.now(),
-                        lastUsed: Date.now()
-                    };
-                    summary.keystoresImported++;
-                }
-            }
-            
-            localStorage.setItem(WALLETS_STORAGE_KEY, JSON.stringify(existingWallets));
-        }
-
-        Logger.info('Keystores imported:', summary);
-        return summary;
     }
 }
 

@@ -11,7 +11,6 @@
 import { Logger } from './logger.js';
 import { streamrController, STREAM_CONFIG, deriveEphemeralId, deriveMessageId } from './streamr.js';
 import { authManager } from './auth.js';
-import { cryptoManager } from './crypto.js';
 import { identityManager } from './identity.js';
 import { secureStorage } from './secureStorage.js';
 import { graphAPI } from './graph.js';

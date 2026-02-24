@@ -248,18 +248,36 @@ class SettingsUI {
                     }
                     const keystore = JSON.parse(keystoreJson);
 
-                    // Show progress modal
+                    // Show progress modal - Step 1: Verify password
                     const progressModal = this.showProgressModal(
                         'Creating Backup',
-                        'Encrypting with scrypt (same as Keystore V3)...'
+                        'Verifying password...'
                     );
 
                     try {
-                        // Verify password and create backup with scrypt
+                        // First verify password against keystore (prevents wrong password in backup)
+                        try {
+                            await ethers.Wallet.fromEncryptedJson(
+                                keystoreJson,
+                                password,
+                                (progress) => this.updateProgressModal(progressModal, progress * 0.4)
+                            );
+                        } catch (verifyError) {
+                            this.hideProgressModal(progressModal);
+                            this.showNotification('Wrong password', 'error');
+                            return;
+                        }
+
+                        // Password verified - now create backup
+                        this.updateProgressModal(progressModal, 0.4);
+                        progressModal.querySelector('p')?.textContent && 
+                            (progressModal.querySelector('p').textContent = 'Encrypting data with scrypt...');
+
+                        // Create backup with scrypt (progress 0.4 to 1.0)
                         const backup = await this.secureStorage.exportAccountBackup(
                             keystore,
                             password,
-                            (progress) => this.updateProgressModal(progressModal, progress)
+                            (progress) => this.updateProgressModal(progressModal, 0.4 + progress * 0.6)
                         );
 
                         this.hideProgressModal(progressModal);

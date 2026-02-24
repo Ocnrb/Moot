@@ -637,9 +637,9 @@ class App {
 
             this.hideProgressModal(progressModal);
 
-            // Save the keystore to localStorage
+            // Save the keystore to localStorage (using same key as authManager)
             const keystoreAddress = backup.keystore.address.toLowerCase();
-            const wallets = JSON.parse(localStorage.getItem('pombo_wallets') || '{}');
+            const wallets = JSON.parse(localStorage.getItem('eth_chat_keystores') || '{}');
             if (!wallets[keystoreAddress]) {
                 wallets[keystoreAddress] = {
                     name: result.data?.username || `Restored ${keystoreAddress.slice(0, 8)}`,
@@ -648,7 +648,7 @@ class App {
                     lastUsed: Date.now(),
                     restored: true
                 };
-                localStorage.setItem('pombo_wallets', JSON.stringify(wallets));
+                localStorage.setItem('eth_chat_keystores', JSON.stringify(wallets));
             }
 
             // Now unlock the wallet with the same password

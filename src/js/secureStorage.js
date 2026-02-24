@@ -772,15 +772,16 @@ class SecureStorage {
         const p = 1;
         const dkLen = 32;
 
-        // Derive key using scrypt
+        // Derive key using scrypt (password must be UTF-8 bytes for ethers v6)
         Logger.debug('Deriving backup encryption key with scrypt...');
+        const passwordBytes = ethers.toUtf8Bytes(password);
         let derivedKey;
         if (progressCallback) {
-            derivedKey = await ethers.scrypt(password, salt, N, r, p, dkLen, (progress) => {
+            derivedKey = await ethers.scrypt(passwordBytes, salt, N, r, p, dkLen, (progress) => {
                 progressCallback(progress * 0.5); // 0-50% for key derivation
             });
         } else {
-            derivedKey = await ethers.scrypt(password, salt, N, r, p, dkLen);
+            derivedKey = await ethers.scrypt(passwordBytes, salt, N, r, p, dkLen);
         }
 
         // Convert hex string to bytes for Web Crypto
@@ -872,10 +873,11 @@ class SecureStorage {
         const ciphertext = ethers.getBytes(enc.ciphertext);
 
         Logger.debug('Deriving data decryption key with scrypt...');
+        const passwordBytes = ethers.toUtf8Bytes(password);
         let derivedKey;
         if (progressCallback) {
             derivedKey = await ethers.scrypt(
-                password, 
+                passwordBytes, 
                 salt, 
                 enc.kdfparams.n, 
                 enc.kdfparams.r, 
@@ -885,7 +887,7 @@ class SecureStorage {
             );
         } else {
             derivedKey = await ethers.scrypt(
-                password, 
+                passwordBytes, 
                 salt, 
                 enc.kdfparams.n, 
                 enc.kdfparams.r, 

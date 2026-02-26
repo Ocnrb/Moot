@@ -168,10 +168,37 @@ class StreamrController {
             this.address = await this.client.getAddress();
             Logger.info('Streamr client initialized with address:', this.address);
 
+            // Pre-warm the network node in background (starts DHT, peer discovery)
+            // This speeds up first channel subscription significantly
+            this.warmupNetwork();
+
             return true;
         } catch (error) {
             Logger.error('Failed to initialize Streamr client:', error);
             throw error;
+        }
+    }
+
+    /**
+     * Pre-warm the network node for faster first subscription.
+     * Subscribes briefly to push stream to force node startup.
+     */
+    async warmupNetwork() {
+        if (!this.client) return;
+        
+        try {
+            // Subscribing to ANY stream forces the network node to start
+            // We use the push stream which is always available
+            const pushStreamId = '0xae340e799e8151f6a4999d245e466197aa217667/push';
+            
+            // Subscribe and immediately unsubscribe - just to trigger node startup
+            const sub = await this.client.subscribe(pushStreamId, () => {});
+            await sub.unsubscribe();
+            
+            Logger.debug('Network node pre-warmed via push stream');
+        } catch (err) {
+            // Non-critical - node will start on first subscribe anyway
+            Logger.debug('Network warmup skipped:', err.message);
         }
     }
 

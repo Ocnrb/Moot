@@ -509,12 +509,17 @@ class SubscriptionManager {
             const messages = result.messages || [];
             
             // Count new messages since last check
+            // Filter out reactions - they're stored in the same stream but shouldn't count as new messages
             let newCount = 0;
             let latestTime = currentActivity.lastMessageTime;
 
             for (const msg of messages) {
                 if (msg.timestamp > currentActivity.lastMessageTime) {
-                    newCount++;
+                    // Only count actual messages, not reactions
+                    if (msg.type !== 'reaction') {
+                        newCount++;
+                    }
+                    // But still track the latest timestamp (including reactions) to avoid re-checking
                     if (msg.timestamp > latestTime) {
                         latestTime = msg.timestamp;
                     }

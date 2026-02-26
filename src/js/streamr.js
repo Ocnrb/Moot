@@ -51,7 +51,7 @@ const STREAM_CONFIG = {
     // Default storage provider
     DEFAULT_STORAGE_PROVIDER: 'streamr',
 
-    // Number of messages to load on join (reduced for lazy loading)
+    // Number of messages to load on join (higher to account for reactions)
     INITIAL_MESSAGES: 30,
     
     // Number of messages to load on scroll (pagination)

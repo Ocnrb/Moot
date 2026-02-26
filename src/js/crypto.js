@@ -8,6 +8,53 @@ class CryptoManager {
     constructor() {
         this.textEncoder = new TextEncoder();
         this.textDecoder = new TextDecoder();
+        
+        // LRU cache for derived keys (avoids expensive PBKDF2 re-derivation)
+        this.keyCache = new Map();
+        this.maxCacheSize = 10;
+    }
+
+    /**
+     * Generate cache key from password and salt
+     * @param {string} password 
+     * @param {Uint8Array} salt 
+     * @returns {string}
+     */
+    getCacheKey(password, salt) {
+        // Simple hash: password + salt as hex
+        const saltHex = Array.from(salt).map(b => b.toString(16).padStart(2, '0')).join('');
+        return `${password}:${saltHex}`;
+    }
+
+    /**
+     * Get cached key or derive new one
+     * @param {string} password 
+     * @param {Uint8Array} salt 
+     * @returns {Promise<CryptoKey>}
+     */
+    async getCachedKey(password, salt) {
+        const cacheKey = this.getCacheKey(password, salt);
+        
+        if (this.keyCache.has(cacheKey)) {
+            // Move to end (LRU)
+            const key = this.keyCache.get(cacheKey);
+            this.keyCache.delete(cacheKey);
+            this.keyCache.set(cacheKey, key);
+            return key;
+        }
+        
+        // Derive new key (expensive operation)
+        const key = await this.deriveKeyInternal(password, salt);
+        
+        // Add to cache with LRU eviction
+        if (this.keyCache.size >= this.maxCacheSize) {
+            // Remove oldest entry (first in Map)
+            const firstKey = this.keyCache.keys().next().value;
+            this.keyCache.delete(firstKey);
+        }
+        this.keyCache.set(cacheKey, key);
+        
+        return key;
     }
 
     /**
@@ -17,6 +64,16 @@ class CryptoManager {
      * @returns {Promise<CryptoKey>} - Derived key
      */
     async deriveKey(password, salt) {
+        return this.getCachedKey(password, salt);
+    }
+
+    /**
+     * Internal key derivation (no cache)
+     * @param {string} password - The password
+     * @param {Uint8Array} salt - Salt for key derivation
+     * @returns {Promise<CryptoKey>} - Derived key
+     */
+    async deriveKeyInternal(password, salt) {
         const passwordBuffer = this.textEncoder.encode(password);
 
         // Import password as key material
@@ -215,6 +272,24 @@ class CryptoManager {
         return Array.from(bytes)
             .map(b => b.toString(16).padStart(2, '0'))
             .join('');
+    }
+
+    /**
+     * Clear the key cache (call on logout/channel leave)
+     */
+    clearCache() {
+        this.keyCache.clear();
+    }
+
+    /**
+     * Get cache statistics for debugging
+     * @returns {Object}
+     */
+    getCacheStats() {
+        return {
+            size: this.keyCache.size,
+            maxSize: this.maxCacheSize
+        };
     }
 }
 

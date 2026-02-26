@@ -400,12 +400,36 @@ class SecureStorage {
 
     /**
      * Get last access timestamp for a channel
+     * Checks both encrypted storage AND emergency localStorage (from beforeunload)
      * @param {string} streamId - Channel stream ID
      * @returns {number|null} - Timestamp or null if never accessed
      */
     getChannelLastAccess(streamId) {
         if (!this.isUnlocked) return null;
-        return this.cache.channelLastAccess?.[streamId] || null;
+        
+        // Get from encrypted cache
+        const cachedAccess = this.cache.channelLastAccess?.[streamId] || 0;
+        
+        // Check emergency localStorage (saved on beforeunload/pagehide)
+        const emergencyKey = `pombo_channel_access_${streamId}`;
+        const emergencyValue = localStorage.getItem(emergencyKey);
+        const emergencyAccess = emergencyValue ? parseInt(emergencyValue, 10) : 0;
+        
+        // Use the most recent timestamp
+        const latestAccess = Math.max(cachedAccess, emergencyAccess);
+        
+        // If emergency value was newer, sync it to encrypted storage and cleanup
+        if (emergencyAccess > cachedAccess && emergencyAccess > 0) {
+            if (!this.cache.channelLastAccess) {
+                this.cache.channelLastAccess = {};
+            }
+            this.cache.channelLastAccess[streamId] = emergencyAccess;
+            // Clean up emergency key (async, fire-and-forget)
+            localStorage.removeItem(emergencyKey);
+            this.saveToStorage();
+        }
+        
+        return latestAccess > 0 ? latestAccess : null;
     }
 
     /**
@@ -419,6 +443,11 @@ class SecureStorage {
             this.cache.channelLastAccess = {};
         }
         this.cache.channelLastAccess[streamId] = timestamp;
+        
+        // Clean up any emergency localStorage value for this channel
+        const emergencyKey = `pombo_channel_access_${streamId}`;
+        localStorage.removeItem(emergencyKey);
+        
         await this.saveToStorage();
     }
 

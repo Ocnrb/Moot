@@ -326,10 +326,87 @@ class UIController {
         // Register activity handler for background channel updates
         this.setupActivityHandler();
         
+        // Setup heartbeat for tracking channel access (handles abrupt app closure)
+        this.setupAccessHeartbeat();
+        
         // Initialize history manager for browser back/forward navigation
         historyManager.init((state) => this.navigateToState(state));
 
         Logger.info('UI Controller initialized');
+    }
+    
+    /**
+     * Setup heartbeat system for tracking channel access
+     * This ensures lastAccess is saved even if app closes abruptly
+     */
+    setupAccessHeartbeat() {
+        // Heartbeat interval (15 seconds)
+        this.HEARTBEAT_INTERVAL = 15000;
+        this.heartbeatTimer = null;
+        
+        // Save access on page unload (best effort)
+        window.addEventListener('beforeunload', () => {
+            this.saveCurrentChannelAccess();
+        });
+        
+        // Save access when tab becomes hidden (user switches tabs)
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                this.saveCurrentChannelAccess();
+            }
+        });
+        
+        // Save access on page hide (mobile browsers)
+        window.addEventListener('pagehide', () => {
+            this.saveCurrentChannelAccess();
+        });
+    }
+    
+    /**
+     * Start heartbeat for current channel
+     * @param {string} streamId - Channel stream ID
+     */
+    startAccessHeartbeat(streamId) {
+        this.stopAccessHeartbeat();
+        this.heartbeatStreamId = streamId;
+        
+        // Save immediately when entering channel
+        secureStorage.setChannelLastAccess(streamId, Date.now());
+        
+        // Then save periodically
+        this.heartbeatTimer = setInterval(() => {
+            if (this.heartbeatStreamId) {
+                secureStorage.setChannelLastAccess(this.heartbeatStreamId, Date.now());
+            }
+        }, this.HEARTBEAT_INTERVAL);
+    }
+    
+    /**
+     * Stop heartbeat and save final access time
+     */
+    stopAccessHeartbeat() {
+        if (this.heartbeatTimer) {
+            clearInterval(this.heartbeatTimer);
+            this.heartbeatTimer = null;
+        }
+        
+        // Save final access time
+        if (this.heartbeatStreamId) {
+            secureStorage.setChannelLastAccess(this.heartbeatStreamId, Date.now());
+            this.heartbeatStreamId = null;
+        }
+    }
+    
+    /**
+     * Save current channel access (for emergency saves on unload/hide)
+     */
+    saveCurrentChannelAccess() {
+        const currentChannel = channelManager.getCurrentChannel();
+        if (currentChannel) {
+            // Use synchronous localStorage directly for reliability during unload
+            const key = `pombo_channel_access_${currentChannel.streamId}`;
+            localStorage.setItem(key, Date.now().toString());
+        }
     }
     
     /**
@@ -940,6 +1017,9 @@ class UIController {
      * @param {string} streamId - Stream ID
      */
     async selectChannel(streamId) {
+        // Stop heartbeat for previous channel (saves final access time)
+        this.stopAccessHeartbeat();
+        
         // Clear typing indicator from previous channel
         this.hideTypingIndicator();
         
@@ -951,16 +1031,13 @@ class UIController {
             await this.exitPreviewMode(false); // Don't navigate away
         }
         
-        // Immediately clear messages area to prevent flash of explore view with wrong padding
-        this.elements.messagesArea.innerHTML = '';
-        
-        // Restore padding for chat messages
-        this.elements.messagesArea?.classList.add('p-4');
-        
         channelManager.setCurrentChannel(streamId);
         const channel = channelManager.getCurrentChannel();
 
         if (channel) {
+            // Start heartbeat for this channel (tracks access time periodically)
+            this.startAccessHeartbeat(streamId);
+            
             // Hide Join button, show Invite button (this is a joined channel)
             this.elements.joinChannelBtn?.classList.add('hidden');
             
@@ -1051,6 +1128,9 @@ class UIController {
      * Deselect current channel (close it)
      */
     async deselectChannel() {
+        // Stop heartbeat and save final access time
+        this.stopAccessHeartbeat();
+        
         // Clear typing indicator
         this.hideTypingIndicator();
         
@@ -1306,6 +1386,9 @@ class UIController {
      * @private
      */
     async _selectChannelWithoutHistory(streamId) {
+        // Stop heartbeat for previous channel (saves final access time)
+        this.stopAccessHeartbeat();
+        
         // Same as selectChannel but without history push
         this.hideTypingIndicator();
         this.cancelReply();
@@ -1314,13 +1397,13 @@ class UIController {
             await this.exitPreviewMode(false);
         }
 
-        this.elements.messagesArea.innerHTML = '';
-        this.elements.messagesArea?.classList.add('p-4');
-
         channelManager.setCurrentChannel(streamId);
         const channel = channelManager.getCurrentChannel();
 
         if (channel) {
+            // Start heartbeat for this channel
+            this.startAccessHeartbeat(streamId);
+            
             this.elements.joinChannelBtn?.classList.add('hidden');
 
             try {
@@ -2394,6 +2477,7 @@ class UIController {
         }
         
         // Calculate unread count (messages newer than last access)
+        // Reactions count too - they're legitimate activity the user hasn't seen
         const unreadCount = channel.messages.filter(m => m.timestamp > lastAccess).length;
         const hasUnread = unreadCount > 0;
         

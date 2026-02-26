@@ -12,6 +12,7 @@
 import { authManager } from './auth.js';
 import { secureStorage } from './secureStorage.js';
 import { Logger } from './logger.js';
+import { cryptoWorkerPool } from './workers/cryptoWorkerPool.js';
 
 // ENS cache duration (24 hours)
 const ENS_CACHE_DURATION = 24 * 60 * 60 * 1000;
@@ -185,6 +186,7 @@ class IdentityManager {
 
     /**
      * Verify message signature
+     * Uses Web Worker for CPU-intensive ECDSA signature recovery
      * @param {Object} message - Message object with signature
      * @param {string} channelId - Channel ID (optional)
      * @returns {Object} - Verification result { valid, recoveredAddress, trustLevel, ensName }
@@ -201,7 +203,7 @@ class IdentityManager {
                 };
             }
 
-            // Validate timestamp to prevent replay attacks
+            // Validate timestamp to prevent replay attacks (fast, main thread)
             if (!skipTimestampCheck) {
                 const timestampResult = this.validateTimestamp(message.timestamp);
                 if (!timestampResult.valid) {
@@ -214,7 +216,7 @@ class IdentityManager {
                 }
             }
 
-            // Recreate the message hash
+            // Create message hash (fast, main thread)
             const messageHash = this.createMessageHash(
                 message.id,
                 message.text,
@@ -223,29 +225,30 @@ class IdentityManager {
                 message.channelId
             );
 
-            // Recover the signer address from signature
-            const recoveredAddress = ethers.verifyMessage(messageHash, message.signature);
+            // Verify signature in worker (CPU-intensive ECDSA recovery)
+            const verification = await cryptoWorkerPool.execute('VERIFY_SIGNATURE', {
+                messageHash,
+                signature: message.signature,
+                expectedSender: message.sender
+            });
             
-            // Direct signature mode: signature should match sender
-            const valid = recoveredAddress.toLowerCase() === message.sender.toLowerCase();
-            
-            if (!valid) {
+            if (!verification.valid) {
                 return {
                     valid: false,
-                    error: 'Signature mismatch',
+                    error: verification.error || 'Signature mismatch',
                     claimedSender: message.sender,
-                    actualSigner: recoveredAddress,
+                    actualSigner: verification.recoveredAddress,
                     trustLevel: -1
                 };
             }
 
-            // Get trust level and ENS name
-            const trustLevel = await this.getTrustLevel(recoveredAddress);
-            const ensName = await this.resolveENS(recoveredAddress);
+            // Get trust level and ENS name (cached, usually fast)
+            const trustLevel = await this.getTrustLevel(verification.recoveredAddress);
+            const ensName = await this.resolveENS(verification.recoveredAddress);
 
             return {
                 valid: true,
-                recoveredAddress: recoveredAddress,
+                recoveredAddress: verification.recoveredAddress,
                 trustLevel: trustLevel,
                 ensName: ensName
             };

@@ -849,6 +849,10 @@ video {
   margin-left: 0.5rem;
 }
 
+.ml-6 {
+  margin-left: 1.5rem;
+}
+
 .ml-auto {
   margin-left: auto;
 }
@@ -1172,8 +1176,8 @@ video {
   width: 420px;
 }
 
-.w-\[580px\] {
-  width: 580px;
+.w-\[500px\] {
+  width: 500px;
 }
 
 .w-\[640px\] {
@@ -2921,11 +2925,6 @@ select option {
 .peer:checked ~ .peer-checked\:bg-\[\#ff0000\] {
   --tw-bg-opacity: 1;
   background-color: rgb(255 0 0 / var(--tw-bg-opacity, 1));
-}
-
-.peer:checked ~ .peer-checked\:bg-white {
-  --tw-bg-opacity: 1;
-  background-color: rgb(255 255 255 / var(--tw-bg-opacity, 1));
 }
 
 .peer:checked ~ .peer-checked\:after\:translate-x-full::after {

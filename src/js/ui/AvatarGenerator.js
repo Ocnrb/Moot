@@ -15,21 +15,21 @@ const COLOR_PAIRS = [
     ['#101726', '#4462C9'],  // Deep Atlantic
     ['#171C2B', '#6A7FDB'],  // Soft Periwinkle
 
-    // --- ÍNDIGO & VIOLETAS (Mais ricos, menos acinzentados) ---
+    // --- INDIGO & VIOLETS (Richer, less grayish) ---
     ['#19142A', '#6C5DD3'],  // Soft Indigo
     ['#1C1633', '#7A6CE0'],  // Muted Electric Violet
     ['#1A1230', '#5F55B5'],  // Deep Night Indigo
     ['#201238', '#7B4FE0'],  // Deep Violet
     ['#23113A', '#8A4BD6'],  // Royal Iris
 
-    // --- ROXOS & MAGENTAS (Saturação controlada mas viva) ---
+    // --- PURPLES & MAGENTAS (Controlled but vivid saturation) ---
     ['#1D122B', '#8E46E6'],  // Vibrant Amethyst
     ['#211529', '#8952D9'],  // Royal Purple
     ['#241024', '#B33DB3'],  // Deep Magenta
     ['#291425', '#C44994'],  // Rich Orchid
     ['#2A1028', '#A93FA0'],  // Velvet Plum
 
-    // --- VERMELHOS & VINHOS (Sem laranja) ---
+    // --- REDS & WINES (No orange) ---
     ['#2B1212', '#D93838'],  // Strong Crimson
     ['#2E151A', '#D94160'],  // Vibrant Ruby
     ['#2E1622', '#C93C75'],  // Deep Berry
@@ -37,14 +37,14 @@ const COLOR_PAIRS = [
     ['#2A1416', '#B5424D'],  // Muted Garnet
     ['#241012', '#A63A44'],  // Deep Wine
 
-    // --- VERDES ESCUROS PROFUNDOS (Elegantes e frios) ---
+    // --- DEEP DARK GREENS (Elegant and cool) ---
     ['#0F1F1A', '#1F8A70'],  // Deep Teal
     ['#0E1B17', '#1C7C68'],  // Muted Emerald
     ['#0C1A16', '#207561'],  // Forest Teal
     ['#0F201C', '#2C8C6A'],  // Dark Sea Green
     ['#101C18', '#3A7F66'],  // Dusty Pine
 
-    // --- NEUTROS FRIOS (Sem roxos acinzentados) ---
+    // --- COOL NEUTRALS (No grayish purples) ---
     ['#1A1C23', '#7382A6'],  // Steel Blue
     ['#181B22', '#6F7C99'],  // Cool Slate
     ['#161A20', '#5F6B85']   // Deep Blue Grey

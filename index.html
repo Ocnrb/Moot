@@ -2,7 +2,7 @@
 <html lang="pt">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-vvt4KWwuNr51XfE5m+hzeNEGhiOfZzG97ccfqGsPwvE='; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; frame-src https://www.youtube-nocookie.com; connect-src 'self' wss: https://*.streamr.network https://*.streamr.network:8002 https://rpc.ankr.com https://polygon.drpc.org https://polygon-bor-rpc.publicnode.com https://gasstation.polygon.technology https://eth.llamarpc.com https://*.thegraph.com https://*.ens.domains https://euc.li https://*.logstore.usher.so; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-vvt4KWwuNr51XfE5m+hzeNEGhiOfZzG97ccfqGsPwvE='; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; frame-src https://www.youtube-nocookie.com; connect-src 'self' wss: https://*.streamr.network https://*.streamr.network:8002 https://rpc.ankr.com https://polygon.drpc.org https://polygon-bor-rpc.publicnode.com https://gasstation.polygon.technology https://eth.llamarpc.com https://*.thegraph.com https://*.ens.domains https://euc.li https://*.logstore.usher.so https://fcm.googleapis.com https://*.push.services.mozilla.com https://updates.push.services.mozilla.com; base-uri 'self'; form-action 'self'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pombo - P2P Decentralized Chat</title>
 
@@ -961,8 +961,8 @@
 
     <!-- Modal: Channel Settings (Member Management) -->
     <!-- Channel Settings Modal - Tabbed Layout -->
-    <div id="channel-settings-modal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-        <div class="bg-[#141414] rounded-2xl w-[580px] max-w-full max-h-[85vh] flex flex-col shadow-2xl border border-white/5 overflow-hidden">
+    <div id="channel-settings-modal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
+        <div class="bg-[#141414] rounded-2xl w-[640px] max-w-[95vw] mx-4 shadow-2xl border border-white/5 overflow-hidden">
             <!-- Header -->
             <div class="flex items-center justify-between px-6 py-4 border-b border-white/5">
                 <div>
@@ -976,10 +976,18 @@
                 </button>
             </div>
 
-            <div class="flex flex-1 min-h-0">
+            <div class="flex min-h-[420px]">
                 <!-- Sidebar Tabs -->
-                <div class="w-40 bg-[#0a0a0a] border-r border-white/5 py-2 flex-shrink-0">
-                    <nav class="space-y-1 px-2">
+                <div class="w-44 bg-[#0a0a0a] border-r border-white/5 py-2 flex flex-col">
+                    <!-- Mobile Carousel (hidden on desktop) -->
+                    <div id="channel-settings-carousel" class="hidden">
+                        <div class="carousel-tabs">
+                            <span class="carousel-tab" data-tab=""></span>
+                            <span class="carousel-tab active" data-tab=""></span>
+                            <span class="carousel-tab" data-tab=""></span>
+                        </div>
+                    </div>
+                    <nav class="space-y-1 px-2 flex-1 flex flex-col">
                         <button data-channel-tab="info" class="channel-settings-tab w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left transition-all text-white/60 hover:text-white/90 hover:bg-white/5">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z"/></svg>
                             <span>Info</span>
@@ -988,16 +996,20 @@
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/></svg>
                             <span>Members</span>
                         </button>
+                        <button data-channel-tab="notifications" class="channel-settings-tab w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left transition-all text-white/60 hover:text-white/90 hover:bg-white/5">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
+                            <span>Push</span>
+                        </button>
                         <div id="danger-tab-divider" class="hidden my-2 mx-3 border-t border-white/5"></div>
                         <button id="danger-tab-btn" data-channel-tab="danger" class="hidden channel-settings-tab w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left transition-all text-white/60 hover:text-red-400 hover:bg-red-500/5">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
                             <span>Delete</span>
                         </button>
                     </nav>
                 </div>
 
                 <!-- Content Panels -->
-                <div class="flex-1 overflow-y-auto p-6">
+                <div class="flex-1 p-6 overflow-y-auto">
                     <!-- Info Panel -->
                     <div id="channel-panel-info" class="channel-settings-panel hidden space-y-4">
                         <div class="space-y-4">
@@ -1100,6 +1112,36 @@
                         </div>
                     </div>
 
+                    <!-- Push Notifications Panel -->
+                    <div id="channel-panel-notifications" class="channel-settings-panel hidden">
+                        <div class="space-y-5">
+                            <div id="channel-notifications-container" class="flex items-start justify-between p-4 bg-white/5 rounded-xl border border-white/5 transition-opacity duration-200">
+                                <div class="flex-1 mr-4">
+                                    <h4 class="text-sm font-medium text-white/90 mb-1">Push Notifications</h4>
+                                    <p class="text-xs text-white/40 leading-relaxed">
+                                        Get notified when new messages are posted in this channel
+                                    </p>
+                                </div>
+                                <div class="relative group">
+                                    <label id="channel-notifications-label" class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" id="channel-notifications-enabled" class="sr-only peer">
+                                        <div class="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white/60 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#F6851B] peer-disabled:opacity-40 peer-disabled:cursor-not-allowed"></div>
+                                    </label>
+                                    <!-- Tooltip for disabled state -->
+                                    <div id="channel-notifications-tooltip" class="hidden absolute right-0 top-full mt-2 w-48 p-2 bg-[#1a1a1a] border border-white/10 rounded-lg shadow-lg z-10">
+                                        <p class="text-xs text-white/70">Enable Push Notifications in Settings first to use this feature.</p>
+                                        <div class="absolute -top-1 right-3 w-2 h-2 bg-[#1a1a1a] border-l border-t border-white/10 transform rotate-45"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="channel-notifications-status" class="text-xs text-white/40"></div>
+                            <p id="channel-notifications-requires-push" class="hidden text-xs text-amber-400/80 flex items-center gap-2">
+                                <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+                                <span>Enable Push Notifications in Settings first</span>
+                            </p>
+                        </div>
+                    </div>
+
                     <!-- Danger Panel (Owner only) -->
                     <div id="channel-panel-danger" class="channel-settings-panel hidden">
                         <div id="delete-channel-section" class="space-y-4">
@@ -1117,6 +1159,77 @@
                             </div>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Push Notifications Technical Info -->
+    <div id="push-learn-more-modal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+        <div class="bg-[#141414] rounded-2xl w-[500px] max-w-full max-h-[85vh] flex flex-col shadow-2xl border border-white/10 overflow-hidden">
+            <div class="flex items-center justify-between px-6 py-4 border-b border-white/5">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-full bg-[#F6851B]/10 flex items-center justify-center">
+                        <svg class="w-4 h-4 text-[#F6851B]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>
+                    </div>
+                    <h3 class="text-base font-medium text-white/90">Privacy & K-Anonymity</h3>
+                </div>
+                <button id="close-push-learn-more-btn" class="text-white/40 hover:text-white/80 transition p-1">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="p-6 overflow-y-auto space-y-5 text-sm">
+                <div>
+                    <div class="flex items-center gap-2 mb-2">
+                        <svg class="w-4 h-4 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88"/></svg>
+                        <h4 class="text-white/90 font-medium">Blind Relay Architecture</h4>
+                    </div>
+                    <p class="text-white/50 text-xs leading-relaxed">
+                        Push notifications use a "Blind Relay" — the server that wakes your device <span class="text-white/70">never learns your identity</span>. It only sees anonymous tags, not who you are or what you're reading.
+                    </p>
+                </div>
+                <div>
+                    <div class="flex items-center gap-2 mb-2">
+                        <svg class="w-4 h-4 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z"/></svg>
+                        <h4 class="text-white/90 font-medium">K-Anonymity (k ≈ 65,000)</h4>
+                    </div>
+                    <p class="text-white/50 text-xs leading-relaxed">
+                        Each notification tag is a 4-byte hash — shared by roughly <span class="text-white/70">65,000 possible addresses</span>. Even if someone monitors all traffic, they can't tell which user received a notification. You're hidden in a crowd.
+                    </p>
+                </div>
+                <div>
+                    <div class="flex items-center gap-2 mb-2">
+                        <svg class="w-4 h-4 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>
+                        <h4 class="text-white/90 font-medium">What the Relay Cannot See</h4>
+                    </div>
+                    <ul class="text-white/50 text-xs leading-relaxed space-y-1.5 ml-6">
+                        <li class="flex items-center gap-2">
+                            <svg class="w-3 h-3 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                            <span>Your wallet address or ENS name</span>
+                        </li>
+                        <li class="flex items-center gap-2">
+                            <svg class="w-3 h-3 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                            <span>Message content (end-to-end encrypted)</span>
+                        </li>
+                        <li class="flex items-center gap-2">
+                            <svg class="w-3 h-3 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                            <span>Your IP address (hidden by Streamr P2P)</span>
+                        </li>
+                    </ul>
+                </div>
+                <div>
+                    <div class="flex items-center gap-2 mb-2">
+                        <svg class="w-4 h-4 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5"/></svg>
+                        <h4 class="text-white/90 font-medium">Anti-Spam Protection</h4>
+                    </div>
+                    <p class="text-white/50 text-xs leading-relaxed">
+                        Each wake signal requires Proof-of-Work (~200ms per recipient). Negligible for normal use, but makes spam prohibitive — a spammer would need hours of computation to flood the network.
+                    </p>
+                </div>
+                <div class="pt-3 border-t border-white/5">
+                    <p class="text-white/30 text-xs">
+                        The relay is fully open-source. Anyone can run their own instance for additional trust guarantees.
+                    </p>
                 </div>
             </div>
         </div>
@@ -1276,16 +1389,39 @@
                     <!-- Notifications Panel -->
                     <div id="settings-panel-notifications" class="settings-panel hidden">
                         <div class="space-y-6">
+                            <!-- Push Notifications (Wake Signals) -->
                             <div class="flex items-start justify-between p-4 bg-white/5 rounded-xl border border-white/5">
                                 <div class="flex-1 mr-4">
-                                    <h4 class="text-sm font-medium text-white/90 mb-1">Push Notifications</h4>
+                                    <div class="flex items-center gap-2 mb-1">
+                                        <h4 class="text-sm font-medium text-white/90">Push Notifications</h4>
+                                        <button id="push-learn-more-btn" class="text-xs text-white/40 hover:text-white/70 transition flex items-center gap-1">
+                                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                        </button>
+                                    </div>
+                                    <p class="text-xs text-white/40 leading-relaxed">
+                                        Get notified when new messages arrive (even when app is closed)
+                                    </p>
+                                </div>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="push-notifications-enabled" class="sr-only peer">
+                                    <div class="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white/60 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#F6851B]"></div>
+                                </label>
+                            </div>
+                            <div id="push-notifications-status" class="text-xs text-white/40"></div>
+                            
+                            <div class="my-4 border-t border-white/5"></div>
+                            
+                            <!-- Channel Invites (On-chain) -->
+                            <div class="flex items-start justify-between p-4 bg-white/5 rounded-xl border border-white/5">
+                                <div class="flex-1 mr-4">
+                                    <h4 class="text-sm font-medium text-white/90 mb-1">Channel Invites</h4>
                                     <p class="text-xs text-white/40 leading-relaxed">
                                         Receive channel invites from other users
                                     </p>
                                 </div>
                                 <label class="relative inline-flex items-center cursor-pointer">
                                     <input type="checkbox" id="notifications-enabled" class="sr-only peer">
-                                    <div class="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white/60 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-white"></div>
+                                    <div class="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white/60 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#F6851B]"></div>
                                 </label>
                             </div>
                             <div class="flex items-center gap-2 text-xs text-amber-400/80">

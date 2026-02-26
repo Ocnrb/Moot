@@ -14,6 +14,7 @@ import { mediaController } from './media.js';
 import { streamrController } from './streamr.js';
 import { subscriptionManager } from './subscriptionManager.js';
 import { historyManager } from './historyManager.js';
+import { relayManager } from './relayManager.js';
 
 // UI Modules
 import { GasEstimator } from './ui/GasEstimator.js';
@@ -4143,6 +4144,8 @@ class UIController {
         this.elements.closeSettingsBtn = document.getElementById('close-settings-btn');
         this.elements.notificationsEnabled = document.getElementById('notifications-enabled');
         this.elements.notificationsStatus = document.getElementById('notifications-status');
+        this.elements.pushNotificationsEnabled = document.getElementById('push-notifications-enabled');
+        this.elements.pushNotificationsStatus = document.getElementById('push-notifications-status');
         this.elements.settingsUsername = document.getElementById('settings-username');
         this.elements.settingsAddress = document.getElementById('settings-address');
         this.elements.copyOwnAddressBtn = document.getElementById('copy-own-address-btn');
@@ -4166,9 +4169,26 @@ class UIController {
             this.elements.closeSettingsBtn.addEventListener('click', () => this.hideSettingsModal());
         }
 
-        // Notifications toggle
+        // Notifications toggle (on-chain invites)
         if (this.elements.notificationsEnabled) {
             this.elements.notificationsEnabled.addEventListener('change', (e) => this.handleNotificationsToggle(e));
+        }
+
+        // Push notifications toggle
+        if (this.elements.pushNotificationsEnabled) {
+            this.elements.pushNotificationsEnabled.addEventListener('change', (e) => this.handlePushNotificationsToggle(e));
+        }
+
+        // Push learn more modal
+        const pushLearnMoreBtn = document.getElementById('push-learn-more-btn');
+        const pushLearnMoreModal = document.getElementById('push-learn-more-modal');
+        const closePushLearnMoreBtn = document.getElementById('close-push-learn-more-btn');
+        if (pushLearnMoreBtn && pushLearnMoreModal) {
+            pushLearnMoreBtn.addEventListener('click', () => pushLearnMoreModal.classList.remove('hidden'));
+            closePushLearnMoreBtn?.addEventListener('click', () => pushLearnMoreModal.classList.add('hidden'));
+            pushLearnMoreModal.addEventListener('click', (e) => {
+                if (e.target === pushLearnMoreModal) pushLearnMoreModal.classList.add('hidden');
+            });
         }
 
         // Username change
@@ -4406,7 +4426,7 @@ class UIController {
             // Update balance field
             this.updateBalanceDisplay(address);
 
-            // Update checkbox state
+            // Update checkbox state (on-chain invites)
             const enabled = notificationManager.isEnabled();
             if (this.elements.notificationsEnabled) {
                 this.elements.notificationsEnabled.checked = enabled;
@@ -4417,6 +4437,13 @@ class UIController {
                     ? 'text-xs text-green-500' 
                     : 'text-xs text-white/40';
             }
+
+            // Update push notifications toggle state
+            const pushEnabled = relayManager.enabled;
+            if (this.elements.pushNotificationsEnabled) {
+                this.elements.pushNotificationsEnabled.checked = pushEnabled;
+            }
+            this.updatePushNotificationsStatus();
 
             // Update Graph API key field
             if (this.elements.settingsGraphApiKey) {
@@ -4905,6 +4932,51 @@ class UIController {
                 this.elements.notificationsStatus.textContent = 'Disabled';
                 this.elements.notificationsStatus.className = 'text-xs text-gray-500';
             }
+        }
+    }
+
+    /**
+     * Handle push notifications toggle
+     */
+    async handlePushNotificationsToggle(e) {
+        const enable = e.target.checked;
+        
+        if (enable) {
+            try {
+                // Request permission and subscribe
+                const subscription = await relayManager.subscribe();
+                
+                if (subscription) {
+                    this.showNotification('Push notifications enabled!', 'success');
+                    this.updatePushNotificationsStatus();
+                } else {
+                    e.target.checked = false;
+                    this.showNotification('Could not enable push notifications', 'error');
+                }
+            } catch (error) {
+                e.target.checked = false;
+                this.showNotification('Failed to enable: ' + error.message, 'error');
+            }
+        } else {
+            await relayManager.unsubscribe();
+            this.showNotification('Push notifications disabled', 'info');
+            this.updatePushNotificationsStatus();
+        }
+    }
+
+    /**
+     * Update push notifications status text
+     */
+    updatePushNotificationsStatus() {
+        if (!this.elements.pushNotificationsStatus) return;
+        
+        if (relayManager.enabled) {
+            const channelCount = relayManager.subscribedChannels.size;
+            this.elements.pushNotificationsStatus.textContent = `Enabled - ${channelCount} channel(s) with notifications enabled`;
+            this.elements.pushNotificationsStatus.className = 'text-xs text-green-500';
+        } else {
+            this.elements.pushNotificationsStatus.textContent = 'Disabled';
+            this.elements.pushNotificationsStatus.className = 'text-xs text-white/40';
         }
     }
 

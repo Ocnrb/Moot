@@ -7,11 +7,17 @@ import { Logger } from '../logger.js';
 import { modalManager } from './ModalManager.js';
 import { escapeHtml, escapeAttr } from './utils.js';
 import { sanitizeText } from './sanitizer.js';
+import { relayManager } from '../relayManager.js';
 
 class ChannelSettingsUI {
     constructor() {
         this.deps = null;
         this.elements = null;
+        // Carousel tab order for mobile swipe navigation
+        this.channelTabOrder = ['info', 'members', 'notifications', 'danger'];
+        this.currentChannelTabIndex = 0;
+        this.showDangerTab = false;
+        this.showMembersTab = true; // Only for native channels
     }
 
     /**
@@ -67,6 +73,7 @@ class ChannelSettingsUI {
         this.elements.nonNativeMessage.classList.toggle('hidden', isNative);
 
         // Show/hide members tab button for native channels only
+        this.showMembersTab = isNative;
         const membersTabBtn = document.querySelector('[data-channel-tab="members"]');
         membersTabBtn?.classList.toggle('hidden', !isNative);
 
@@ -87,14 +94,21 @@ class ChannelSettingsUI {
         const dangerTabBtn = document.getElementById('danger-tab-btn');
         
         // Show/hide danger tab for users with DELETE permission only
+        this.showDangerTab = canDelete;
         dangerTabDivider?.classList.toggle('hidden', !canDelete);
         dangerTabBtn?.classList.toggle('hidden', !canDelete);
+
+        // Initialize carousel for mobile (must be after danger tab visibility is set)
+        this.initCarousel();
 
         // Select appropriate starting tab (always info for non-native since members tab is hidden)
         this.selectTab('info');
 
         // Show modal
         modalManager.show('channel-settings-modal');
+
+        // Initialize channel notifications toggle
+        this.initChannelNotificationsToggle(currentChannel.streamId);
 
         // Load members and permissions if native channel
         if (isNative) {
@@ -137,6 +151,11 @@ class ChannelSettingsUI {
             tab.classList.toggle('text-white/60', !isActive && tab.dataset.channelTab !== 'danger');
         });
 
+        // Update carousel for mobile
+        if (this.isMobileView()) {
+            this.updateCarousel(tabName);
+        }
+
         // Update panels
         document.querySelectorAll('.channel-settings-panel').forEach(panel => {
             const panelName = panel.id.replace('channel-panel-', '');
@@ -145,11 +164,278 @@ class ChannelSettingsUI {
     }
 
     /**
+     * Check if we're in mobile view
+     */
+    isMobileView() {
+        return window.innerWidth < 768;
+    }
+
+    /**
+     * Get the available tabs based on channel type and permissions
+     */
+    getAvailableTabs() {
+        const tabs = ['info'];
+        if (this.showMembersTab) tabs.push('members');
+        tabs.push('notifications');
+        if (this.showDangerTab) tabs.push('danger');
+        return tabs;
+    }
+
+    /**
+     * Initialize carousel for mobile swipe navigation
+     */
+    initCarousel() {
+        const carousel = document.getElementById('channel-settings-carousel');
+        const modal = document.getElementById('channel-settings-modal');
+        if (!carousel || !modal) return;
+
+        const tabElements = carousel.querySelectorAll('.carousel-tab');
+
+        // Click on adjacent tabs to navigate
+        tabElements.forEach((tab, index) => {
+            // Remove old listeners by cloning
+            const newTab = tab.cloneNode(true);
+            tab.parentNode.replaceChild(newTab, tab);
+            
+            newTab.addEventListener('click', () => {
+                if (index === 0) {
+                    // Clicked on left (prev) tab
+                    this.navigateCarousel(-1);
+                } else if (index === 2) {
+                    // Clicked on right (next) tab
+                    this.navigateCarousel(1);
+                }
+                // Middle tab (index 1) is already active, no action needed
+            });
+        });
+
+        // Add swipe support on entire modal
+        let touchStartX = 0;
+        let touchStartY = 0;
+        let isSwiping = false;
+        
+        const modalContainer = modal.querySelector('.bg-\\[\\#141414\\]');
+        if (!modalContainer) return;
+
+        // Remove existing listeners by using a bound function reference
+        if (this._touchStartHandler) {
+            modalContainer.removeEventListener('touchstart', this._touchStartHandler);
+            modalContainer.removeEventListener('touchend', this._touchEndHandler);
+        }
+
+        this._touchStartHandler = (e) => {
+            // Don't interfere with scrollable elements
+            const target = e.target;
+            if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') {
+                isSwiping = false;
+                return;
+            }
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+            isSwiping = true;
+        };
+
+        this._touchEndHandler = (e) => {
+            if (!isSwiping || !this.isMobileView()) return;
+            
+            const touchEndX = e.changedTouches[0].clientX;
+            const touchEndY = e.changedTouches[0].clientY;
+            const diffX = touchStartX - touchEndX;
+            const diffY = touchStartY - touchEndY;
+            
+            // Only trigger if horizontal swipe is dominant (not scrolling vertically)
+            if (Math.abs(diffX) > 50 && Math.abs(diffX) > Math.abs(diffY) * 1.5) {
+                this.navigateCarousel(diffX > 0 ? 1 : -1);
+            }
+            isSwiping = false;
+        };
+
+        modalContainer.addEventListener('touchstart', this._touchStartHandler, { passive: true });
+        modalContainer.addEventListener('touchend', this._touchEndHandler, { passive: true });
+    }
+
+    /**
+     * Navigate carousel by offset (-1 for prev, +1 for next)
+     */
+    navigateCarousel(offset) {
+        const availableTabs = this.getAvailableTabs();
+        const total = availableTabs.length;
+        this.currentChannelTabIndex = (this.currentChannelTabIndex + offset + total) % total;
+        const tabName = availableTabs[this.currentChannelTabIndex];
+        this.selectTab(tabName);
+    }
+
+    /**
+     * Update carousel display with current, prev, and next tabs
+     */
+    updateCarousel(tabName) {
+        const carousel = document.getElementById('channel-settings-carousel');
+        if (!carousel) return;
+
+        const tabs = carousel.querySelectorAll('.carousel-tab');
+        if (tabs.length !== 3) return;
+
+        const availableTabs = this.getAvailableTabs();
+        const total = availableTabs.length;
+        const currentIndex = availableTabs.indexOf(tabName);
+        if (currentIndex === -1) return;
+
+        this.currentChannelTabIndex = currentIndex;
+
+        const prevIndex = (currentIndex - 1 + total) % total;
+        const nextIndex = (currentIndex + 1) % total;
+
+        const tabLabels = {
+            'info': 'Info',
+            'members': 'Members',
+            'notifications': 'Push',
+            'danger': 'Delete'
+        };
+
+        // Update tab displays: [prev] [current] [next]
+        tabs[0].textContent = tabLabels[availableTabs[prevIndex]];
+        tabs[0].dataset.tab = availableTabs[prevIndex];
+        tabs[0].classList.remove('active');
+        tabs[0].classList.add('adjacent');
+
+        tabs[1].textContent = tabLabels[availableTabs[currentIndex]];
+        tabs[1].dataset.tab = availableTabs[currentIndex];
+        tabs[1].classList.add('active');
+        tabs[1].classList.remove('adjacent');
+
+        tabs[2].textContent = tabLabels[availableTabs[nextIndex]];
+        tabs[2].dataset.tab = availableTabs[nextIndex];
+        tabs[2].classList.remove('active');
+        tabs[2].classList.add('adjacent');
+    }
+
+    /**
      * Hide channel settings modal
      */
     hide() {
         modalManager.hide('channel-settings-modal');
         this.elements.addMemberInput.value = '';
+    }
+
+    /**
+     * Initialize channel notifications toggle
+     */
+    initChannelNotificationsToggle(streamId) {
+        const toggle = document.getElementById('channel-notifications-enabled');
+        const status = document.getElementById('channel-notifications-status');
+        const requiresPush = document.getElementById('channel-notifications-requires-push');
+        const container = document.getElementById('channel-notifications-container');
+        const tooltip = document.getElementById('channel-notifications-tooltip');
+        const label = document.getElementById('channel-notifications-label');
+        
+        if (!toggle) return;
+        
+        // Check if push notifications are enabled globally
+        const pushEnabled = relayManager.enabled;
+        
+        // Check if this channel has notifications enabled
+        const isSubscribed = relayManager.isChannelSubscribed(streamId);
+        
+        // Set toggle state
+        toggle.checked = isSubscribed;
+        toggle.disabled = !pushEnabled;
+        
+        // Apply visual grey out to container when disabled
+        if (container) {
+            container.classList.toggle('opacity-50', !pushEnabled);
+        }
+        
+        // Update label cursor
+        if (label) {
+            label.classList.toggle('cursor-not-allowed', !pushEnabled);
+            label.classList.toggle('cursor-pointer', pushEnabled);
+        }
+        
+        // Setup tooltip hover handlers (stored on element to avoid duplicates)
+        if (tooltip && label) {
+            // Remove old handlers if they exist
+            if (label._tooltipEnter) label.removeEventListener('mouseenter', label._tooltipEnter);
+            if (label._tooltipLeave) label.removeEventListener('mouseleave', label._tooltipLeave);
+            if (label._tooltipClick) label.removeEventListener('click', label._tooltipClick);
+            
+            if (!pushEnabled) {
+                // Store handlers on element for later removal
+                label._tooltipEnter = () => tooltip.classList.remove('hidden');
+                label._tooltipLeave = () => tooltip.classList.add('hidden');
+                label._tooltipClick = (e) => {
+                    e.preventDefault();
+                    if (requiresPush) {
+                        requiresPush.classList.add('animate-pulse');
+                        setTimeout(() => requiresPush.classList.remove('animate-pulse'), 1000);
+                    }
+                };
+                label.addEventListener('mouseenter', label._tooltipEnter);
+                label.addEventListener('mouseleave', label._tooltipLeave);
+                label.addEventListener('click', label._tooltipClick);
+            } else {
+                tooltip.classList.add('hidden');
+            }
+        }
+        
+        // Update status text
+        if (status) {
+            if (!pushEnabled) {
+                status.textContent = '';
+            } else if (isSubscribed) {
+                status.textContent = 'Push notifications enabled for this channel';
+                status.className = 'text-xs text-green-500';
+            } else {
+                status.textContent = 'Push notifications disabled';
+                status.className = 'text-xs text-white/40';
+            }
+        }
+        
+        // Show/hide "enable push first" warning
+        if (requiresPush) {
+            requiresPush.classList.toggle('hidden', pushEnabled);
+        }
+        
+        // Setup toggle change handler (stored on element to avoid duplicates)
+        if (toggle._changeHandler) toggle.removeEventListener('change', toggle._changeHandler);
+        toggle._changeHandler = async (e) => {
+            await this.handleChannelNotificationsToggle(e, streamId);
+        };
+        toggle.addEventListener('change', toggle._changeHandler);
+    }
+
+    /**
+     * Handle channel notifications toggle change
+     */
+    async handleChannelNotificationsToggle(e, streamId) {
+        const enable = e.target.checked;
+        const status = document.getElementById('channel-notifications-status');
+        const { showNotification } = this.deps;
+        
+        if (enable) {
+            try {
+                const success = await relayManager.subscribeToChannel(streamId);
+                if (success) {
+                    showNotification('Push notifications enabled!', 'success');
+                    if (status) {
+                        status.textContent = 'Push notifications enabled for this channel';
+                        status.className = 'text-xs text-green-500';
+                    }
+                } else {
+                    e.target.checked = false;
+                    showNotification('Failed to enable push notifications', 'error');
+                }
+            } catch (error) {
+                e.target.checked = false;
+                showNotification('Error: ' + error.message, 'error');
+            }
+        } else {
+            relayManager.unsubscribeFromChannel(streamId);
+            showNotification('Push notifications disabled', 'info');
+            if (status) {
+                status.textContent = 'Push notifications disabled';
+                status.className = 'text-xs text-white/40';
+            }
+        }
     }
 
     /**

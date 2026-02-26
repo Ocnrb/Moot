@@ -387,16 +387,22 @@ class SubscriptionManager {
     initializeActivityState() {
         const channels = channelManager.getAllChannels();
         const lastAccessMap = secureStorage.getAllChannelLastAccess();
+        const now = Date.now();
 
         for (const channel of channels) {
             // Use messageStreamId as key (dual-stream)
             const messageStreamId = channel.messageStreamId || channel.streamId;
             
             if (!this.channelActivity.has(messageStreamId)) {
-                // Initialize with last known access time
-                const lastAccess = lastAccessMap[messageStreamId] || lastAccessMap[channel.streamId] || 0;
+                // Get last access time for this channel
+                const lastAccess = lastAccessMap[messageStreamId] || lastAccessMap[channel.streamId];
+                
+                // If user never accessed this channel, use current time as baseline
+                // This prevents historical messages from being counted as "new"
+                const lastMessageTime = lastAccess || now;
+                
                 this.channelActivity.set(messageStreamId, {
-                    lastMessageTime: lastAccess,
+                    lastMessageTime,
                     unreadCount: 0,
                     lastChecked: 0
                 });
@@ -482,8 +488,9 @@ class SubscriptionManager {
         const password = channel.password || null;
 
         // Get current activity state
+        // If no state exists, use current time as baseline to avoid false positives
         const currentActivity = this.channelActivity.get(messageStreamId) || {
-            lastMessageTime: 0,
+            lastMessageTime: Date.now(),
             unreadCount: 0,
             lastChecked: 0
         };

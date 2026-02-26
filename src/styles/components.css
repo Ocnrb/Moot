@@ -1277,7 +1277,7 @@ body {
     /* Modal sidebars become horizontal tabs on mobile */
     #new-channel-modal .flex.flex-1.min-h-0,
     #settings-modal .flex.min-h-\[420px\],
-    #channel-settings-modal .flex.min-h-\[400px\] {
+    #channel-settings-modal .flex.min-h-\[420px\] {
         flex-direction: column;
         flex: 1;
         min-height: 0;
@@ -1294,7 +1294,7 @@ body {
     /* Modal sidebars horizontal on mobile */
     #new-channel-modal .w-40,
     #settings-modal .w-44,
-    #channel-settings-modal .w-40 {
+    #channel-settings-modal .w-44 {
         width: 100% !important;
         border-right: none !important;
         border-bottom: 1px solid rgba(255, 255, 255, 0.05);
@@ -1312,8 +1312,7 @@ body {
     }
     
     /* Modal nav items horizontal */
-    #new-channel-modal .w-40 nav,
-    #channel-settings-modal .w-40 nav {
+    #new-channel-modal .w-40 nav {
         display: flex !important;
         flex-direction: row !important;
         gap: 0.5rem;
@@ -1324,13 +1323,15 @@ body {
         padding-right: 0.5rem;
     }
 
-    /* Settings modal carousel container */
-    #settings-modal .w-44 nav {
+    /* Settings & Channel Settings modal carousel - hide nav on mobile */
+    #settings-modal .w-44 nav,
+    #channel-settings-modal .w-44 nav {
         display: none !important;
     }
 
     /* Settings carousel - replaces nav on mobile */
-    #settings-carousel {
+    #settings-carousel,
+    #channel-settings-carousel {
         display: flex !important;
         align-items: center;
         justify-content: center;
@@ -1345,7 +1346,9 @@ body {
 
     /* Subtle orange glow on edges to indicate scroll */
     #settings-carousel::before,
-    #settings-carousel::after {
+    #settings-carousel::after,
+    #channel-settings-carousel::before,
+    #channel-settings-carousel::after {
         content: '';
         position: absolute;
         top: 0;
@@ -1355,17 +1358,20 @@ body {
         z-index: 1;
     }
 
-    #settings-carousel::before {
+    #settings-carousel::before,
+    #channel-settings-carousel::before {
         left: 0;
         background: linear-gradient(to right, rgba(246, 133, 27, 0.15), transparent);
     }
 
-    #settings-carousel::after {
+    #settings-carousel::after,
+    #channel-settings-carousel::after {
         right: 0;
         background: linear-gradient(to left, rgba(246, 133, 27, 0.15), transparent);
     }
 
-    #settings-carousel .carousel-tabs {
+    #settings-carousel .carousel-tabs,
+    #channel-settings-carousel .carousel-tabs {
         display: grid;
         grid-template-columns: 1fr 1fr 1fr;
         width: 100%;
@@ -1373,7 +1379,8 @@ body {
         padding: 0;
     }
 
-    #settings-carousel .carousel-tab {
+    #settings-carousel .carousel-tab,
+    #channel-settings-carousel .carousel-tab {
         padding: 0.75rem 0;
         margin: 0;
         font-size: 10px;
@@ -1389,19 +1396,20 @@ body {
         box-sizing: border-box;
     }
 
-    #settings-carousel .carousel-tab.active {
+    #settings-carousel .carousel-tab.active,
+    #channel-settings-carousel .carousel-tab.active {
         color: #F6851B;
         font-weight: 400;
         cursor: default;
         border-bottom-color: #F6851B;
     }
 
-    #settings-carousel .carousel-tab.adjacent {
+    #settings-carousel .carousel-tab.adjacent,
+    #channel-settings-carousel .carousel-tab.adjacent {
         color: rgba(255, 255, 255, 0.4);
     }
     
-    #new-channel-modal .w-40 nav button,
-    #channel-settings-modal .w-40 nav button {
+    #new-channel-modal .w-40 nav button {
         white-space: nowrap;
         flex-shrink: 0;
         width: auto !important;

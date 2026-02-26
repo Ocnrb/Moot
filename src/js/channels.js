@@ -14,6 +14,7 @@ import { authManager } from './auth.js';
 import { identityManager } from './identity.js';
 import { secureStorage } from './secureStorage.js';
 import { graphAPI } from './graph.js';
+import { relayManager } from './relayManager.js';
 
 /**
  * Check if an error is a blockchain/gas related error
@@ -97,7 +98,7 @@ class ChannelManager {
         // Online presence tracking
         this.onlineUsers = new Map(); // streamId -> Map(userId -> {lastActive, nickname, address})
         this.presenceInterval = null;
-        this.ONLINE_TIMEOUT = 15000; // 15 seconds to consider user offline
+        this.ONLINE_TIMEOUT = 25000; // 25 seconds to consider user offline (5x heartbeat interval)
         this.onlineUsersHandlers = [];
         
         // Pending messages (failed to send, will retry)
@@ -1502,6 +1503,11 @@ class ChannelManager {
             // Notify UI that message is confirmed
             this.notifyHandlers('message_confirmed', { streamId: messageStreamId, messageId: message.id });
 
+            // Send wake signals to other channel members (async, don't await)
+            this.sendWakeSignals(messageStreamId).catch(err => {
+                Logger.debug('Wake signals failed (non-critical):', err.message);
+            });
+
             Logger.debug('Message sent to messageStream:', message.id);
         } catch (error) {
             Logger.error('Failed to send message:', error);
@@ -1698,6 +1704,52 @@ class ChannelManager {
             );
         } catch (error) {
             Logger.error('Failed to send typing indicator:', error);
+        }
+    }
+
+    /**
+     * Send wake signals to other members in the channel.
+     * This notifies them via push notification that there's a new message.
+     * 
+     * HYBRID ARCHITECTURE:
+     * - Native channels: Send to each member's userTag (max privacy)
+     * - Public/Password channels: Send to channelTag (opt-in subscribers)
+     * 
+     * @param {string} messageStreamId - Message Stream ID (channel key)
+     */
+    async sendWakeSignals(messageStreamId) {
+        try {
+            const channel = this.channels.get(messageStreamId);
+            if (!channel) return;
+            
+            const channelType = channel.type || 'unknown';
+            
+            // Native channels: Send to each member individually
+            if (channelType === 'native') {
+                const myAddress = authManager.getAddress()?.toLowerCase();
+                const members = channel.members || [];
+                const otherMembers = members.filter(m => m.toLowerCase() !== myAddress);
+                
+                if (otherMembers.length === 0) {
+                    Logger.debug('No other members to send wake signals to');
+                    return;
+                }
+                
+                Logger.debug('Sending wake signals to', otherMembers.length, 'native members');
+                const sent = await relayManager.sendWakeSignalBatch(otherMembers);
+                Logger.debug('Wake signals sent:', sent, '/', otherMembers.length);
+                
+            } else {
+                // Public/Password channels: Send to channel tag
+                // Anyone who opted into notifications for this channel will receive
+                Logger.debug('Sending channel wake signal for:', channelType, 'channel');
+                await relayManager.sendChannelWakeSignal(messageStreamId);
+                Logger.debug('Channel wake signal sent');
+            }
+            
+        } catch (error) {
+            // Non-critical - log but don't throw
+            Logger.debug('Failed to send wake signals:', error.message);
         }
     }
 

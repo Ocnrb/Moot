@@ -12,6 +12,7 @@ import { identityManager } from './identity.js';
 import { secureStorage } from './secureStorage.js';
 import { mediaController } from './media.js';
 import { subscriptionManager } from './subscriptionManager.js';
+import { relayManager } from './relayManager.js';
 import { Logger } from './logger.js';
 import { getAvatar } from './ui/AvatarGenerator.js';
 import { escapeHtml, escapeAttr } from './ui/utils.js';
@@ -1837,6 +1838,14 @@ class App {
                 Logger.warn('Failed to init notifications (non-critical):', notifError);
             }
 
+            // Initialize push notification relay manager
+            try {
+                await relayManager.init(address);
+                Logger.info('Relay manager initialized');
+            } catch (relayError) {
+                Logger.warn('Failed to init relay manager (non-critical):', relayError);
+            }
+
             // Process pending invite if any
             if (this.pendingInvite) {
                 Logger.info('Processing pending invite:', this.pendingInvite.name);
@@ -2126,4 +2135,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Expose app to window for debugging
     window.ethChat = app;
+    
+    // Expose managers for testing
+    window.relayManager = relayManager;
+    window.channelManager = channelManager;
 });

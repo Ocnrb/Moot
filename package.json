@@ -11,7 +11,11 @@
     "watch": "npm run watch:css & npm run watch:js",
     "build:minify": "npx tailwindcss -i ./src/styles/input.css -o ./css/output.css --minify && npx shx cp src/styles/components.css css/components.css && webpack --mode production",
     "clean": "npx shx rm -rf js css",
-    "serve": "npm run build && npx serve ."
+    "serve": "npm run build && npx serve .",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:ui": "vitest --ui"
   },
   "dependencies": {
     "@streamr/sdk": "^103.3.1",
@@ -20,7 +24,14 @@
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/user-event": "^14.6.1",
+    "@vitest/coverage-v8": "^4.0.18",
+    "@vitest/ui": "^4.0.18",
+    "happy-dom": "^20.8.3",
+    "jsdom": "^28.1.0",
     "tailwindcss": "^3.4.1",
+    "vitest": "^4.0.18",
     "webpack": "^5.90.0",
     "webpack-cli": "^5.1.4"
   }

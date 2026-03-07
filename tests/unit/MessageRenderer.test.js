@@ -1,0 +1,637 @@
+/**
+ * Tests for MessageRenderer.js - Message rendering and content handling
+ */
+
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { messageRenderer } from '../../src/js/ui/MessageRenderer.js';
+
+describe('MessageRenderer', () => {
+    beforeEach(() => {
+        // Reset dependencies
+        messageRenderer.deps = {};
+        document.body.innerHTML = '';
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    describe('setDependencies()', () => {
+        it('should set dependencies', () => {
+            const getCurrentAddress = vi.fn();
+            messageRenderer.setDependencies({ getCurrentAddress });
+            expect(messageRenderer.deps.getCurrentAddress).toBe(getCurrentAddress);
+        });
+        
+        it('should merge dependencies', () => {
+            messageRenderer.setDependencies({ dep1: 'a' });
+            messageRenderer.setDependencies({ dep2: 'b' });
+            expect(messageRenderer.deps.dep1).toBe('a');
+            expect(messageRenderer.deps.dep2).toBe('b');
+        });
+    });
+
+    describe('isEmojiOnly()', () => {
+        it('should return false for empty text', () => {
+            expect(messageRenderer.isEmojiOnly('')).toBe(false);
+            expect(messageRenderer.isEmojiOnly(null)).toBe(false);
+            expect(messageRenderer.isEmojiOnly(undefined)).toBe(false);
+        });
+        
+        it('should return false for plain text', () => {
+            expect(messageRenderer.isEmojiOnly('hello')).toBe(false);
+            expect(messageRenderer.isEmojiOnly('Hello World')).toBe(false);
+        });
+        
+        it('should return "true" for 1-3 emojis', () => {
+            expect(messageRenderer.isEmojiOnly('😀')).toBe('true');
+            expect(messageRenderer.isEmojiOnly('😀😀')).toBe('true');
+            expect(messageRenderer.isEmojiOnly('😀😀😀')).toBe('true');
+        });
+        
+        it('should return "many" for 4+ emojis', () => {
+            expect(messageRenderer.isEmojiOnly('😀😀😀😀')).toBe('many');
+            expect(messageRenderer.isEmojiOnly('😀😀😀😀😀')).toBe('many');
+            expect(messageRenderer.isEmojiOnly('🎉🎊🎁🎈🎀')).toBe('many');
+        });
+        
+        it('should return false for mixed text and emojis', () => {
+            expect(messageRenderer.isEmojiOnly('hello 😀')).toBe(false);
+            expect(messageRenderer.isEmojiOnly('😀 world')).toBe(false);
+            expect(messageRenderer.isEmojiOnly('hi 👋 there')).toBe(false);
+        });
+        
+        it('should handle emojis with spaces', () => {
+            expect(messageRenderer.isEmojiOnly('😀 😀')).toBe('true');
+            expect(messageRenderer.isEmojiOnly('😀  😀  😀')).toBe('true');
+        });
+        
+        it('should handle complex emojis', () => {
+            // Skin tone modifiers
+            expect(messageRenderer.isEmojiOnly('👍🏻')).toBe('true');
+            // Flag emojis
+            expect(messageRenderer.isEmojiOnly('🇵🇹')).toBe('true');
+        });
+        
+        it('should return false for numbers and special characters', () => {
+            expect(messageRenderer.isEmojiOnly('123')).toBe(false);
+            expect(messageRenderer.isEmojiOnly('!@#')).toBe(false);
+            expect(messageRenderer.isEmojiOnly('😀123')).toBe(false);
+        });
+    });
+
+    describe('wrapInlineEmojis()', () => {
+        it('should wrap single emoji', () => {
+            const result = messageRenderer.wrapInlineEmojis('Hello 😀 World');
+            expect(result).toContain('<span class="inline-emoji">😀</span>');
+            expect(result).toContain('Hello');
+            expect(result).toContain('World');
+        });
+        
+        it('should wrap multiple emojis', () => {
+            const result = messageRenderer.wrapInlineEmojis('😀 test 🎉');
+            expect(result).toContain('<span class="inline-emoji">😀</span>');
+            expect(result).toContain('<span class="inline-emoji">🎉</span>');
+        });
+        
+        it('should preserve text without emojis', () => {
+            const result = messageRenderer.wrapInlineEmojis('Hello World');
+            expect(result).toBe('Hello World');
+        });
+        
+        it('should handle empty string', () => {
+            expect(messageRenderer.wrapInlineEmojis('')).toBe('');
+        });
+    });
+
+    describe('formatFileSize()', () => {
+        it('should format bytes', () => {
+            expect(messageRenderer.formatFileSize(0)).toBe('0 B');
+            expect(messageRenderer.formatFileSize(100)).toBe('100 B');
+            expect(messageRenderer.formatFileSize(1023)).toBe('1023 B');
+        });
+        
+        it('should format kilobytes', () => {
+            expect(messageRenderer.formatFileSize(1024)).toBe('1.0 KB');
+            expect(messageRenderer.formatFileSize(1536)).toBe('1.5 KB');
+            expect(messageRenderer.formatFileSize(10240)).toBe('10.0 KB');
+        });
+        
+        it('should format megabytes', () => {
+            expect(messageRenderer.formatFileSize(1024 * 1024)).toBe('1.00 MB');
+            expect(messageRenderer.formatFileSize(1024 * 1024 * 5.5)).toBe('5.50 MB');
+            expect(messageRenderer.formatFileSize(1024 * 1024 * 100)).toBe('100.00 MB');
+        });
+        
+        it('should format gigabytes', () => {
+            expect(messageRenderer.formatFileSize(1024 * 1024 * 1024)).toBe('1.00 GB');
+            expect(messageRenderer.formatFileSize(1024 * 1024 * 1024 * 2.5)).toBe('2.50 GB');
+        });
+    });
+
+    describe('renderDateSeparator()', () => {
+        it('should render "Today" for today\'s date', () => {
+            const today = new Date();
+            const result = messageRenderer.renderDateSeparator(today);
+            expect(result).toContain('Today');
+            expect(result).toContain('date-separator');
+            expect(result).toContain('date-pill');
+        });
+        
+        it('should render "Yesterday" for yesterday\'s date', () => {
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            const result = messageRenderer.renderDateSeparator(yesterday);
+            expect(result).toContain('Yesterday');
+        });
+        
+        it('should render month and day for this year', () => {
+            const date = new Date();
+            date.setMonth(0); // January
+            date.setDate(15);
+            // Only test if it's not today/yesterday
+            const today = new Date();
+            if (date.toDateString() !== today.toDateString()) {
+                const result = messageRenderer.renderDateSeparator(date);
+                expect(result).toContain('January 15');
+                expect(result).not.toContain(date.getFullYear().toString());
+            }
+        });
+        
+        it('should include year for past years', () => {
+            const date = new Date();
+            date.setFullYear(date.getFullYear() - 1);
+            date.setMonth(5); // June
+            date.setDate(20);
+            const result = messageRenderer.renderDateSeparator(date);
+            expect(result).toContain('June 20');
+            expect(result).toContain((date.getFullYear()).toString());
+        });
+    });
+
+    describe('renderReactions()', () => {
+        it('should return empty container when no reactions', () => {
+            messageRenderer.setDependencies({ getMessageReactions: () => null });
+            const result = messageRenderer.renderReactions('msg-1', false);
+            expect(result).toContain('reactions-container');
+            expect(result).toContain('data-reactions-for="msg-1"');
+            expect(result).not.toContain('reaction-badge');
+        });
+        
+        it('should return empty container when empty reactions', () => {
+            messageRenderer.setDependencies({ getMessageReactions: () => ({}) });
+            const result = messageRenderer.renderReactions('msg-1', false);
+            expect(result).not.toContain('reaction-badge');
+        });
+        
+        it('should render reaction badges', () => {
+            messageRenderer.setDependencies({
+                getMessageReactions: () => ({
+                    '👍': ['0x123', '0x456'],
+                    '❤️': ['0x789']
+                }),
+                getCurrentAddress: () => '0x000'
+            });
+            
+            const result = messageRenderer.renderReactions('msg-1', false);
+            expect(result).toContain('reaction-badge');
+            expect(result).toContain('👍');
+            expect(result).toContain('2'); // count
+            expect(result).toContain('❤️');
+            expect(result).toContain('1'); // count
+        });
+        
+        it('should mark user-reacted badges', () => {
+            messageRenderer.setDependencies({
+                getMessageReactions: () => ({
+                    '👍': ['0x123', '0xabc']
+                }),
+                getCurrentAddress: () => '0xABC' // Case-insensitive match
+            });
+            
+            const result = messageRenderer.renderReactions('msg-1', false);
+            expect(result).toContain('user-reacted');
+        });
+        
+        it('should not mark when user has not reacted', () => {
+            messageRenderer.setDependencies({
+                getMessageReactions: () => ({
+                    '👍': ['0x123']
+                }),
+                getCurrentAddress: () => '0xDEF'
+            });
+            
+            const result = messageRenderer.renderReactions('msg-1', false);
+            expect(result).not.toContain('user-reacted');
+        });
+        
+        it('should skip reactions with empty user list', () => {
+            messageRenderer.setDependencies({
+                getMessageReactions: () => ({
+                    '👍': [],
+                    '❤️': ['0x123']
+                }),
+                getCurrentAddress: () => '0x000'
+            });
+            
+            const result = messageRenderer.renderReactions('msg-1', false);
+            // Should not have badge for 👍 since no users
+            const thumbsMatch = result.match(/data-emoji="👍"/g);
+            expect(thumbsMatch).toBeNull();
+        });
+    });
+
+    describe('renderReplyPreview()', () => {
+        it('should return empty string when no replyTo', () => {
+            expect(messageRenderer.renderReplyPreview(null)).toBe('');
+            expect(messageRenderer.renderReplyPreview(undefined)).toBe('');
+        });
+        
+        it('should render reply preview with sender name', () => {
+            const replyTo = {
+                id: 'reply-123',
+                sender: '0x123',
+                senderName: 'Alice',
+                text: 'Original message'
+            };
+            
+            const result = messageRenderer.renderReplyPreview(replyTo);
+            expect(result).toContain('reply-preview');
+            expect(result).toContain('Alice');
+            expect(result).toContain('Original message');
+            expect(result).toContain('data-reply-to-id="reply-123"');
+        });
+        
+        it('should use formatted address when no sender name', () => {
+            const replyTo = {
+                id: 'reply-123',
+                sender: '0x1234567890abcdef',
+                text: 'Message'
+            };
+            
+            const result = messageRenderer.renderReplyPreview(replyTo);
+            // Should contain truncated address
+            expect(result).toContain('0x123');
+        });
+        
+        it('should truncate long text', () => {
+            const replyTo = {
+                id: 'reply-123',
+                sender: '0x123',
+                senderName: 'Bob',
+                text: 'A'.repeat(100)
+            };
+            
+            const result = messageRenderer.renderReplyPreview(replyTo);
+            expect(result).toContain('...');
+            expect(result).not.toContain('A'.repeat(100));
+        });
+        
+        it('should show [Message] for empty text', () => {
+            const replyTo = {
+                id: 'reply-123',
+                sender: '0x123',
+                senderName: 'Charlie',
+                text: ''
+            };
+            
+            const result = messageRenderer.renderReplyPreview(replyTo);
+            expect(result).toContain('[Message]');
+        });
+        
+        it('should sanitize display name', () => {
+            const replyTo = {
+                id: 'reply-123',
+                sender: '0x123',
+                senderName: '<script>alert(1)</script>',
+                text: 'Safe text'
+            };
+            
+            const result = messageRenderer.renderReplyPreview(replyTo);
+            expect(result).not.toContain('<script>');
+        });
+    });
+
+    describe('renderMessageContent()', () => {
+        beforeEach(() => {
+            messageRenderer.setDependencies({
+                getYouTubeEmbedsEnabled: () => true,
+                getImage: () => null,
+                getCurrentChannel: () => null
+            });
+        });
+        
+        it('should render text message', () => {
+            const msg = { type: 'text', text: 'Hello World' };
+            const result = messageRenderer.renderMessageContent(msg);
+            expect(result).toContain('Hello World');
+        });
+        
+        it('should escape HTML in text', () => {
+            const msg = { type: 'text', text: '<script>alert(1)</script>' };
+            const result = messageRenderer.renderMessageContent(msg);
+            expect(result).not.toContain('<script>');
+            expect(result).toContain('&lt;script&gt;');
+        });
+        
+        it('should convert newlines to br tags', () => {
+            const msg = { type: 'text', text: 'Line 1\nLine 2' };
+            const result = messageRenderer.renderMessageContent(msg);
+            expect(result).toContain('<br>');
+        });
+        
+        it('should linkify URLs', () => {
+            const msg = { type: 'text', text: 'Check https://example.com' };
+            const result = messageRenderer.renderMessageContent(msg);
+            expect(result).toContain('href="https://example.com"');
+        });
+        
+        it('should wrap emojis', () => {
+            const msg = { type: 'text', text: 'Hello 😀' };
+            const result = messageRenderer.renderMessageContent(msg);
+            expect(result).toContain('inline-emoji');
+        });
+        
+        it('should handle missing type as text', () => {
+            const msg = { text: 'No type specified' };
+            const result = messageRenderer.renderMessageContent(msg);
+            expect(result).toContain('No type specified');
+        });
+        
+        it('should show loading for unavailable image', () => {
+            messageRenderer.setDependencies({
+                getImage: () => null,
+                getCurrentChannel: () => ({ streamId: 'ch-123' }),
+                requestImage: vi.fn()
+            });
+            
+            const msg = { type: 'image', imageId: 'img-123' };
+            const result = messageRenderer.renderMessageContent(msg);
+            expect(result).toContain('Loading image');
+            expect(result).toContain('data-image-id="img-123"');
+        });
+    });
+
+    describe('renderImageContent()', () => {
+        it('should render image from cache', () => {
+            const imageData = 'data:image/png;base64,ABC123';
+            messageRenderer.setDependencies({
+                getImage: () => imageData,
+                registerMedia: () => 'media-123',
+                cacheImage: vi.fn()
+            });
+            
+            const msg = { type: 'image', imageId: 'img-1' };
+            const result = messageRenderer.renderImageContent(msg);
+            
+            expect(result).toContain('<img');
+            expect(result).toContain(`src="${imageData}"`);
+            expect(result).toContain('data-media-id="media-123"');
+            expect(result).toContain('lightbox-trigger');
+        });
+        
+        it('should use embedded imageData and cache it', () => {
+            const cacheImage = vi.fn();
+            messageRenderer.setDependencies({
+                getImage: () => null,
+                cacheImage,
+                registerMedia: () => 'media-456'
+            });
+            
+            const msg = { 
+                type: 'image', 
+                imageId: 'img-2',
+                imageData: 'data:image/jpeg;base64,XYZ'
+            };
+            const result = messageRenderer.renderImageContent(msg);
+            
+            expect(cacheImage).toHaveBeenCalledWith('img-2', 'data:image/jpeg;base64,XYZ');
+            expect(result).toContain('<img');
+        });
+        
+        it('should show error for invalid media registration', () => {
+            messageRenderer.setDependencies({
+                getImage: () => 'data:image/png;base64,test',
+                registerMedia: () => null
+            });
+            
+            const msg = { type: 'image', imageId: 'img-3' };
+            const result = messageRenderer.renderImageContent(msg);
+            
+            expect(result).toContain('Invalid image data');
+        });
+        
+        it('should request image from network when not available', () => {
+            const requestImage = vi.fn();
+            messageRenderer.setDependencies({
+                getImage: () => null,
+                getCurrentChannel: () => ({ 
+                    streamId: 'ch-123', 
+                    password: 'secret' 
+                }),
+                requestImage
+            });
+            
+            const msg = { type: 'image', imageId: 'img-4' };
+            messageRenderer.renderImageContent(msg);
+            
+            expect(requestImage).toHaveBeenCalledWith('ch-123', 'img-4', 'secret');
+        });
+    });
+
+    describe('buildMessageHTML()', () => {
+        beforeEach(() => {
+            messageRenderer.setDependencies({
+                getMessageReactions: () => ({}),
+                getCurrentAddress: () => '0x000',
+                getYouTubeEmbedsEnabled: () => true
+            });
+        });
+        
+        it('should build message HTML for own message', () => {
+            const msg = {
+                id: 'msg-1',
+                sender: '0xABC',
+                text: 'Hello',
+                type: 'text'
+            };
+            
+            const result = messageRenderer.buildMessageHTML(
+                msg, true, '12:00', { html: '' }, 'Alice'
+            );
+            
+            expect(result).toContain('own-message');
+            expect(result).toContain('data-msg-id="msg-1"');
+            expect(result).toContain('Hello');
+            expect(result).toContain('12:00');
+        });
+        
+        it('should build message HTML for other\'s message', () => {
+            const msg = {
+                id: 'msg-2',
+                sender: '0xDEF',
+                text: 'Hi there',
+                type: 'text'
+            };
+            
+            const result = messageRenderer.buildMessageHTML(
+                msg, false, '13:00', { html: '<span>✓</span>' }, 'Bob'
+            );
+            
+            expect(result).toContain('other-message');
+            expect(result).toContain('Hi there');
+            expect(result).toContain('Bob');
+        });
+        
+        it('should include reply and react buttons', () => {
+            const msg = { id: 'msg-3', sender: '0x1', text: 'Test' };
+            
+            const result = messageRenderer.buildMessageHTML(
+                msg, false, '14:00', { html: '' }, 'User'
+            );
+            
+            expect(result).toContain('reply-btn');
+            expect(result).toContain('react-btn');
+            expect(result).toContain('data-msg-id="msg-3"');
+        });
+        
+        it('should include avatar for other\'s message', () => {
+            const msg = { id: 'msg-4', sender: '0x123', text: 'Test' };
+            
+            const result = messageRenderer.buildMessageHTML(
+                msg, false, '15:00', { html: '' }, 'User'
+            );
+            
+            expect(result).toContain('message-avatar');
+            expect(result).toContain('<svg'); // Avatar SVG
+        });
+        
+        it('should add emoji-only attribute for emoji messages', () => {
+            const msg = { id: 'msg-5', sender: '0x1', text: '😀😀', type: 'text' };
+            
+            const result = messageRenderer.buildMessageHTML(
+                msg, false, '16:00', { html: '' }, 'User'
+            );
+            
+            expect(result).toContain('data-emoji-only="true"');
+        });
+        
+        it('should show invalid signature warning', () => {
+            const msg = {
+                id: 'msg-6',
+                sender: '0x1',
+                text: 'Suspicious',
+                verified: { valid: false },
+                signature: 'invalid-sig'
+            };
+            
+            const result = messageRenderer.buildMessageHTML(
+                msg, false, '17:00', { html: '' }, 'User'
+            );
+            
+            expect(result).toContain('Invalid signature');
+        });
+        
+        it('should include reply preview when present', () => {
+            const msg = {
+                id: 'msg-7',
+                sender: '0x1',
+                text: 'Reply text',
+                replyTo: {
+                    id: 'original-msg',
+                    sender: '0x2',
+                    senderName: 'Original',
+                    text: 'Original text'
+                }
+            };
+            
+            const result = messageRenderer.buildMessageHTML(
+                msg, false, '18:00', { html: '' }, 'User'
+            );
+            
+            expect(result).toContain('reply-preview');
+            expect(result).toContain('Original');
+        });
+        
+        it('should apply group class', () => {
+            const msg = { id: 'msg-8', sender: '0x1', text: 'Test' };
+            
+            const result = messageRenderer.buildMessageHTML(
+                msg, false, '19:00', { html: '' }, 'User', 'msg-group-middle'
+            );
+            
+            expect(result).toContain('msg-group-middle');
+        });
+        
+        it('should apply spacing class', () => {
+            const msg = { id: 'msg-9', sender: '0x1', text: 'Test' };
+            
+            const result = messageRenderer.buildMessageHTML(
+                msg, false, '20:00', { html: '' }, 'User', 'msg-group-single', 'SINGLE', 'msg-spacing-large'
+            );
+            
+            expect(result).toContain('msg-spacing-large');
+        });
+        
+        it('should use timestamp as fallback for msgId', () => {
+            const msg = { timestamp: 12345, sender: '0x1', text: 'Test' };
+            
+            const result = messageRenderer.buildMessageHTML(
+                msg, false, '21:00', { html: '' }, 'User'
+            );
+            
+            expect(result).toContain('data-msg-id="12345"');
+        });
+    });
+
+    describe('renderVideoContent()', () => {
+        it('should return escaped text if no metadata', () => {
+            const msg = { type: 'video_announce', text: 'Video shared' };
+            const result = messageRenderer.renderVideoContent(msg);
+            expect(result).toBe('Video shared');
+        });
+        
+        it('should sanitize metadata', () => {
+            messageRenderer.setDependencies({
+                getFileUrl: () => null,
+                getCurrentAddress: () => '0x123'
+            });
+            
+            const msg = {
+                type: 'video_announce',
+                metadata: {
+                    fileId: 'file-123',
+                    fileName: '<script>hack</script>.mp4',
+                    fileType: 'video/mp4',
+                    fileSize: 1024
+                }
+            };
+            
+            const result = messageRenderer.renderVideoContent(msg);
+            expect(result).not.toContain('<script>');
+        });
+        
+        it('should show download panel when video not available', () => {
+            messageRenderer.setDependencies({
+                getFileUrl: () => null,
+                getCurrentAddress: () => '0x123',
+                isSeeding: () => false
+            });
+            
+            const msg = {
+                type: 'video_announce',
+                metadata: {
+                    fileId: 'file-456',
+                    fileName: 'video.mp4',
+                    fileType: 'video/mp4',
+                    fileSize: 5000000
+                }
+            };
+            
+            const result = messageRenderer.renderVideoContent(msg);
+            expect(result).toContain('download-file-btn');
+            expect(result).toContain('data-file-id="file-456"');
+            expect(result).toContain('video.mp4');
+        });
+    });
+});

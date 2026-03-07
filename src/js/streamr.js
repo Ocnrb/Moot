@@ -927,6 +927,62 @@ class StreamrController {
     }
 
     /**
+     * Get storage information for a stream from the Streamr SDK
+     * @param {string} streamId - Stream ID
+     * @returns {Promise<{enabled: boolean, nodes: string[], storageDays: number|null}>}
+     */
+    async getStreamStorageInfo(streamId) {
+        if (!this.client) {
+            return { enabled: false, nodes: [], storageDays: null };
+        }
+
+        try {
+            const stream = await this.client.getStream(streamId);
+            
+            // Get storage nodes assigned to this stream
+            // getStorageNodes() returns an array-like synchronously
+            const storageNodesResult = stream.getStorageNodes();
+            
+            // Handle different return types (could be array, promise, or async iterable)
+            let storageNodes = [];
+            if (Array.isArray(storageNodesResult)) {
+                storageNodes = storageNodesResult;
+            } else if (storageNodesResult && typeof storageNodesResult.then === 'function') {
+                // It's a promise
+                storageNodes = await storageNodesResult;
+            } else if (storageNodesResult && typeof storageNodesResult[Symbol.asyncIterator] === 'function') {
+                // It's an async iterable
+                for await (const node of storageNodesResult) {
+                    storageNodes.push(node);
+                }
+            } else if (storageNodesResult && typeof storageNodesResult[Symbol.iterator] === 'function') {
+                // It's a sync iterable
+                storageNodes = [...storageNodesResult];
+            }
+            
+            const enabled = storageNodes.length > 0;
+            
+            // Get storage day count if storage is enabled
+            let storageDays = null;
+            if (enabled) {
+                try {
+                    const result = await stream.getStorageDayCount();
+                    if (result !== null && result !== undefined) {
+                        storageDays = typeof result === 'bigint' ? Number(result) : result;
+                    }
+                } catch (e) {
+                    // May fail if TTL not set (e.g., LogStore)
+                }
+            }
+            
+            return { enabled, nodes: storageNodes, storageDays };
+        } catch (error) {
+            Logger.error('Failed to get stream storage info:', error);
+            return { enabled: false, nodes: [], storageDays: null };
+        }
+    }
+
+    /**
      * Check if current user has PUBLISH permission on a stream
      * Uses Streamr SDK hasPermission for real-time on-chain check
      * @param {string} streamId - Stream ID
@@ -937,6 +993,7 @@ class StreamrController {
         if (!this.client) {
             return false;
         }
+
 
         try {
             const stream = await this.client.getStream(streamId);

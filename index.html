@@ -959,14 +959,14 @@
         </div>
     </div>
 
-    <!-- Modal: Channel Settings (Member Management) -->
-    <!-- Channel Settings Modal - Tabbed Layout -->
+    <!-- Modal: Channel Details (formerly Channel Settings) -->
+    <!-- Channel Details Modal - Tabbed Layout -->
     <div id="channel-settings-modal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
         <div class="bg-[#141414] rounded-2xl w-[640px] max-w-[95vw] mx-4 shadow-2xl border border-white/5 overflow-hidden">
             <!-- Header -->
             <div class="flex items-center justify-between px-6 py-4 border-b border-white/5">
                 <div>
-                    <h3 class="text-lg font-medium text-white/90">Channel Settings</h3>
+                    <h3 class="text-lg font-medium text-white/90">Channel Details</h3>
                     <p id="channel-settings-name" class="text-sm text-white/40 mt-0.5"></p>
                 </div>
                 <button id="close-channel-settings-btn" class="text-white/40 hover:text-white/80 transition p-1">
@@ -998,7 +998,11 @@
                         </button>
                         <button data-channel-tab="notifications" class="channel-settings-tab w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left transition-all text-white/60 hover:text-white/90 hover:bg-white/5">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
-                            <span>Push</span>
+                            <span>Notifications</span>
+                        </button>
+                        <button data-channel-tab="storage" class="channel-settings-tab w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left transition-all text-white/60 hover:text-white/90 hover:bg-white/5">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125"/></svg>
+                            <span>Storage</span>
                         </button>
                         <div id="danger-tab-divider" class="hidden my-2 mx-3 border-t border-white/5"></div>
                         <button id="danger-tab-btn" data-channel-tab="danger" class="hidden channel-settings-tab w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left transition-all text-white/60 hover:text-red-400 hover:bg-red-500/5">
@@ -1011,27 +1015,27 @@
                 <!-- Content Panels -->
                 <div class="flex-1 p-6 overflow-y-auto">
                     <!-- Info Panel -->
-                    <div id="channel-panel-info" class="channel-settings-panel hidden space-y-4">
-                        <div class="space-y-4">
+                    <div id="channel-panel-info" class="channel-settings-panel hidden space-y-5">
+                        <div class="space-y-5">
                             <div>
-                                <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Permissions Type</label>
-                                <div id="channel-settings-type" class="text-sm text-white font-medium"></div>
+                                <label class="block text-sm font-medium text-white/40 uppercase tracking-wider mb-2">Permissions Type</label>
+                                <div id="channel-settings-type" class="text-base text-white font-medium"></div>
                             </div>
                             <div>
-                                <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Channel ID</label>
-                                <div class="flex items-center gap-2">
-                                    <code id="channel-settings-id" class="flex-1 text-xs font-mono text-white/60 bg-white/5 px-3 py-2 rounded-lg break-all"></code>
-                                    <button id="copy-stream-id-btn" class="bg-white/5 hover:bg-white/10 border border-white/10 p-2 rounded-lg transition" title="Copy">
-                                        <svg class="w-4 h-4 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184"/></svg>
+                                <div class="flex items-center gap-2 mb-2">
+                                    <label class="text-sm font-medium text-white/40 uppercase tracking-wider">Channel ID</label>
+                                    <button id="copy-stream-id-btn" class="p-1 hover:bg-white/5 rounded transition" title="Copy">
+                                        <svg class="w-4 h-4 text-white/40 hover:text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
                                     </button>
                                 </div>
+                                <code id="channel-settings-id" class="block text-sm font-mono text-white/60 bg-white/5 px-3 py-2 rounded-lg break-all"></code>
                             </div>
                         </div>
                         
-                        <!-- Non-native message -->
-                        <div id="non-native-message" class="hidden mt-6 text-center py-6 text-white/40 bg-white/5 rounded-xl border border-white/5">
-                            <p class="text-sm">Member management is only available for</p>
-                            <p class="text-sm">channels using on-chain verified membership.</p>
+                        <!-- Non-native message / Channel Description -->
+                        <div id="non-native-message" class="hidden mt-6">
+                            <label class="block text-sm font-medium text-white/40 uppercase tracking-wider mb-2">Description</label>
+                            <div id="channel-description-display" class="text-base text-white/60 bg-white/5 px-3 py-3 rounded-lg"></div>
                         </div>
                     </div>
 
@@ -1041,20 +1045,20 @@
                             <!-- Current Members -->
                             <div>
                                 <div class="flex items-center justify-between mb-3">
-                                    <label class="text-xs font-medium text-white/40 uppercase tracking-wider">Current Members</label>
-                                    <button id="refresh-members-btn" class="text-xs text-white/60 hover:text-white transition">
+                                    <label class="text-sm font-medium text-white/40 uppercase tracking-wider">Current Members</label>
+                                    <button id="refresh-members-btn" class="text-sm text-white/60 hover:text-white transition">
                                         ↻ Refresh
                                     </button>
                                 </div>
                                 <div id="members-list" class="space-y-2 max-h-[200px] overflow-y-auto pr-1">
-                                    <div class="text-center text-white/30 py-4 text-sm">Loading...</div>
+                                    <div class="text-center text-white/30 py-4 text-base">Loading...</div>
                                 </div>
                             </div>
 
                             <!-- Add Members (Owner only) -->
                             <div id="add-member-form" class="hidden">
                                 <div class="border-t border-white/5 pt-5">
-                                    <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-3">Add Members</label>
+                                    <label class="block text-sm font-medium text-white/40 uppercase tracking-wider mb-3">Add Members</label>
                                     
                                     <!-- Single address input -->
                                     <div class="flex gap-2 mb-3">
@@ -1062,16 +1066,16 @@
                                             type="text"
                                             id="add-member-input"
                                             placeholder="0x... address"
-                                            class="flex-1 bg-white/5 border border-white/10 text-white px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:border-white/30 transition placeholder:text-white/20"
+                                            class="flex-1 bg-white/5 border border-white/10 text-white px-4 py-2.5 rounded-xl text-base focus:outline-none focus:border-white/30 transition placeholder:text-white/20"
                                         />
-                                        <button id="add-member-btn" class="bg-white/10 hover:bg-white/20 text-white border border-white/20 px-4 py-2.5 rounded-xl text-sm transition">
+                                        <button id="add-member-btn" class="bg-white/10 hover:bg-white/20 text-white border border-white/20 px-4 py-2.5 rounded-xl text-base transition">
                                             Add
                                         </button>
                                     </div>
 
                                     <!-- Batch add -->
                                     <details class="group">
-                                        <summary class="text-xs text-white/40 hover:text-white/60 cursor-pointer transition mb-2">
+                                        <summary class="text-sm text-white/40 hover:text-white/60 cursor-pointer transition mb-2">
                                             <span class="group-open:hidden">▸ Batch add multiple addresses</span>
                                             <span class="hidden group-open:inline">▾ Batch add multiple addresses</span>
                                         </summary>
@@ -1082,14 +1086,14 @@
                                                 rows="4"
                                                 class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-sm font-mono focus:outline-none focus:border-white/30 transition placeholder:text-white/20 resize-none"
                                             ></textarea>
-                                            <button id="batch-add-members-btn" class="w-full bg-white/10 hover:bg-white/20 text-white border border-white/20 px-4 py-2.5 rounded-xl text-sm transition">
+                                            <button id="batch-add-members-btn" class="w-full bg-white/10 hover:bg-white/20 text-white border border-white/20 px-4 py-2.5 rounded-xl text-base transition">
                                                 Add All Addresses
                                             </button>
                                         </div>
                                     </details>
 
-                                    <p class="text-xs text-amber-400/60 mt-3 flex items-center gap-1.5">
-                                        <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+                                    <p class="text-sm text-amber-400/60 mt-3 flex items-center gap-1.5">
+                                        <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
                                         <span>Adding members requires on-chain transactions (gas fees)</span>
                                     </p>
                                 </div>
@@ -1099,12 +1103,12 @@
                             <div id="permissions-section" class="hidden">
                                 <div class="border-t border-white/5 pt-5">
                                     <div class="flex items-center justify-between mb-3">
-                                        <label class="text-xs font-medium text-white/40 uppercase tracking-wider">Stream Permissions</label>
-                                        <button id="refresh-permissions-btn" class="text-xs text-white/60 hover:text-white transition">
+                                        <label class="text-sm font-medium text-white/40 uppercase tracking-wider">Stream Permissions</label>
+                                        <button id="refresh-permissions-btn" class="text-sm text-white/60 hover:text-white transition">
                                             ↻ Refresh
                                         </button>
                                     </div>
-                                    <div id="permissions-list" class="text-xs space-y-1 max-h-[120px] overflow-y-auto pr-1">
+                                    <div id="permissions-list" class="text-sm space-y-1 max-h-[120px] overflow-y-auto pr-1">
                                         <div class="text-white/30">Loading...</div>
                                     </div>
                                 </div>
@@ -1117,8 +1121,8 @@
                         <div class="space-y-5">
                             <div id="channel-notifications-container" class="flex items-start justify-between p-4 bg-white/5 rounded-xl border border-white/5 transition-opacity duration-200">
                                 <div class="flex-1 mr-4">
-                                    <h4 class="text-sm font-medium text-white/90 mb-1">Push Notifications</h4>
-                                    <p class="text-xs text-white/40 leading-relaxed">
+                                    <h4 class="text-base font-medium text-white/90 mb-1">Push Notifications</h4>
+                                    <p class="text-sm text-white/40 leading-relaxed">
                                         Get notified when new messages are posted in this channel
                                     </p>
                                 </div>
@@ -1129,16 +1133,45 @@
                                     </label>
                                     <!-- Tooltip for disabled state -->
                                     <div id="channel-notifications-tooltip" class="hidden absolute right-0 top-full mt-2 w-48 p-2 bg-[#1a1a1a] border border-white/10 rounded-lg shadow-lg z-10">
-                                        <p class="text-xs text-white/70">Enable Push Notifications in Settings first to use this feature.</p>
+                                        <p class="text-sm text-white/70">Enable Push Notifications in Settings first to use this feature.</p>
                                         <div class="absolute -top-1 right-3 w-2 h-2 bg-[#1a1a1a] border-l border-t border-white/10 transform rotate-45"></div>
                                     </div>
                                 </div>
                             </div>
-                            <div id="channel-notifications-status" class="text-xs text-white/40"></div>
-                            <p id="channel-notifications-requires-push" class="hidden text-xs text-amber-400/80 flex items-center gap-2">
-                                <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+                            <div id="channel-notifications-status" class="text-sm text-white/40"></div>
+                            <p id="channel-notifications-requires-push" class="hidden text-sm text-amber-400/80 flex items-center gap-2">
+                                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
                                 <span>Enable Push Notifications in Settings first</span>
                             </p>
+                        </div>
+                    </div>
+
+                    <!-- Storage Panel -->
+                    <div id="channel-panel-storage" class="channel-settings-panel hidden">
+                        <div class="space-y-5">
+                            <div>
+                                <label class="block text-sm font-medium text-white/40 uppercase tracking-wider mb-2">Storage Provider</label>
+                                <div id="channel-storage-provider" class="text-base text-white font-medium">-</div>
+                            </div>
+                            <div>
+                                <div class="flex items-center gap-2 mb-2">
+                                    <label class="text-sm font-medium text-white/40 uppercase tracking-wider">Storage Node</label>
+                                    <button id="copy-storage-node-btn" class="p-1 hover:bg-white/5 rounded transition" title="Copy address">
+                                        <svg class="w-4 h-4 text-white/40 hover:text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                                    </button>
+                                </div>
+                                <code id="channel-storage-node" class="inline-block text-sm text-white/70 font-mono bg-white/5 px-3 py-2 rounded-lg">-</code>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-white/40 uppercase tracking-wider mb-2">Retention Period</label>
+                                <div id="channel-storage-retention" class="text-base text-white font-medium">-</div>
+                            </div>
+                            <div id="channel-storage-no-storage" class="hidden p-4 bg-amber-500/5 rounded-xl border border-amber-500/10">
+                                <p class="text-sm text-amber-400/80 flex items-center gap-2">
+                                    <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+                                    <span>Storage is not enabled for this channel. Messages are not persisted.</span>
+                                </p>
+                            </div>
                         </div>
                     </div>
 
@@ -1146,14 +1179,14 @@
                     <div id="channel-panel-danger" class="channel-settings-panel hidden">
                         <div id="delete-channel-section" class="space-y-4">
                             <div class="p-4 bg-red-500/5 rounded-xl border border-red-500/10">
-                                <h4 class="text-sm font-medium text-white/90 mb-1 flex items-center gap-2">
+                                <h4 class="text-base font-medium text-white/90 mb-1 flex items-center gap-2">
                                     <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
                                     Delete Channel
                                 </h4>
-                                <p class="text-xs text-white/40 mb-4">
+                                <p class="text-sm text-white/40 mb-4">
                                     Permanently delete this channel from the Streamr network. This cannot be undone.
                                 </p>
-                                <button id="delete-channel-btn" class="w-full bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 px-4 py-2.5 rounded-xl text-sm transition">
+                                <button id="delete-channel-btn" class="w-full bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 px-4 py-2.5 rounded-xl text-base transition">
                                     Delete Channel Forever
                                 </button>
                             </div>
@@ -1334,51 +1367,51 @@
                     <div id="settings-panel-profile" class="settings-panel hidden">
                         <div class="space-y-6">
                             <div>
-                                <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Display Name</label>
+                                <label class="block text-sm font-medium text-white/40 uppercase tracking-wider mb-2">Display Name</label>
                                 <input
                                     type="text"
                                     id="settings-username"
                                     placeholder="Enter your name"
-                                    class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-white/30 transition placeholder:text-white/20"
+                                    class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-base focus:outline-none focus:border-white/30 transition placeholder:text-white/20"
                                 />
-                                <p class="text-xs text-white/30 mt-2">Visible to other users</p>
+                                <p class="text-sm text-white/30 mt-2">Visible to other users</p>
                             </div>
                             <div>
-                                <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Account Address</label>
+                                <label class="block text-sm font-medium text-white/40 uppercase tracking-wider mb-2">Account Address</label>
                                 <div class="flex gap-2">
                                     <input
                                         type="text"
                                         id="settings-address"
                                         readonly
-                                        class="flex-1 bg-white/5 border border-white/10 text-white/60 px-4 py-3 rounded-xl text-xs font-mono"
+                                        class="flex-1 bg-white/5 border border-white/10 text-white/60 px-4 py-3 rounded-xl text-sm font-mono"
                                     />
                                     <button id="copy-own-address-btn" class="bg-white/5 hover:bg-white/10 border border-white/10 px-4 rounded-xl transition flex items-center justify-center" title="Copy">
-                                        <svg class="w-4 h-4 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184"/></svg>
+                                        <svg class="w-4 h-4 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
                                     </button>
                                 </div>
                             </div>
                             <div>
-                                <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">POL Balance</label>
+                                <label class="block text-sm font-medium text-white/40 uppercase tracking-wider mb-2">POL Balance</label>
                                 <div class="bg-white/5 border border-white/10 px-4 py-3 rounded-xl">
                                     <div class="flex items-center justify-between">
-                                        <span id="settings-balance" class="text-white text-sm font-medium">Loading...</span>
+                                        <span id="settings-balance" class="text-white text-base font-medium">Loading...</span>
                                         <button id="refresh-balance-btn" class="text-white/40 hover:text-white/60 transition p-1" title="Refresh">
                                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
                                         </button>
                                     </div>
-                                    <p class="text-xs text-white/30 mt-1">On Polygon network</p>
+                                    <p class="text-sm text-white/30 mt-1">On Polygon network</p>
                                 </div>
                                 <button id="fund-metamask-btn" class="w-full mt-3 bg-[#F6851B]/10 hover:bg-[#F6851B]/20 text-[#F6851B] border border-[#F6851B]/30 px-4 py-2.5 rounded-xl text-sm transition flex items-center justify-center gap-2">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 12a2.25 2.25 0 00-2.25-2.25H15a3 3 0 11-6 0H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9m18 0V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v3"/></svg>
                                     Fund with MetaMask
                                 </button>
-                                <p class="text-xs text-white/30 mt-2 text-center">Send POL from your MetaMask wallet</p>
+                                <p class="text-sm text-white/30 mt-2 text-center">Send POL from your MetaMask wallet</p>
                             </div>
                             <div class="my-4 border-t border-white/5"></div>
                             <div class="flex items-start justify-between p-4 bg-white/5 rounded-xl border border-white/5">
                                 <div class="flex-1 mr-4">
-                                    <h4 class="text-sm font-medium text-white/90 mb-1">Show Sensitive Content</h4>
-                                    <p class="text-xs text-white/40 leading-relaxed">
+                                    <h4 class="text-base font-medium text-white/90 mb-1">Show Sensitive Content</h4>
+                                    <p class="text-sm text-white/40 leading-relaxed">
                                         Enable NSFW filter in channel exploration
                                     </p>
                                 </div>
@@ -1397,13 +1430,13 @@
                             <div class="flex items-start justify-between p-4 bg-white/5 rounded-xl border border-white/5">
                                 <div class="flex-1 mr-4">
                                     <div class="flex items-center gap-2 mb-1">
-                                        <h4 class="text-sm font-medium text-white/90">Push Notifications</h4>
+                                        <h4 class="text-base font-medium text-white/90">Push Notifications</h4>
                                         <button id="push-learn-more-btn" class="inline-flex items-center gap-1 text-xs text-white/40 hover:text-white/60 transition">
                                             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg>
                                             <span>Learn more</span>
                                         </button>
                                     </div>
-                                    <p class="text-xs text-white/40 leading-relaxed">
+                                    <p class="text-sm text-white/40 leading-relaxed">
                                         Get notified when new messages arrive (even when app is closed)
                                     </p>
                                 </div>
@@ -1419,8 +1452,8 @@
                             <!-- Channel Invites (On-chain) -->
                             <div class="flex items-start justify-between p-4 bg-white/5 rounded-xl border border-white/5">
                                 <div class="flex-1 mr-4">
-                                    <h4 class="text-sm font-medium text-white/90 mb-1">Channel Invites</h4>
-                                    <p class="text-xs text-white/40 leading-relaxed">
+                                    <h4 class="text-base font-medium text-white/90 mb-1">Channel Invites</h4>
+                                    <p class="text-sm text-white/40 leading-relaxed">
                                         Receive channel invites from other users
                                     </p>
                                 </div>
@@ -1441,14 +1474,14 @@
                     <div id="settings-panel-api" class="settings-panel hidden">
                         <div class="space-y-6">
                             <div>
-                                <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">The Graph API Key</label>
+                                <label class="block text-sm font-medium text-white/40 uppercase tracking-wider mb-2">The Graph API Key</label>
                                 <input
                                     type="password"
                                     id="settings-graph-api-key"
                                     placeholder="Optional - uses default if empty"
-                                    class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-white/30 transition placeholder:text-white/20"
+                                    class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-base focus:outline-none focus:border-white/30 transition placeholder:text-white/20"
                                 />
-                                <p class="text-xs text-white/30 mt-2">
+                                <p class="text-sm text-white/30 mt-2">
                                     Get yours at <a href="https://thegraph.com/studio/apikeys/" target="_blank" class="text-white/60 hover:text-white transition">thegraph.com/studio</a>
                                 </p>
                             </div>
@@ -1461,8 +1494,8 @@
                         <div class="space-y-6">
                             <div class="flex items-start justify-between p-4 bg-white/5 rounded-xl border border-white/5">
                                 <div class="flex-1 mr-4">
-                                    <h4 class="text-sm font-medium text-white/90 mb-1">YouTube Embeds</h4>
-                                    <p class="text-xs text-white/40 leading-relaxed">
+                                    <h4 class="text-base font-medium text-white/90 mb-1">YouTube Embeds</h4>
+                                    <p class="text-sm text-white/40 leading-relaxed">
                                         Show video player when YouTube links are shared
                                     </p>
                                 </div>
@@ -1479,11 +1512,11 @@
                         <div class="space-y-6">
                             <!-- Export Private Key -->
                             <div class="p-4 bg-red-500/5 rounded-xl border border-red-500/10">
-                                <h4 class="text-sm font-medium text-white/90 mb-1 flex items-center gap-2">
+                                <h4 class="text-base font-medium text-white/90 mb-1 flex items-center gap-2">
                                     <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
                                     Private Key
                                 </h4>
-                                <p class="text-xs text-white/40 mb-4">Anyone with this key has full control of your account</p>
+                                <p class="text-sm text-white/40 mb-4">Anyone with this key has full control of your account</p>
                                 
                                 <div id="export-key-step1" class="space-y-3">
                                     <input
@@ -1525,11 +1558,11 @@
 
                             <!-- Backup & Restore -->
                             <div>
-                                <h4 class="text-sm font-medium text-white/90 mb-1 flex items-center gap-2">
+                                <h4 class="text-base font-medium text-white/90 mb-1 flex items-center gap-2">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125"/></svg>
                                     Backup & Restore
                                 </h4>
-                                <p class="text-xs text-white/40 mb-4">Export data to restore on another device</p>
+                                <p class="text-sm text-white/40 mb-4">Export data to restore on another device</p>
                                 
                                 <div class="grid grid-cols-2 gap-3">
                                     <button id="export-all-data-btn" class="bg-white/10 hover:bg-white/20 text-white border border-white/20 px-4 py-3 rounded-xl text-sm transition flex items-center justify-center gap-2">
@@ -1542,7 +1575,7 @@
                                         Import
                                     </button>
                                 </div>
-                                <p class="text-xs text-white/30 mt-3">Passwords not included — you'll need them to unlock</p>
+                                <p class="text-sm text-white/30 mt-3">Passwords not included — you'll need them to unlock</p>
                             </div>
 
                             <!-- Divider -->
@@ -1550,11 +1583,11 @@
 
                             <!-- Delete Account -->
                             <div class="p-4 bg-red-500/5 rounded-xl border border-red-500/10">
-                                <h4 class="text-sm font-medium text-white/90 mb-1 flex items-center gap-2">
+                                <h4 class="text-base font-medium text-white/90 mb-1 flex items-center gap-2">
                                     <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
                                     Delete Account
                                 </h4>
-                                <p class="text-xs text-white/40 mb-4">Permanently delete this account and all its data</p>
+                                <p class="text-sm text-white/40 mb-4">Permanently delete this account and all its data</p>
                                 
                                 <div id="delete-account-step1" class="space-y-3">
                                     <input
@@ -1590,7 +1623,7 @@
                     <div id="settings-panel-about" class="settings-panel hidden">
                         <div class="space-y-6">
                             <div>
-                                <h4 class="text-sm font-medium text-white/90 mb-3 flex items-center gap-2">
+                                <h4 class="text-base font-medium text-white/90 mb-3 flex items-center gap-2">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z"/></svg>
                                     Disclaimer
                                 </h4>

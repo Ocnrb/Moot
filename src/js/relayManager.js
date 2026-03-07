@@ -6,6 +6,7 @@
 
 import { Logger } from './logger.js';
 import { streamrController } from './streamr.js';
+import { channelManager } from './channels.js';
 import { 
     calculateChannelTag,
     calculateNativeChannelTag,
@@ -343,6 +344,9 @@ class RelayManager {
                 this.subscribedNativeChannels = new Set(nativeChannels);
                 Logger.debug('Native channels with notifications:', this.subscribedNativeChannels.size);
             }
+            
+            // Sync to Service Worker (delayed to ensure SW is ready)
+            setTimeout(() => this.syncWithServiceWorker(), 1000);
         } catch (e) {
             Logger.warn('Error loading subscribed channels:', e);
         }
@@ -360,9 +364,81 @@ class RelayManager {
             // Save native channels
             const nativeChannels = Array.from(this.subscribedNativeChannels);
             localStorage.setItem(CONFIG.storageKey + '_native_channels', JSON.stringify(nativeChannels));
+            
+            // Sync to Service Worker for push verification
+            this.syncWithServiceWorker();
         } catch (e) {
             Logger.warn('Error saving subscribed channels:', e);
         }
+    }
+    
+    /**
+     * Sync monitored channels to Service Worker for push verification.
+     * SW uses this to verify push notifications via HTTP.
+     */
+    syncWithServiceWorker() {
+        if (!navigator.serviceWorker?.controller) {
+            Logger.debug('No Service Worker controller - skipping sync');
+            return;
+        }
+        
+        const channels = [];
+        
+        // Default storage endpoints (March 2026)
+        const DEFAULT_STORAGE_ENDPOINTS = [
+            'https://storage-cluster-1.streamr.network:8002',
+            'https://storage-cluster-2.streamr.network:8002',
+            'https://storage-cluster-3.streamr.network:8002',
+            'https://storage-cluster-4.streamr.network:8002',
+            'https://storage-cluster-5.streamr.network:8002',
+            'https://storage-cluster-6.streamr.network:8002',
+        ];
+        
+        // Public/password channels
+        for (const streamId of this.subscribedChannels) {
+            const channelInfo = channelManager.channels.get(streamId);
+            const channelTag = calculateChannelTag(streamId);
+            
+            channels.push({
+                streamId,
+                type: channelInfo?.isPrivate ? 'private' : 'public',
+                name: channelInfo?.name || 'Channel',
+                tag: channelTag,
+                storageEndpoints: channelInfo?.storageEndpoints || DEFAULT_STORAGE_ENDPOINTS
+            });
+        }
+        
+        // Native channels (DMs)
+        for (const streamId of this.subscribedNativeChannels) {
+            const channelInfo = channelManager.channels.get(streamId);
+            const channelTag = calculateNativeChannelTag(streamId);
+            
+            // For DMs, try to get the other participant's name
+            let name = 'Direct Message';
+            if (channelInfo?.participants) {
+                const otherParticipant = channelInfo.participants.find(
+                    p => p.address?.toLowerCase() !== this.walletAddress?.toLowerCase()
+                );
+                if (otherParticipant?.nickname) {
+                    name = otherParticipant.nickname;
+                }
+            }
+            
+            channels.push({
+                streamId,
+                type: 'native',
+                name,
+                tag: channelTag,
+                storageEndpoints: channelInfo?.storageEndpoints || DEFAULT_STORAGE_ENDPOINTS
+            });
+        }
+        
+        navigator.serviceWorker.controller.postMessage({
+            type: 'SYNC_CHANNELS',
+            channels
+        });
+        
+        Logger.debug('Synced', channels.length, 'channels to Service Worker');
     }
     
     /**
@@ -588,11 +664,15 @@ class RelayManager {
         if (!data || !data.type) return;
         
         switch (data.type) {
-            case 'PUSH_RECEIVED':
-                Logger.debug('Push received (app focused)');
-                // Dispatch event to the app
-                window.dispatchEvent(new CustomEvent('pombo-push-received', {
-                    detail: { timestamp: data.timestamp }
+            case 'NEW_MESSAGE':
+                // New verified message from SW
+                Logger.debug('New verified message:', data.streamId?.slice(0, 20));
+                window.dispatchEvent(new CustomEvent('pombo-new-message', {
+                    detail: {
+                        streamId: data.streamId,
+                        timestamp: data.timestamp,
+                        content: data.content
+                    }
                 }));
                 break;
                 

@@ -1,10 +1,289 @@
-// sw.js - Service Worker for Push Notifications
+// sw.js - Service Worker for Push Notifications with Client Verification
 // ================================================
 // This file MUST be at the root of the site
 // to have scope over all pages.
 // ================================================
 
-const SW_VERSION = '1.0.0';
+const SW_VERSION = '2.0.0';
+
+// ================================================
+// INDEXEDDB CONFIGURATION
+// ================================================
+
+const DB_NAME = 'pombo-sw';
+const DB_VERSION = 1;
+const STORES = {
+    CHANNELS: 'channels',
+    LAST_SEEN: 'lastSeen',
+    CONFIG: 'config'
+};
+
+let db = null;
+
+// Default storage endpoints (March 2026)
+const DEFAULT_STORAGE_ENDPOINTS = [
+    'https://storage-cluster-1.streamr.network:8002',
+    'https://storage-cluster-2.streamr.network:8002',
+    'https://storage-cluster-3.streamr.network:8002',
+    'https://storage-cluster-4.streamr.network:8002',
+    'https://storage-cluster-5.streamr.network:8002',
+    'https://storage-cluster-6.streamr.network:8002',
+];
+
+const API_PATH = '/streams/{streamId}/data/partitions/{partition}/last?count=1';
+
+// ================================================
+// INDEXEDDB FUNCTIONS
+// ================================================
+
+async function openDatabase() {
+    if (db) return db;
+    
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        
+        request.onerror = () => {
+            console.error('[SW] IndexedDB error:', request.error);
+            reject(request.error);
+        };
+        
+        request.onsuccess = () => {
+            db = request.result;
+            console.log('[SW] IndexedDB opened');
+            resolve(db);
+        };
+        
+        request.onupgradeneeded = (event) => {
+            const database = event.target.result;
+            
+            // Channels store with index on tag
+            if (!database.objectStoreNames.contains(STORES.CHANNELS)) {
+                const channelsStore = database.createObjectStore(STORES.CHANNELS, { keyPath: 'streamId' });
+                channelsStore.createIndex('tag', 'tag', { unique: true });
+                console.log('[SW] Created channels store with tag index');
+            }
+            
+            // LastSeen store
+            if (!database.objectStoreNames.contains(STORES.LAST_SEEN)) {
+                database.createObjectStore(STORES.LAST_SEEN, { keyPath: 'streamId' });
+                console.log('[SW] Created lastSeen store');
+            }
+            
+            // Config store
+            if (!database.objectStoreNames.contains(STORES.CONFIG)) {
+                database.createObjectStore(STORES.CONFIG, { keyPath: 'key' });
+                console.log('[SW] Created config store');
+            }
+        };
+    });
+}
+
+async function getChannelByTag(tag) {
+    if (!db) await openDatabase();
+    
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction([STORES.CHANNELS, STORES.LAST_SEEN], 'readonly');
+        const channelsStore = tx.objectStore(STORES.CHANNELS);
+        const lastSeenStore = tx.objectStore(STORES.LAST_SEEN);
+        
+        const tagIndex = channelsStore.index('tag');
+        const request = tagIndex.get(tag);
+        
+        request.onsuccess = () => {
+            const channel = request.result;
+            if (!channel) {
+                resolve(null);
+                return;
+            }
+            
+            // Get last seen timestamp
+            const lastSeenReq = lastSeenStore.get(channel.streamId);
+            lastSeenReq.onsuccess = () => {
+                resolve({
+                    ...channel,
+                    lastTimestamp: lastSeenReq.result?.timestamp || 0
+                });
+            };
+            lastSeenReq.onerror = () => {
+                resolve({
+                    ...channel,
+                    lastTimestamp: 0
+                });
+            };
+        };
+        
+        request.onerror = () => reject(request.error);
+    });
+}
+
+async function updateLastSeen(streamId, timestamp) {
+    if (!db) await openDatabase();
+    
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORES.LAST_SEEN, 'readwrite');
+        const store = tx.objectStore(STORES.LAST_SEEN);
+        
+        store.put({
+            streamId,
+            timestamp,
+            updatedAt: Date.now()
+        });
+        
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+async function syncChannelsToIndexedDB(channels) {
+    if (!db) await openDatabase();
+    
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORES.CHANNELS, 'readwrite');
+        const store = tx.objectStore(STORES.CHANNELS);
+        
+        // Clear old channels
+        const clearReq = store.clear();
+        
+        clearReq.onsuccess = () => {
+            // Add new channels
+            for (const channel of channels) {
+                store.put({
+                    streamId: channel.streamId,
+                    type: channel.type,
+                    name: channel.name || 'Channel',
+                    tag: channel.tag,
+                    storageEndpoints: channel.storageEndpoints || [],
+                    lastChecked: Date.now()
+                });
+            }
+        };
+        
+        tx.oncomplete = () => {
+            console.log('[SW] Synced', channels.length, 'channels to IndexedDB');
+            resolve();
+        };
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+// ================================================
+// HTTP VERIFICATION FUNCTIONS
+// ================================================
+
+function buildUrl(endpoint, streamId, partition = 0) {
+    const encoded = encodeURIComponent(streamId);
+    return endpoint + API_PATH
+        .replace('{streamId}', encoded)
+        .replace('{partition}', partition);
+}
+
+async function fetchWithTimeout(url, timeout = 5000) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+            return { success: false, error: `HTTP ${response.status}` };
+        }
+        
+        const data = await response.json();
+        
+        if (!data || data.length === 0) {
+            return { success: true, timestamp: 0 };
+        }
+        
+        const msg = data[0];
+        return {
+            success: true,
+            timestamp: msg.timestamp,
+            content: msg.content,
+            publisherId: msg.publisherId
+        };
+        
+    } catch (error) {
+        clearTimeout(timeoutId);
+        throw error;
+    }
+}
+
+async function verifyChannel(channel) {
+    const { streamId, lastTimestamp, storageEndpoints } = channel;
+    
+    const endpoints = storageEndpoints?.length > 0 
+        ? storageEndpoints 
+        : DEFAULT_STORAGE_ENDPOINTS;
+    
+    // Try each endpoint until one responds
+    for (const endpoint of endpoints) {
+        try {
+            const url = buildUrl(endpoint, streamId, 0);
+            const result = await fetchWithTimeout(url, 5000);
+            
+            if (result.success) {
+                const hasNew = result.timestamp > lastTimestamp;
+                return {
+                    hasNew,
+                    timestamp: result.timestamp,
+                    content: hasNew ? result.content : null,
+                    publisherId: hasNew ? result.publisherId : null
+                };
+            }
+        } catch (error) {
+            console.warn(`[SW] Endpoint ${endpoint} failed:`, error.message);
+        }
+    }
+    
+    console.warn('[SW] All storage endpoints failed for', streamId);
+    return { hasNew: false, error: 'All endpoints failed' };
+}
+
+// ================================================
+// MESSAGE PREVIEW FOR NOTIFICATIONS
+// ================================================
+
+function getMessagePreview(channel) {
+    const { type, content } = channel;
+    
+    // Private/native channels - content is encrypted
+    if (type === 'private' || type === 'native') {
+        return type === 'native' 
+            ? 'New direct message' 
+            : 'New encrypted message';
+    }
+    
+    // Public channels - show content
+    if (!content) {
+        return 'New message';
+    }
+    
+    switch (content.type) {
+        case 'text':
+            const text = content.text || '';
+            return text.length > 100 ? text.substring(0, 100) + '...' : text;
+        case 'image':
+            return '📷 Image';
+        case 'file':
+            return `📎 ${content.fileName || 'File'}`;
+        case 'audio':
+            return '🎵 Audio message';
+        case 'video':
+            return '🎬 Video';
+        case 'gif':
+            return '🎞️ GIF';
+        case 'reaction':
+            return `Reacted with ${content.emoji || '👍'}`;
+        default:
+            return 'New message';
+    }
+}
 
 // ================================================
 // INSTALLATION
@@ -12,25 +291,28 @@ const SW_VERSION = '1.0.0';
 
 self.addEventListener('install', (event) => {
     console.log('[SW] Installed v' + SW_VERSION);
-    // skipWaiting allows immediate activation after installation
     self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
     console.log('[SW] Activated');
-    // clients.claim() takes control of all open pages
-    event.waitUntil(self.clients.claim());
+    event.waitUntil(
+        (async () => {
+            await openDatabase();
+            await self.clients.claim();
+            console.log('[SW] Ready for push verification');
+        })()
+    );
 });
 
 // ================================================
-// PUSH NOTIFICATION
+// PUSH NOTIFICATION WITH VERIFICATION
 // ================================================
 
 self.addEventListener('push', (event) => {
     console.log('[SW] Push received');
     
     let data = {};
-    
     try {
         if (event.data) {
             data = event.data.json();
@@ -39,64 +321,120 @@ self.addEventListener('push', (event) => {
         console.warn('[SW] Push data is not JSON:', e);
     }
     
-    // Relay sends { type: 'wake', channelType: 'private'|'public', timestamp: ... }
-    // channelType indicates if it's a private or public channel (without revealing which one)
-    
-    // Message based on channel type
-    let body = 'You have new messages';
-    if (data.channelType === 'private') {
-        body = 'New message in private channel';
-    } else if (data.channelType === 'public') {
-        body = 'New message in public channel';
+    event.waitUntil(handlePushWithVerification(data));
+});
+
+async function handlePushWithVerification(pushData) {
+    try {
+        if (!db) {
+            await openDatabase();
+        }
+        
+        const { tag } = pushData;
+        
+        // If no tag, can't verify - ignore (K-anonymity noise)
+        if (!tag) {
+            console.log('[SW] Push without tag - ignoring (K-anonymity noise)');
+            return;
+        }
+        
+        // Find channel by tag
+        const channel = await getChannelByTag(tag);
+        
+        if (!channel) {
+            console.log('[SW] Channel not found for tag - ignoring (not subscribed)');
+            return;
+        }
+        
+        // Verify this channel via HTTP
+        console.log('[SW] Verifying channel:', channel.name || channel.streamId);
+        const result = await verifyChannel(channel);
+        
+        if (!result.hasNew) {
+            console.log('[SW] No new messages - false positive');
+            return;
+        }
+        
+        // Update lastSeen
+        await updateLastSeen(channel.streamId, result.timestamp);
+        
+        // Show notification with real data
+        await showVerifiedNotification({
+            ...channel,
+            newTimestamp: result.timestamp,
+            content: result.content,
+            publisherId: result.publisherId
+        });
+        
+    } catch (error) {
+        console.error('[SW] Verification error:', error);
+        // Fallback: show generic notification
+        await showFallbackNotification(pushData);
     }
+}
+
+async function showVerifiedNotification(channelWithNews) {
+    const title = channelWithNews.name || 'Pombo';
+    const body = getMessagePreview(channelWithNews);
     
     const options = {
         body: body,
         icon: '/favicon/web-app-manifest-192x192.png',
         badge: '/favicon/favicon-96x96.png',
-        tag: 'pombo-' + (data.timestamp || Date.now()), // Unique tag per notification
-        renotify: true, // Vibrate even if one with this tag already exists
-        requireInteraction: false, // Does not require user interaction
+        tag: 'pombo-' + Date.now(),
+        renotify: true,
+        requireInteraction: false,
         silent: false,
         vibrate: [200, 100, 200],
         data: {
-            url: self.registration.scope,
-            timestamp: data.timestamp || Date.now(),
-            channelType: data.channelType
+            url: '/',
+            channelStreamId: channelWithNews.streamId,
+            timestamp: channelWithNews.newTimestamp
         },
         actions: [
-            {
-                action: 'open',
-                title: 'Open'
-            },
-            {
-                action: 'dismiss',
-                title: 'Dismiss'
-            }
+            { action: 'open', title: 'Open' },
+            { action: 'dismiss', title: 'Dismiss' }
         ]
     };
     
-    event.waitUntil(
-        // First, check if we already have an open window
-        self.clients.matchAll({ type: 'window', includeUncontrolled: true })
-            .then((clients) => {
-                // If there's a focused window, don't show notification
-                const focusedClient = clients.find(c => c.focused);
-                if (focusedClient) {
-                    console.log('[SW] App already focused, skipping visual notification');
-                    // But still notify the app
-                    focusedClient.postMessage({
-                        type: 'PUSH_RECEIVED',
-                        timestamp: data.timestamp
-                    });
-                    return;
-                }
-                
-                // Show notification
-                return self.registration.showNotification('Pombo', options);
-            })
-    );
-});
+    // Check if app is focused
+    const clients = await self.clients.matchAll({ 
+        type: 'window', 
+        includeUncontrolled: true 
+    });
+    
+    const focusedClient = clients.find(c => c.focused);
+    if (focusedClient) {
+        console.log('[SW] App already focused - notifying via postMessage');
+        focusedClient.postMessage({
+            type: 'NEW_MESSAGE',
+            streamId: channelWithNews.streamId,
+            timestamp: channelWithNews.newTimestamp,
+            content: channelWithNews.content
+        });
+        return;
+    }
+    
+    return self.registration.showNotification(title, options);
+}
+
+async function showFallbackNotification(pushData) {
+    const options = {
+        body: pushData.channelType === 'private' 
+            ? 'New message in private channel' 
+            : 'You may have new messages',
+        icon: '/favicon/web-app-manifest-192x192.png',
+        badge: '/favicon/favicon-96x96.png',
+        tag: 'pombo-fallback-' + Date.now(),
+        renotify: true,
+        vibrate: [200, 100, 200],
+        data: {
+            url: '/'
+        }
+    };
+    
+    return self.registration.showNotification('Pombo', options);
+}
 
 // ================================================
 // NOTIFICATION CLICK
@@ -144,10 +482,27 @@ self.addEventListener('notificationclose', (event) => {
 // CLIENT MESSAGES
 // ================================================
 
-self.addEventListener('message', (event) => {
-    console.log('[SW] Message received:', event.data);
+self.addEventListener('message', async (event) => {
+    const { type } = event.data || {};
     
-    if (event.data?.type === 'SKIP_WAITING') {
-        self.skipWaiting();
+    // Sync channels from app
+    if (type === 'SYNC_CHANNELS') {
+        console.log('[SW] Syncing channels:', event.data.channels?.length || 0);
+        await syncChannelsToIndexedDB(event.data.channels || []);
+        return;
     }
+    
+    // Update last seen timestamp
+    if (type === 'UPDATE_LAST_SEEN') {
+        await updateLastSeen(event.data.streamId, event.data.timestamp);
+        return;
+    }
+    
+    // Force update
+    if (type === 'SKIP_WAITING') {
+        self.skipWaiting();
+        return;
+    }
+    
+    console.log('[SW] Unknown message type:', type);
 });

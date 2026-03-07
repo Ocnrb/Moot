@@ -279,7 +279,7 @@ class ContactsUI {
 
         switch (action) {
             case 'add-contact':
-                showAddContactModal(address);
+                this.showAddModal(address);
                 break;
                 
             case 'copy-address':
@@ -292,8 +292,84 @@ class ContactsUI {
                 break;
                 
             case 'remove-contact':
-                showRemoveContactModal(address);
+                this.showRemoveModal(address);
                 break;
+        }
+    }
+
+    // ========================================
+    // Add/Remove Contact Modal Methods
+    // ========================================
+
+    /**
+     * Show add contact modal
+     * @param {string} address - Contact address to add
+     */
+    showAddModal(address) {
+        modalManager.showAddContactModal(address);
+        this._pendingContactAddress = address;
+    }
+
+    /**
+     * Hide add contact modal
+     */
+    hideAddModal() {
+        modalManager.hideAddContactModal();
+        this._pendingContactAddress = null;
+    }
+
+    /**
+     * Confirm adding contact from modal
+     */
+    async confirmAdd() {
+        const { identityManager, showNotification } = this.deps;
+        const nicknameInput = document.getElementById('add-contact-modal-nickname');
+        const nickname = nicknameInput?.value?.trim() || null;
+        const address = this._pendingContactAddress || modalManager.getPendingData('contactAddress');
+        
+        if (!address) return;
+        
+        await identityManager.addTrustedContact(address, nickname);
+        showNotification('Contact added!', 'success');
+        this.hideAddModal();
+    }
+
+    /**
+     * Show remove contact confirmation modal
+     * @param {string} address - Contact address to remove
+     * @param {Function} onRemoveCallback - Optional callback after removal
+     */
+    showRemoveModal(address, onRemoveCallback = null) {
+        modalManager.showRemoveContactModal(address, onRemoveCallback);
+        this._pendingRemoveContactAddress = address;
+        this._onRemoveContactCallback = onRemoveCallback;
+    }
+
+    /**
+     * Hide remove contact modal
+     */
+    hideRemoveModal() {
+        modalManager.hideRemoveContactModal();
+        this._pendingRemoveContactAddress = null;
+        this._onRemoveContactCallback = null;
+    }
+
+    /**
+     * Confirm removing contact from modal
+     */
+    async confirmRemove() {
+        const { identityManager, showNotification } = this.deps;
+        const address = this._pendingRemoveContactAddress;
+        const callback = this._onRemoveContactCallback;
+        
+        if (!address) return;
+        
+        await identityManager.removeTrustedContact(address);
+        showNotification('Contact removed', 'info');
+        this.hideRemoveModal();
+        
+        if (callback) {
+            callback();
         }
     }
 }

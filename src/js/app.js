@@ -16,6 +16,10 @@ import { relayManager } from './relayManager.js';
 import { Logger } from './logger.js';
 import { getAvatar } from './ui/AvatarGenerator.js';
 import { escapeHtml, escapeAttr } from './ui/utils.js';
+import { headerUI } from './ui/HeaderUI.js';
+import { chatAreaUI } from './ui/ChatAreaUI.js';
+import { reactionManager } from './ui/ReactionManager.js';
+import { mediaHandler } from './ui/MediaHandler.js';
 import { sanitizeText } from './ui/sanitizer.js';
 
 class App {
@@ -51,7 +55,7 @@ class App {
             // Check for invite link in URL
             this.checkInviteLink();
 
-            uiController.updateNetworkStatus('Ready to connect', false);
+            headerUI.updateNetworkStatus('Ready to connect', false);
 
             this.initialized = true;
             Logger.info('Pombo - Ready!');
@@ -160,8 +164,8 @@ class App {
             authManager.disconnect();
             
             // 8. Update UI to disconnected state
-            uiController.updateWalletInfo(null);
-            uiController.updateNetworkStatus('Disconnected', false);
+            headerUI.updateWalletInfo(null);
+            headerUI.updateNetworkStatus('Disconnected', false);
             uiController.renderChannelList(); // Clear channel list
             uiController.resetToDisconnectedState(); // Reset all UI state
             
@@ -175,8 +179,8 @@ class App {
         } catch (error) {
             Logger.error('Error disconnecting:', error);
             // Even on error, try to reset UI
-            uiController.updateWalletInfo(null);
-            uiController.updateNetworkStatus('Disconnected', false);
+            headerUI.updateWalletInfo(null);
+            headerUI.updateNetworkStatus('Disconnected', false);
             uiController.resetToDisconnectedState();
             uiController.showNotification('Error disconnecting: ' + error.message, 'error');
         }
@@ -188,7 +192,7 @@ class App {
      */
     async connectAsGuest() {
         try {
-            uiController.updateNetworkStatus('Connecting as Guest...', false);
+            headerUI.updateNetworkStatus('Connecting as Guest...', false);
             
             // Generate ephemeral wallet
             const { address, signer } = authManager.connectAsGuest();
@@ -201,7 +205,7 @@ class App {
             Logger.info('Connected as Guest - ready to explore!');
         } catch (error) {
             Logger.error('Failed to connect as Guest:', error);
-            uiController.updateNetworkStatus('Failed to connect', false);
+            headerUI.updateNetworkStatus('Failed to connect', false);
             uiController.showNotification('Failed to connect: ' + error.message, 'error');
         }
     }
@@ -273,7 +277,7 @@ class App {
                             <div class="flex items-center gap-3">
                                 <div class="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0">${getAvatar(wallet.address, 40, 0.2)}</div>
                                 <div class="flex-1 min-w-0">
-                                    <div class="text-[13px] font-medium text-white truncate">${uiController.escapeAttr(getDisplayName(wallet, 0))}</div>
+                                    <div class="text-[13px] font-medium text-white truncate">${escapeAttr(getDisplayName(wallet, 0))}</div>
                                     <div class="text-[11px] text-[#888] font-mono">${wallet.address.slice(0, 6)}...${wallet.address.slice(-4)}</div>
                                 </div>
                             </div>
@@ -284,11 +288,11 @@ class App {
                     <div class="px-5 pb-4">
                         <div class="space-y-2 max-h-40 overflow-y-auto scrollbar-thin">
                             ${wallets.map((w, i) => `
-                                <button class="wallet-item w-full bg-[#1a1a1a] hover:bg-[#202020] rounded-lg p-3 border border-[#282828] hover:border-[#444] transition-all text-left ${i === 0 ? 'selected border-[#444]' : ''}" data-address="${uiController.escapeAttr(w.address)}" data-name="${uiController.escapeAttr(w.name)}">
+                                <button class="wallet-item w-full bg-[#1a1a1a] hover:bg-[#202020] rounded-lg p-3 border border-[#282828] hover:border-[#444] transition-all text-left ${i === 0 ? 'selected border-[#444]' : ''}" data-address="${escapeAttr(w.address)}" data-name="${escapeAttr(w.name)}">
                                     <div class="flex items-center gap-3">
                                         <div class="w-9 h-9 rounded-lg overflow-hidden flex-shrink-0">${getAvatar(w.address, 36, 0.2)}</div>
                                         <div class="flex-1 min-w-0">
-                                            <div class="text-[13px] font-medium text-white truncate">${uiController.escapeAttr(getDisplayName(w, i))}</div>
+                                            <div class="text-[13px] font-medium text-white truncate">${escapeAttr(getDisplayName(w, i))}</div>
                                             <div class="text-[11px] text-[#888] font-mono">${w.address.slice(0, 6)}...${w.address.slice(-4)}</div>
                                         </div>
                                         <div class="w-4 h-4 rounded-full border border-[#444] group-[.selected]:bg-white flex items-center justify-center">
@@ -1666,11 +1670,11 @@ class App {
                     <div class="px-5 pb-5">
                         <div class="space-y-2 max-h-60 overflow-y-auto scrollbar-thin">
                             ${wallets.map((w, i) => `
-                                <button class="account-option w-full bg-[#1a1a1a] hover:bg-[#202020] rounded-lg p-3 border border-[#282828] hover:border-[#444] transition-all text-left" data-address="${uiController.escapeAttr(w.address)}">
+                                <button class="account-option w-full bg-[#1a1a1a] hover:bg-[#202020] rounded-lg p-3 border border-[#282828] hover:border-[#444] transition-all text-left" data-address="${escapeAttr(w.address)}">
                                     <div class="flex items-center gap-3">
                                         <div class="w-9 h-9 rounded-lg overflow-hidden flex-shrink-0">${getAvatar(w.address, 36, 0.2)}</div>
                                         <div class="flex-1 min-w-0">
-                                            <div class="text-[13px] font-medium text-white truncate">${uiController.escapeAttr(getDisplayName(w, i))}</div>
+                                            <div class="text-[13px] font-medium text-white truncate">${escapeAttr(getDisplayName(w, i))}</div>
                                             <div class="text-[11px] text-[#888] font-mono">${w.address.slice(0, 6)}...${w.address.slice(-4)}</div>
                                         </div>
                                     </div>
@@ -1774,12 +1778,12 @@ class App {
             const isGuest = authManager.isGuestMode();
             
             // Update UI
-            uiController.updateWalletInfo(address, isGuest);
-            uiController.updateNetworkStatus('Connecting to Streamr...', false);
+            headerUI.updateWalletInfo(address, isGuest);
+            headerUI.updateNetworkStatus('Connecting to Streamr...', false);
 
             // Show/hide switch wallet button based on saved wallets count
             const savedWallets = authManager.listSavedWallets();
-            uiController.updateSwitchWalletButton(savedWallets.length > 1);
+            headerUI.updateSwitchWalletButton(savedWallets.length > 1);
 
             // Initialize secure storage (Guest uses memory-only mode)
             if (isGuest) {
@@ -1805,7 +1809,7 @@ class App {
             const streamrAddress = await streamrController.getAddress();
             Logger.info('Streamr connected with address:', streamrAddress);
 
-            uiController.updateNetworkStatus('Connected to Streamr', true);
+            headerUI.updateNetworkStatus('Connected to Streamr', true);
 
             // Initialize identity manager for signature verification and ENS
             try {
@@ -1858,7 +1862,7 @@ class App {
             Logger.info('Wallet connected and Streamr initialized');
         } catch (error) {
             Logger.error('Failed to initialize after wallet connection:', error);
-            uiController.updateNetworkStatus('Failed to connect to Streamr', false);
+            headerUI.updateNetworkStatus('Failed to connect to Streamr', false);
             throw error;
         }
     }
@@ -1884,11 +1888,20 @@ class App {
             
             if (event === 'message') {
                 // Update unread count in sidebar for any channel
-                uiController.updateUnreadCount(data.streamId);
+                chatAreaUI.updateUnreadCount(data.streamId);
                 
                 // Only show message if it's from the current channel
                 if (data.streamId === currentStreamId) {
-                    uiController.addMessage(data.message);
+                    chatAreaUI.addMessage(data.message, () => {
+                        reactionManager.attachReactionListeners(
+                            (msgId) => {
+                                chatAreaUI.startReply(msgId);
+                            },
+                            (fileId) => uiController.handleFileDownload(fileId),
+                            (msgId) => chatAreaUI.scrollToMessage(msgId)
+                        );
+                        mediaHandler.attachLightboxListeners();
+                    });
                 }
             } else if (event === 'typing') {
                 // Only show typing if it's from the current channel
@@ -1918,7 +1931,7 @@ class App {
                 }
                 
                 // Update UI with typing users for current channel only
-                uiController.showTypingIndicator(Array.from(channelTyping.keys()));
+                chatAreaUI.showTypingIndicator(Array.from(channelTyping.keys()));
                 
                 // Set timeout to hide indicator
                 setTimeout(() => {
@@ -1926,14 +1939,14 @@ class App {
                     // Only update UI if still on same channel
                     const stillCurrentChannel = channelManager.getCurrentChannel();
                     if (stillCurrentChannel?.streamId === data.streamId) {
-                        uiController.showTypingIndicator(Array.from(channelTyping.keys()));
+                        chatAreaUI.showTypingIndicator(Array.from(channelTyping.keys()));
                     }
                 }, 3000);
                 
             } else if (event === 'reaction') {
                 // Only show reaction if it's from the current channel
                 if (data.streamId === currentStreamId) {
-                    uiController.handleIncomingReaction(data.messageId, data.emoji, data.user, data.action || 'add');
+                    reactionManager.handleIncomingReaction(data.messageId, data.emoji, data.user, data.action || 'add');
                 }
             } else if (event === 'media') {
                 // Handle media messages (images, file chunks, etc.)
@@ -1965,7 +1978,16 @@ class App {
                 if (data.streamId === currentStreamId) {
                     const channel = channelManager.getCurrentChannel();
                     if (channel) {
-                        uiController.renderMessages(channel.messages);
+                        chatAreaUI.renderMessages(channel.messages, () => {
+                            reactionManager.attachReactionListeners(
+                                (msgId) => {
+                                    chatAreaUI.startReply(msgId);
+                                },
+                                (fileId) => uiController.handleFileDownload(fileId),
+                                (msgId) => chatAreaUI.scrollToMessage(msgId)
+                            );
+                            mediaHandler.attachLightboxListeners();
+                        });
                         Logger.debug(`History batch loaded: ${data.loaded}/${data.total} messages`);
                     }
                 }

@@ -8,13 +8,14 @@ import { modalManager } from './ModalManager.js';
 import { escapeHtml, escapeAttr } from './utils.js';
 import { sanitizeText } from './sanitizer.js';
 import { relayManager } from '../relayManager.js';
+import { graphAPI } from '../graph.js';
 
 class ChannelSettingsUI {
     constructor() {
         this.deps = null;
         this.elements = null;
         // Carousel tab order for mobile swipe navigation
-        this.channelTabOrder = ['info', 'members', 'notifications', 'danger'];
+        this.channelTabOrder = ['info', 'members', 'notifications', 'storage', 'danger'];
         this.currentChannelTabIndex = 0;
         this.showDangerTab = false;
         this.showMembersTab = true; // Only for native channels
@@ -40,11 +41,15 @@ class ChannelSettingsUI {
     async show() {
         const { channelManager, streamrController, authManager } = this.deps;
         
-        const currentChannel = channelManager.getCurrentChannel();
+        // Use getActiveChannel to support both regular and preview mode
+        const currentChannel = this.deps.getActiveChannel?.() || channelManager.getCurrentChannel();
         if (!currentChannel) {
             this.deps.showNotification('No channel selected', 'error');
             return;
         }
+
+        // Check if in preview mode
+        const isPreviewMode = this.deps.isInPreviewMode?.() || false;
 
         // Update channel info
         this.elements.channelSettingsName.textContent = currentChannel.name;
@@ -54,28 +59,68 @@ class ChannelSettingsUI {
         // Determine channel type
         const isNative = currentChannel.type === 'native';
         
-        // Use cached DELETE permission if valid for current wallet, else fetch fresh
-        const cached = channelManager.getCachedDeletePermission(currentChannel.streamId);
-        const canDelete = cached.valid 
-            ? cached.canDelete 
-            : await streamrController.hasDeletePermission(currentChannel.streamId);
+        // In preview mode: no admin permissions
+        let canDelete = false;
+        let canAddMembers = false;
         
-        Logger.debug('Channel settings:', { 
-            canDelete,
-            fromCache: cached.valid,
-            currentAddress: authManager.getAddress()?.slice(0,10) 
-        });
+        if (!isPreviewMode) {
+            // Use cached DELETE permission if valid for current wallet, else fetch fresh
+            const cached = channelManager.getCachedDeletePermission(currentChannel.streamId);
+            canDelete = cached.valid 
+                ? cached.canDelete 
+                : await streamrController.hasDeletePermission(currentChannel.streamId);
+            
+            Logger.debug('Channel settings:', { 
+                canDelete,
+                fromCache: cached.valid,
+                currentAddress: authManager.getAddress()?.slice(0,10) 
+            });
+            
+            // Check if user can add members (owner OR has GRANT permission)
+            canAddMembers = isNative ? await channelManager.canAddMembers(currentChannel.streamId) : false;
+        }
+
+        // Get description from channel (regular or preview mode)
+        // If no description, try to fetch from The Graph
+        let description = currentChannel.description || currentChannel.channelInfo?.description || '';
         
-        // Check if user can add members (owner OR has GRANT permission)
-        const canAddMembers = isNative ? await channelManager.canAddMembers(currentChannel.streamId) : false;
+        if (!description.trim()) {
+            try {
+                const graphInfo = await graphAPI.getChannelInfo(currentChannel.streamId);
+                if (graphInfo?.description) {
+                    description = graphInfo.description;
+                    // Cache it on the channel object for future use
+                    if (currentChannel.channelInfo) {
+                        currentChannel.channelInfo.description = description;
+                    } else {
+                        currentChannel.description = description;
+                    }
+                }
+            } catch (e) {
+                Logger.debug('Could not fetch channel info from Graph:', e.message);
+            }
+        }
+        
+        // Show/hide description section in Info panel (only if description exists)
+        const hasDescription = description.trim().length > 0;
+        this.elements.nonNativeMessage.classList.toggle('hidden', !hasDescription);
+        
+        // Populate description display
+        if (this.elements.channelDescriptionDisplay) {
+            this.elements.channelDescriptionDisplay.textContent = description;
+        }
 
-        // Show/hide non-native message in Info panel
-        this.elements.nonNativeMessage.classList.toggle('hidden', isNative);
-
-        // Show/hide members tab button for native channels only
-        this.showMembersTab = isNative;
+        // Show/hide members tab button for native channels only (and not in preview mode)
+        this.showMembersTab = isNative && !isPreviewMode;
         const membersTabBtn = document.querySelector('[data-channel-tab="members"]');
-        membersTabBtn?.classList.toggle('hidden', !isNative);
+        membersTabBtn?.classList.toggle('hidden', !isNative || isPreviewMode);
+        
+        // Show/hide notifications tab in preview mode
+        const notificationsTabBtn = document.querySelector('[data-channel-tab="notifications"]');
+        notificationsTabBtn?.classList.toggle('hidden', isPreviewMode);
+
+        // Populate storage info
+        this.populateStorageInfo(currentChannel);
 
         // Show/hide members-related elements based on permission to add members
         this.elements.addMemberForm?.classList.toggle('hidden', !canAddMembers);
@@ -107,14 +152,106 @@ class ChannelSettingsUI {
         // Show modal
         modalManager.show('channel-settings-modal');
 
-        // Initialize channel notifications toggle
-        this.initChannelNotificationsToggle(currentChannel.streamId);
+        // Initialize channel notifications toggle (only when not in preview mode)
+        if (!isPreviewMode) {
+            this.initChannelNotificationsToggle(currentChannel.streamId);
+        }
 
-        // Load members and permissions if native channel
-        if (isNative) {
+        // Load members and permissions if native channel (not in preview mode)
+        if (isNative && !isPreviewMode) {
             await this.loadMembers();
             if (canDelete) {
                 this.loadPermissions();
+            }
+        }
+    }
+
+    /**
+     * Populate storage info panel from Streamr SDK
+     * @param {Object} channel - Channel object
+     */
+    async populateStorageInfo(channel) {
+        const { streamrController } = this.deps;
+        
+        // Known storage node addresses for identification
+        const LOGSTORE_NODE = '0x17f98084757a75add72bf6c5b5a6f69008c28a57';
+        
+        // Show loading state
+        if (this.elements.channelStorageProvider) {
+            this.elements.channelStorageProvider.textContent = 'Loading...';
+        }
+        if (this.elements.channelStorageNode) {
+            this.elements.channelStorageNode.textContent = 'Loading...';
+        }
+        if (this.elements.channelStorageRetention) {
+            this.elements.channelStorageRetention.textContent = 'Loading...';
+        }
+        
+        try {
+            // Fetch storage info from Streamr SDK
+            const storageInfo = await streamrController.getStreamStorageInfo(channel.streamId);
+            
+            const { enabled, nodes, storageDays } = storageInfo;
+            
+            // Determine provider based on node address
+            let providerName = 'Unknown';
+            let nodeAddress = '-';
+            let isLogStore = false;
+            
+            if (enabled && nodes.length > 0) {
+                nodeAddress = nodes[0]; // Use first node
+                
+                // Check if it's LogStore
+                if (nodeAddress.toLowerCase() === LOGSTORE_NODE.toLowerCase()) {
+                    providerName = 'LogStore';
+                    isLogStore = true;
+                } else {
+                    providerName = 'Streamr Official';
+                }
+            }
+            
+            // Update provider name
+            if (this.elements.channelStorageProvider) {
+                this.elements.channelStorageProvider.textContent = enabled ? providerName : '-';
+            }
+            
+            // Update node address
+            if (this.elements.channelStorageNode) {
+                this.elements.channelStorageNode.textContent = enabled ? nodeAddress : '-';
+            }
+            
+            // Update retention period
+            if (this.elements.channelStorageRetention) {
+                if (!enabled) {
+                    this.elements.channelStorageRetention.textContent = '-';
+                } else if (isLogStore) {
+                    this.elements.channelStorageRetention.textContent = 'Permanent';
+                } else if (storageDays !== null && storageDays !== undefined && typeof storageDays === 'number') {
+                    this.elements.channelStorageRetention.textContent = `${storageDays} days`;
+                } else {
+                    this.elements.channelStorageRetention.textContent = 'Not set';
+                }
+            }
+            
+            // Show/hide "no storage" warning
+            if (this.elements.channelStorageNoStorage) {
+                this.elements.channelStorageNoStorage.classList.toggle('hidden', enabled);
+            }
+        } catch (error) {
+            Logger.error('Failed to fetch storage info:', error);
+            
+            // Show error state
+            if (this.elements.channelStorageProvider) {
+                this.elements.channelStorageProvider.textContent = 'Error';
+            }
+            if (this.elements.channelStorageNode) {
+                this.elements.channelStorageNode.textContent = '-';
+            }
+            if (this.elements.channelStorageRetention) {
+                this.elements.channelStorageRetention.textContent = '-';
+            }
+            if (this.elements.channelStorageNoStorage) {
+                this.elements.channelStorageNoStorage.classList.remove('hidden');
             }
         }
     }
@@ -288,7 +425,8 @@ class ChannelSettingsUI {
         const tabLabels = {
             'info': 'Info',
             'members': 'Members',
-            'notifications': 'Push',
+            'notifications': 'Notifications',
+            'storage': 'Storage',
             'danger': 'Delete'
         };
 

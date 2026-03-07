@@ -376,6 +376,10 @@ class GraphAPI {
                     streamId: stream.id,
                     name: pomboMetadata.n || stream.id.split('/')[1]?.split('_')[0] || 'Unknown',
                     type: pomboMetadata.t || 'public',
+                    description: pomboMetadata.d || '',
+                    language: pomboMetadata.l || '',
+                    category: pomboMetadata.c || '',
+                    readOnly: pomboMetadata.r || false,
                     createdAt: pomboMetadata.ts || parseInt(stream.createdAt) * 1000,
                     updatedAt: parseInt(stream.updatedAt) * 1000,
                     createdBy: stream.id.split('/')[0]

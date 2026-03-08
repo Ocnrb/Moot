@@ -374,12 +374,16 @@ class GraphAPI {
 
                 return {
                     streamId: stream.id,
-                    name: pomboMetadata.n || stream.id.split('/')[1]?.split('_')[0] || 'Unknown',
+                    // Preserve null if creator didn't set a name (hidden channels)
+                    name: pomboMetadata.n,
+                    // Fallback name for display purposes only
+                    displayName: pomboMetadata.n || stream.id.split('/')[1]?.split('_')[0] || 'Unknown',
                     type: pomboMetadata.t || 'public',
                     description: pomboMetadata.d || '',
                     language: pomboMetadata.l || '',
                     category: pomboMetadata.c || '',
                     readOnly: pomboMetadata.r || false,
+                    exposure: pomboMetadata.e || 'hidden',
                     createdAt: pomboMetadata.ts || parseInt(stream.createdAt) * 1000,
                     updatedAt: parseInt(stream.updatedAt) * 1000,
                     createdBy: stream.id.split('/')[0]
@@ -445,7 +449,9 @@ class GraphAPI {
                         if (pomboMetadata.a === 'pombo' && pomboMetadata.e === 'visible') {
                             channels.push({
                                 streamId: stream.id,
-                                name: pomboMetadata.n || stream.id.split('/')[1]?.split('_')[0] || 'Unknown',
+                                // Visible channels should always have a name, but preserve structure
+                                name: pomboMetadata.n,
+                                displayName: pomboMetadata.n || stream.id.split('/')[1]?.split('_')[0] || 'Unknown',
                                 type: pomboMetadata.t || 'public',
                                 exposure: pomboMetadata.e,
                                 readOnly: pomboMetadata.r || false,

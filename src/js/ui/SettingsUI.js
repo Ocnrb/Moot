@@ -670,6 +670,15 @@ class SettingsUI {
             this.elements.closeSettingsBtn.addEventListener('click', () => this.hide());
         }
 
+        // Click outside settings modal to close (desktop only - on mobile it's a full-screen container)
+        if (this.elements.settingsModal) {
+            this.elements.settingsModal.addEventListener('click', (e) => {
+                if (e.target === this.elements.settingsModal && this.isMobileView && !this.isMobileView()) {
+                    this.hide();
+                }
+            });
+        }
+
         // Notifications toggle (on-chain invites)
         if (this.elements.notificationsEnabled) {
             this.elements.notificationsEnabled.addEventListener('change', (e) => this.handleNotificationsToggle(e));

@@ -52,8 +52,13 @@ class ChannelSettingsUI {
         // Check if in preview mode
         const isPreviewMode = this.deps.isInPreviewMode?.() || false;
 
+        // Determine effective read-only state from cached publish permission
+        // If user cannot publish, treat as read-only regardless of channel.readOnly flag
+        const canPublish = currentChannel._publishPermCache?.canPublish;
+        const effectiveReadOnly = canPublish === false || currentChannel.readOnly;
+
         // Update channel info
-        this.elements.channelSettingsType.innerHTML = this.deps.getChannelTypeLabel(currentChannel.type, currentChannel.readOnly);
+        this.elements.channelSettingsType.innerHTML = this.deps.getChannelTypeLabel(currentChannel.type, effectiveReadOnly);
         this.elements.channelSettingsId.textContent = currentChannel.streamId;
 
         // Determine channel type

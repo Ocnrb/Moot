@@ -246,7 +246,7 @@ class ExploreUI {
         if (query) {
             const q = query.toLowerCase();
             filtered = filtered.filter(ch => 
-                ch.name.toLowerCase().includes(q) ||
+                (ch.name || ch.displayName || '').toLowerCase().includes(q) ||
                 ch.streamId.toLowerCase().includes(q) ||
                 (ch.description && ch.description.toLowerCase().includes(q))
             );
@@ -308,7 +308,7 @@ class ExploreUI {
                 <div class="flex items-start justify-between gap-3">
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-2 flex-wrap">
-                            <h4 class="text-sm font-medium text-white/90 truncate">${escapeHtml(sanitizeText(ch.name))}</h4>
+                            <h4 class="text-sm font-medium text-white/90 truncate">${escapeHtml(sanitizeText(ch.name || ch.displayName || 'Unknown'))}</h4>
                             ${readOnlyBadge}
                         </div>
                         ${description}

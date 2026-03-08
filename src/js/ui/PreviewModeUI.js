@@ -125,6 +125,9 @@ class PreviewModeUI {
 
             // Update UI for preview mode
             this._showPreviewUI();
+            
+            // Check actual publish permission via SDK and update header accordingly
+            this._checkAndUpdateReadOnlyState();
 
             // Mobile: navigate to chat view
             this.ui.openChatView();
@@ -157,7 +160,9 @@ class PreviewModeUI {
      * @private
      */
     _getChannelDisplayName(streamId, channelInfo) {
+        // Use explicit name if set, or displayName from Graph, or extract from streamId
         if (channelInfo?.name) return channelInfo.name;
+        if (channelInfo?.displayName) return channelInfo.displayName;
         // Extract name from streamId (format: address/name-N)
         const namePart = streamId.split('/')[1];
         if (namePart) {
@@ -235,6 +240,57 @@ class PreviewModeUI {
         elements.onlineHeader?.classList.remove('hidden');
         elements.onlineHeader?.classList.add('flex');
         elements.onlineSeparator?.classList.remove('hidden');
+    }
+
+    /**
+     * Check publish permission via SDK and update header read-only indicator
+     * Called after preview UI is shown to provide accurate permission state
+     * @private
+     */
+    async _checkAndUpdateReadOnlyState() {
+        if (!this.previewChannel) return;
+        
+        const { streamrController, headerUI } = this.deps;
+        const elements = this.ui.elements;
+        
+        try {
+            const canPublish = await streamrController.hasPublishPermission(this.previewChannel.streamId, true);
+            
+            // Update effective read-only: either channel is marked read-only OR user cannot publish
+            const effectiveReadOnly = !canPublish || this.previewChannel.readOnly;
+            this.previewChannel.effectiveReadOnly = effectiveReadOnly;
+            
+            // Update header label
+            if (elements.currentChannelInfo) {
+                elements.currentChannelInfo.innerHTML = headerUI.getChannelTypeLabel(
+                    this.previewChannel.type, 
+                    effectiveReadOnly
+                );
+            }
+            
+            // Update input state
+            if (!canPublish) {
+                const messageInput = elements.messageInput;
+                const sendBtn = document.querySelector('#send-btn');
+                if (messageInput) {
+                    messageInput.disabled = true;
+                    messageInput.placeholder = 'This channel is read-only';
+                    messageInput.classList.add('cursor-not-allowed', 'opacity-50');
+                }
+                if (sendBtn) {
+                    sendBtn.disabled = true;
+                    sendBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                }
+            }
+            
+            Logger.debug('Preview permission check:', {
+                streamId: this.previewChannel.streamId,
+                canPublish,
+                effectiveReadOnly
+            });
+        } catch (error) {
+            Logger.warn('Failed to check preview permissions:', error.message);
+        }
     }
 
     /**

@@ -351,9 +351,44 @@ class ChannelModalsUI {
     /**
      * Show join closed channel modal (with name + classification)
      */
-    showJoinClosedModal(streamId = '') {
+    /**
+     * Show join channel modal for channels requiring local name
+     * Used for: native channels, hidden channels, unknown channels
+     * @param {string} streamId - Channel stream ID
+     * @param {Object} channelInfo - Channel info from Graph (optional)
+     */
+    showJoinClosedModal(streamId = '', channelInfo = null) {
+        // Store channelInfo for use when joining
+        this._pendingJoinChannelInfo = channelInfo;
+        
         this.deps.modalManager?.showJoinClosedChannelModal(streamId);
         this.switchJoinClassificationTab('personal');
+        
+        // Always show classification section - helps organize any channel locally
+        const classificationSection = document.getElementById('join-classification-section');
+        classificationSection?.classList.remove('hidden');
+        
+        // Update modal title based on channel type
+        const modalTitle = document.querySelector('#join-closed-channel-modal h3');
+        if (modalTitle) {
+            if (channelInfo?.type === 'native') {
+                modalTitle.textContent = 'Join Closed Channel';
+            } else if (channelInfo) {
+                modalTitle.textContent = 'Name This Channel';
+            } else {
+                modalTitle.textContent = 'Join Channel';
+            }
+        }
+    }
+    
+    /**
+     * Show join hidden channel modal (alias for consistency)
+     * @param {string} streamId - Channel stream ID
+     * @param {Object} channelInfo - Channel info from Graph (optional)
+     */
+    showJoinHiddenModal(streamId = '', channelInfo = null) {
+        // Use the same modal - classification is useful for all hidden channels
+        this.showJoinClosedModal(streamId, channelInfo);
     }
 
     /**
@@ -364,12 +399,15 @@ class ChannelModalsUI {
     }
 
     /**
-     * Handle joining a closed channel (with local name + classification)
+     * Handle joining a channel (with local name + classification)
      */
     async handleJoinClosedChannel() {
         const streamId = document.getElementById('join-closed-stream-id-input')?.value.trim();
         const localName = document.getElementById('join-closed-name-input')?.value.trim();
         const classification = this.joinClassification || 'personal';
+        
+        // Get stored channel info from when modal was opened
+        const channelInfo = this._pendingJoinChannelInfo;
         
         if (!streamId) {
             this.showNotification('Please enter a Stream ID', 'error');
@@ -383,13 +421,21 @@ class ChannelModalsUI {
         
         this.hideJoinClosedModal();
         
+        // Clear pending state
+        this._pendingJoinChannelInfo = null;
+        
         try {
             this.notificationUI?.showLoadingToast('Joining channel...', 'This may take a moment');
             
+            // Use actual channel type from Graph, or 'native' if unknown
+            const channelType = channelInfo?.type || 'native';
+            
             await this.channelManager.joinChannel(streamId, null, {
                 name: localName,
-                type: 'native',
-                classification: classification
+                type: channelType,
+                classification: classification,  // Always save classification for local organization
+                readOnly: channelInfo?.readOnly || false,
+                createdBy: channelInfo?.createdBy
             });
             
             this.deps.renderChannelList?.();

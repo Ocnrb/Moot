@@ -124,8 +124,9 @@ class JoinChannelUI {
         
         // If we know it's a password-protected channel, show password modal
         if (channelInfo?.type === 'password') {
+            const displayName = channelInfo.name || channelInfo.displayName || 'this channel';
             const password = await this.showPasswordInputModal('Join Password Channel', 
-                `Enter password for "${channelInfo.name}":`);
+                `Enter password for "${displayName}":`);
             
             if (!password) {
                 return; // User cancelled
@@ -153,17 +154,32 @@ class JoinChannelUI {
         
         // For native/Closed channels, show the special modal to get name + classification
         if (channelInfo?.type === 'native') {
-            channelModalsUI.showJoinClosedModal(streamId);
+            channelModalsUI.showJoinClosedModal(streamId, channelInfo);
+            return;
+        }
+        
+        // For hidden channels without a name, ask user for a local name
+        // This applies to any channel type with exposure: hidden and name: null
+        if (channelInfo && !channelInfo.name) {
+            channelModalsUI.showJoinHiddenModal(streamId, channelInfo);
             return;
         }
 
-        // For unknown channels or public channels, try direct join
+        // For unknown channels (no channelInfo), show modal to get name
+        if (!channelInfo) {
+            channelModalsUI.showJoinHiddenModal(streamId, null);
+            return;
+        }
+
+        // For public visible channels with name, try direct join
         try {
             notificationUI.showLoadingToast('Joining channel...', 'This may take a moment');
-            await channelManager.joinChannel(streamId, null, channelInfo ? {
+            await channelManager.joinChannel(streamId, null, {
                 name: channelInfo.name,
-                type: channelInfo.type
-            } : undefined);
+                type: channelInfo.type,
+                readOnly: channelInfo.readOnly || false,
+                createdBy: channelInfo.createdBy
+            });
             
             // Clear the input
             this._clearQuickJoinInput();
@@ -171,27 +187,7 @@ class JoinChannelUI {
             renderChannelList();
             showNotification('Joined channel successfully!', 'success');
         } catch (error) {
-            // If channel isn't in cache but might require password, show join modal
-            // This happens when we don't have info about the channel
-            if (!channelInfo) {
-                // Pre-fill the join modal and show it
-                if (this.elements.joinStreamIdInput) {
-                    this.elements.joinStreamIdInput.value = streamId;
-                }
-                // Reset password checkbox
-                const checkbox = document.getElementById('join-has-password');
-                if (checkbox) {
-                    checkbox.checked = false;
-                    this.elements.joinPasswordField?.classList.add('hidden');
-                }
-                modalManager.show('join-channel-modal');
-                showNotification('Enter channel details or check if password is required', 'info');
-                
-                // Clear quick join input
-                this._clearQuickJoinInput();
-            } else {
-                showNotification('Failed to join: ' + error.message, 'error');
-            }
+            showNotification('Failed to join: ' + error.message, 'error');
         } finally {
             notificationUI.hideLoadingToast();
         }
@@ -246,10 +242,23 @@ class JoinChannelUI {
      */
     async joinPublicChannel(streamId, channelInfo, showNotification, renderChannelList, selectChannel) {
         try {
+            // For native/Closed channels, show the special modal to get name + classification
+            if (channelInfo?.type === 'native') {
+                channelModalsUI.showJoinClosedModal(streamId, channelInfo);
+                return;
+            }
+            
+            // For hidden channels without a name, ask user for a local name
+            if (channelInfo && !channelInfo.name) {
+                channelModalsUI.showJoinHiddenModal(streamId, channelInfo);
+                return;
+            }
+            
             // If password-protected, ask for password
             if (channelInfo?.type === 'password') {
+                const displayName = channelInfo.name || channelInfo.displayName || 'this channel';
                 const password = await this.showPasswordInputModal('Join Password Channel', 
-                    `Enter password for "${channelInfo.name}":`);
+                    `Enter password for "${displayName}":`);
                 
                 if (!password) {
                     return; // User cancelled

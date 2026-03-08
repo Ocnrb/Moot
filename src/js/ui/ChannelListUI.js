@@ -99,14 +99,13 @@ class ChannelListUI {
     _applyFilter(channels) {
         switch (this.currentFilter) {
             case 'personal':
-                // Personal: Closed channels with classification 'personal'
-                return channels.filter(ch => 
-                    ch.type === 'native' && ch.classification === 'personal'
-                );
+                // Personal: any channel with classification 'personal'
+                return channels.filter(ch => ch.classification === 'personal');
             case 'community':
-                // Communities: Open + Protected + Closed with classification 'community'
+                // Communities: channels without classification OR with classification 'community'
+                // This includes public/password channels without explicit classification
                 return channels.filter(ch => 
-                    ch.type !== 'native' || ch.classification === 'community'
+                    !ch.classification || ch.classification === 'community'
                 );
             default:
                 // 'all' - no filtering

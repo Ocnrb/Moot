@@ -886,10 +886,10 @@ class UIController {
             });
         }
 
-        // Click outside channel settings modal to close
+        // Click outside channel settings modal to close (desktop only - on mobile it's a full-screen container)
         if (this.elements.channelSettingsModal) {
             this.elements.channelSettingsModal.addEventListener('click', (e) => {
-                if (e.target === this.elements.channelSettingsModal) {
+                if (e.target === this.elements.channelSettingsModal && !this.isMobileView()) {
                     this.hideChannelSettingsModal();
                 }
             });
@@ -1876,6 +1876,12 @@ class UIController {
         if (cacheValid) {
             const canPublish = channel._publishPermCache.canPublish;
             this.setReadOnlyInputState(!canPublish, canPublish && channel.readOnly);
+            
+            // Update header label with cached permission result
+            const effectiveReadOnly = !canPublish || channel.readOnly;
+            if (this.elements.currentChannelInfo) {
+                this.elements.currentChannelInfo.innerHTML = headerUI.getChannelTypeLabel(channel.type, effectiveReadOnly);
+            }
             return;
         }
 
@@ -1897,10 +1903,17 @@ class UIController {
             // If channel is read-only and user can publish, show "broadcast" placeholder
             this.setReadOnlyInputState(!canPublish, canPublish && channel.readOnly);
             
+            // Update header label to reflect actual read-only state (user cannot publish)
+            const effectiveReadOnly = !canPublish || channel.readOnly;
+            if (this.elements.currentChannelInfo) {
+                this.elements.currentChannelInfo.innerHTML = headerUI.getChannelTypeLabel(channel.type, effectiveReadOnly);
+            }
+            
             Logger.debug('Permission check via SDK:', {
                 channel: channel.name,
                 canPublish: canPublish,
-                readOnly: channel.readOnly
+                readOnly: channel.readOnly,
+                effectiveReadOnly: effectiveReadOnly
             });
         } catch (error) {
             Logger.warn('Failed to check publish permission:', error);

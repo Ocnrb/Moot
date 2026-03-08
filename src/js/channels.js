@@ -265,8 +265,9 @@ class ChannelManager {
             // Extract exposure and metadata from options
             const exposure = options.exposure || (type === 'native' ? 'hidden' : 'hidden');
             
-            // Classification for Closed channels (stored locally only)
-            const classification = type === 'native' ? (options.classification || 'personal') : null;
+            // Classification for local organization (any channel type)
+            // Default to 'personal' for native, null for others unless specified
+            const classification = options.classification || (type === 'native' ? 'personal' : null);
             
             const channel = {
                 messageStreamId: streamInfo.messageStreamId,
@@ -433,8 +434,8 @@ class ChannelManager {
             // For Closed channels, use localName from options (user-provided)
             let channelName = options.localName || options.name || messageStreamId.split('/')[1]?.replace(/-\d$/, '') || messageStreamId;
             
-            // Classification for Closed channels (stored locally only)
-            const classification = channelType === 'native' ? (options.classification || 'personal') : null;
+            // Classification for local organization (any channel type)
+            const classification = options.classification || (channelType === 'native' ? 'personal' : null);
 
             const channel = {
                 messageStreamId: messageStreamId,
@@ -547,7 +548,8 @@ class ChannelManager {
             // Extract info from preview (already validated by successful preview)
             const channelType = previewInfo.type || 'public';
             const channelName = previewInfo.name || messageStreamId.split('/')[1]?.replace(/-\d$/, '') || messageStreamId;
-            const classification = channelType === 'native' ? (previewInfo.classification || 'personal') : null;
+            // Classification for local organization (any channel type)
+            const classification = previewInfo.classification || (channelType === 'native' ? 'personal' : null);
 
             // IMPORTANT: Transfer messages and reactions from preview
             const previewMessages = Array.isArray(previewInfo.messages) ? previewInfo.messages : [];

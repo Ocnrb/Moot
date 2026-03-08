@@ -1586,6 +1586,10 @@ video {
   border-color: rgb(246 133 27 / 0.4);
 }
 
+.border-amber-500\/10 {
+  border-color: rgb(245 158 11 / 0.1);
+}
+
 .border-amber-500\/20 {
   border-color: rgb(245 158 11 / 0.2);
 }
@@ -1771,6 +1775,10 @@ video {
 
 .bg-amber-500\/20 {
   background-color: rgb(245 158 11 / 0.2);
+}
+
+.bg-amber-500\/5 {
+  background-color: rgb(245 158 11 / 0.05);
 }
 
 .bg-black {
@@ -2079,11 +2087,6 @@ video {
 .py-4 {
   padding-top: 1rem;
   padding-bottom: 1rem;
-}
-
-.py-6 {
-  padding-top: 1.5rem;
-  padding-bottom: 1.5rem;
 }
 
 .py-8 {

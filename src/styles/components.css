@@ -49,6 +49,11 @@
 }
 
 /* ----- Base Layout ----- */
+html {
+    background-color: #0d0d0d;
+    color-scheme: dark;
+}
+
 body {
     font-family: 'Inter', sans-serif;
     background-color: #0d0d0d;
@@ -1257,10 +1262,43 @@ body {
     }
     
     /* ----- FULLSCREEN MODALS ON MOBILE ----- */
-    #new-channel-modal,
+    #new-channel-modal {
+        padding: 0 !important;
+    }
+
+    /* ----- SETTINGS & CHANNEL DETAILS AS SLIDE-IN CONTAINER ON MOBILE ----- */
     #settings-modal,
     #channel-settings-modal {
         padding: 0 !important;
+        background: transparent !important;
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+        align-items: stretch !important;
+        justify-content: flex-end !important;
+    }
+
+    #settings-modal > div,
+    #channel-settings-modal > div {
+        transform: translateX(100%);
+        transition: transform 0.3s ease;
+        display: flex;
+        flex-direction: column;
+    }
+
+    #settings-modal:not(.hidden) > div,
+    #channel-settings-modal:not(.hidden) > div {
+        transform: translateX(0);
+    }
+
+    /* Hide main header when settings/channel-details is open on mobile */
+    body.settings-open header,
+    body.channel-details-open header {
+        display: none !important;
+    }
+
+    body.settings-open .app-container,
+    body.channel-details-open .app-container {
+        height: 100dvh;
     }
     
     #new-channel-modal > div,
@@ -1272,6 +1310,28 @@ body {
         max-height: 100% !important;
         border-radius: 0 !important;
         margin: 0 !important;
+    }
+
+    /* Modal headers - same dark color as main header */
+    #new-channel-modal > div > .flex.border-b,
+    #settings-modal > div > .flex.border-b,
+    #channel-settings-modal > div > .flex.border-b {
+        background-color: #0d0d0d !important;
+        border-color: #333 !important;
+    }
+
+    /* Settings modal content area - full height flex */
+    #settings-modal .flex.min-h-\[420px\] {
+        flex: 1 !important;
+        min-height: 0 !important;
+        height: 100% !important;
+    }
+
+    /* Settings panel content scrollable */
+    #settings-modal .flex-1.p-6.overflow-y-auto {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
     }
     
     /* Modal sidebars become horizontal tabs on mobile */
@@ -1297,13 +1357,13 @@ body {
     #channel-settings-modal .w-44 {
         width: 100% !important;
         border-right: none !important;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        border-bottom: 1px solid #333;
         flex-direction: row !important;
         overflow: hidden;
         padding: 0 !important;
         flex-shrink: 0;
         min-height: auto;
-        background: transparent !important;
+        background: #0d0d0d !important;
     }
 
     /* Hide "Type" label on mobile modals */

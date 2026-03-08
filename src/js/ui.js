@@ -50,6 +50,7 @@ class UIController {
         
         // Channel filter state (sidebar tabs: all/personal/community)
         this.currentChannelFilter = 'all';
+        this.isFilterAnimating = false; // Prevent rapid swipes
         
         // Preview mode state - handled by previewModeUI module
         
@@ -265,7 +266,6 @@ class UIController {
             // Channel settings modal
             channelInfoBtn: document.getElementById('channel-info-btn'),
             channelSettingsModal: document.getElementById('channel-settings-modal'),
-            channelSettingsName: document.getElementById('channel-settings-name'),
             channelSettingsType: document.getElementById('channel-settings-type'),
             channelSettingsId: document.getElementById('channel-settings-id'),
             copyStreamIdBtn: document.getElementById('copy-stream-id-btn'),
@@ -597,6 +597,9 @@ class UIController {
                 this.switchChannelFilterTab(tab.dataset.channelFilter);
             });
         });
+
+        // Mobile swipe gestures for channel filter tabs
+        this.initChannelFilterSwipe();
 
         // Read-only toggle
         const readOnlyToggle = document.getElementById('read-only-toggle');
@@ -1740,8 +1743,14 @@ class UIController {
 
     /**
      * Switch channel filter tab in sidebar (All/Personal/Communities)
+     * @param {string} filter - Filter to apply ('all', 'personal', 'community')
+     * @param {number} direction - Direction of swipe (-1 = right/prev, 1 = left/next, 0 = click)
      */
-    switchChannelFilterTab(filter) {
+    switchChannelFilterTab(filter, direction = 0) {
+        // Animation lock for swipes
+        if (direction !== 0 && this.isFilterAnimating) return;
+        if (direction !== 0) this.isFilterAnimating = true;
+        
         document.querySelectorAll('.channel-filter-tab').forEach(tab => {
             const isActive = tab.dataset.channelFilter === filter;
             
@@ -1754,7 +1763,91 @@ class UIController {
         });
         
         this.currentChannelFilter = filter;
-        this.renderChannelList();
+        
+        // Animate channel list on mobile swipe
+        const channelList = this.elements.channelList;
+        if (this.isMobileView() && direction !== 0 && channelList) {
+            // Fade out with slide
+            channelList.style.transition = 'opacity 0.15s ease, transform 0.15s ease';
+            channelList.style.opacity = '0';
+            channelList.style.transform = direction > 0 ? 'translateX(-20px)' : 'translateX(20px)';
+            
+            setTimeout(() => {
+                this.renderChannelList();
+                
+                // Slide in from opposite direction
+                channelList.style.transition = 'none';
+                channelList.style.transform = direction > 0 ? 'translateX(20px)' : 'translateX(-20px)';
+                
+                // Trigger reflow
+                channelList.offsetHeight;
+                
+                channelList.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
+                channelList.style.opacity = '1';
+                channelList.style.transform = 'translateX(0)';
+                
+                // Cleanup
+                setTimeout(() => {
+                    channelList.style.transition = '';
+                    channelList.style.transform = '';
+                    channelList.style.opacity = '';
+                    this.isFilterAnimating = false;
+                }, 200);
+            }, 150);
+        } else {
+            this.renderChannelList();
+            this.isFilterAnimating = false;
+        }
+    }
+
+    /**
+     * Initialize swipe gestures for channel filter tabs (mobile)
+     * Allows swiping left/right on channel list to switch between All/Personal/Communities
+     */
+    initChannelFilterSwipe() {
+        const channelList = this.elements.channelList;
+        if (!channelList) return;
+
+        const filterOrder = ['all', 'personal', 'community'];
+        let touchStartX = 0;
+        let touchStartY = 0;
+        let isSwiping = false;
+
+        channelList.addEventListener('touchstart', (e) => {
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+            isSwiping = true;
+        }, { passive: true });
+
+        channelList.addEventListener('touchend', (e) => {
+            if (!isSwiping || !this.isMobileView()) return;
+
+            const touchEndX = e.changedTouches[0].clientX;
+            const touchEndY = e.changedTouches[0].clientY;
+            const diffX = touchStartX - touchEndX;
+            const diffY = touchStartY - touchEndY;
+
+            // Require horizontal swipe > 50px and more horizontal than vertical (1.5x)
+            if (Math.abs(diffX) > 50 && Math.abs(diffX) > Math.abs(diffY) * 1.5) {
+                const currentIndex = filterOrder.indexOf(this.currentChannelFilter);
+                let newIndex;
+
+                if (diffX > 0) {
+                    // Swipe left - go to next tab
+                    newIndex = Math.min(currentIndex + 1, filterOrder.length - 1);
+                } else {
+                    // Swipe right - go to previous tab
+                    newIndex = Math.max(currentIndex - 1, 0);
+                }
+
+                if (newIndex !== currentIndex) {
+                    const direction = newIndex > currentIndex ? 1 : -1;
+                    this.switchChannelFilterTab(filterOrder[newIndex], direction);
+                }
+            }
+
+            isSwiping = false;
+        }, { passive: true });
     }
 
     /**

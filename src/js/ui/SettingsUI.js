@@ -12,6 +12,7 @@ class SettingsUI {
         this.elements = {};
         this.settingsTabOrder = ['profile', 'notifications', 'api', 'linkpreviews', 'security', 'about'];
         this.currentSettingsTabIndex = 0;
+        this.isAnimating = false; // Prevent multiple simultaneous animations
     }
 
     /**
@@ -828,6 +829,11 @@ class SettingsUI {
             // Reset delete account UI to step 1
             this.resetDeleteAccountUI();
 
+            // Add settings-open class for mobile slide-in effect
+            if (this.isMobileView && this.isMobileView()) {
+                document.body.classList.add('settings-open');
+            }
+
             this.modalManager?.show('settings-modal');
         }
     }
@@ -836,6 +842,8 @@ class SettingsUI {
      * Hide settings modal
      */
     hide() {
+        // Remove settings-open class for mobile
+        document.body.classList.remove('settings-open');
         this.modalManager?.hide('settings-modal');
     }
 
@@ -902,6 +910,7 @@ class SettingsUI {
             const diffY = touchStartY - touchEndY;
             
             if (Math.abs(diffX) > 50 && Math.abs(diffX) > Math.abs(diffY) * 1.5) {
+                // Infinite carousel - always navigate (loops around)
                 this.navigateSettingsCarousel(diffX > 0 ? 1 : -1);
             }
             isSwiping = false;
@@ -912,21 +921,27 @@ class SettingsUI {
      * Navigate carousel by offset (-1 for prev, +1 for next)
      */
     navigateSettingsCarousel(offset) {
+        // Prevent multiple simultaneous animations
+        if (this.isAnimating) return;
+        
         const total = this.settingsTabOrder.length;
         this.currentSettingsTabIndex = (this.currentSettingsTabIndex + offset + total) % total;
         const tabName = this.settingsTabOrder[this.currentSettingsTabIndex];
-        this.selectSettingsTab(tabName);
+        this.selectSettingsTab(tabName, offset);
     }
 
     /**
      * Update carousel display with current, prev, and next tabs
+     * @param {string} tabName - Current tab name
+     * @param {number} direction - Direction of navigation for animation (-1, 0, or 1)
      */
-    updateSettingsCarousel(tabName) {
+    updateSettingsCarousel(tabName, direction = 0) {
         const carousel = document.getElementById('settings-carousel');
         if (!carousel) return;
 
+        const tabsContainer = carousel.querySelector('.carousel-tabs');
         const tabs = carousel.querySelectorAll('.carousel-tab');
-        if (tabs.length !== 3) return;
+        if (tabs.length !== 3 || !tabsContainer) return;
 
         const total = this.settingsTabOrder.length;
         const currentIndex = this.settingsTabOrder.indexOf(tabName);
@@ -941,31 +956,78 @@ class SettingsUI {
             'profile': 'Account',
             'notifications': 'Notifications',
             'api': 'API',
-            'linkpreviews': 'Previews',
+            'linkpreviews': 'Content',
             'security': 'Security',
             'about': 'About'
         };
 
-        tabs[0].textContent = tabLabels[this.settingsTabOrder[prevIndex]];
-        tabs[0].dataset.tab = this.settingsTabOrder[prevIndex];
-        tabs[0].classList.remove('active');
-        tabs[0].classList.add('adjacent');
+        const newLabels = [
+            tabLabels[this.settingsTabOrder[prevIndex]],
+            tabLabels[this.settingsTabOrder[currentIndex]],
+            tabLabels[this.settingsTabOrder[nextIndex]]
+        ];
 
-        tabs[1].textContent = tabLabels[this.settingsTabOrder[currentIndex]];
-        tabs[1].dataset.tab = this.settingsTabOrder[currentIndex];
-        tabs[1].classList.add('active');
-        tabs[1].classList.remove('adjacent');
+        // Simple cross-fade animation for tabs
+        if (direction !== 0) {
+            // Fade out
+            tabsContainer.style.transition = 'opacity 0.15s ease';
+            tabsContainer.style.opacity = '0';
+            
+            setTimeout(() => {
+                // Update labels while hidden
+                tabs[0].textContent = newLabels[0];
+                tabs[0].dataset.tab = this.settingsTabOrder[prevIndex];
+                tabs[0].classList.remove('active');
+                tabs[0].classList.add('adjacent');
 
-        tabs[2].textContent = tabLabels[this.settingsTabOrder[nextIndex]];
-        tabs[2].dataset.tab = this.settingsTabOrder[nextIndex];
-        tabs[2].classList.remove('active');
-        tabs[2].classList.add('adjacent');
+                tabs[1].textContent = newLabels[1];
+                tabs[1].dataset.tab = this.settingsTabOrder[currentIndex];
+                tabs[1].classList.add('active');
+                tabs[1].classList.remove('adjacent');
+
+                tabs[2].textContent = newLabels[2];
+                tabs[2].dataset.tab = this.settingsTabOrder[nextIndex];
+                tabs[2].classList.remove('active');
+                tabs[2].classList.add('adjacent');
+
+                // Fade in
+                tabsContainer.style.opacity = '1';
+                
+                setTimeout(() => {
+                    tabsContainer.style.transition = '';
+                    tabsContainer.style.opacity = '';
+                }, 150);
+            }, 150);
+        } else {
+            // Instant update (no animation)
+            tabs[0].textContent = newLabels[0];
+            tabs[0].dataset.tab = this.settingsTabOrder[prevIndex];
+            tabs[0].classList.remove('active');
+            tabs[0].classList.add('adjacent');
+
+            tabs[1].textContent = newLabels[1];
+            tabs[1].dataset.tab = this.settingsTabOrder[currentIndex];
+            tabs[1].classList.add('active');
+            tabs[1].classList.remove('adjacent');
+
+            tabs[2].textContent = newLabels[2];
+            tabs[2].dataset.tab = this.settingsTabOrder[nextIndex];
+            tabs[2].classList.remove('active');
+            tabs[2].classList.add('adjacent');
+        }
     }
 
     /**
      * Select a settings tab
+     * @param {string} tabName - Tab to select
+     * @param {number} direction - Direction of navigation (-1 = left, 1 = right, 0 = direct click)
      */
-    selectSettingsTab(tabName) {
+    selectSettingsTab(tabName, direction = 0) {
+        // Start animation lock
+        if (direction !== 0) {
+            this.isAnimating = true;
+        }
+
         this.elements.settingsTabs?.forEach(tab => {
             const isActive = tab.dataset.settingsTab === tabName;
             tab.classList.toggle('bg-white/10', isActive);
@@ -974,13 +1036,69 @@ class SettingsUI {
         });
 
         if (this.isMobileView && this.isMobileView()) {
-            this.updateSettingsCarousel(tabName);
+            this.updateSettingsCarousel(tabName, direction);
         }
 
-        this.elements.settingsPanels?.forEach(panel => {
-            const panelName = panel.id.replace('settings-panel-', '');
-            panel.classList.toggle('hidden', panelName !== tabName);
-        });
+        // Animate panel transition on mobile
+        const isMobile = this.isMobileView && this.isMobileView();
+        
+        if (isMobile && direction !== 0) {
+            // Find current and target panels
+            let currentPanel = null;
+            let targetPanel = null;
+            
+            this.elements.settingsPanels?.forEach(panel => {
+                const panelName = panel.id.replace('settings-panel-', '');
+                if (panelName === tabName) {
+                    targetPanel = panel;
+                } else if (!panel.classList.contains('hidden')) {
+                    currentPanel = panel;
+                }
+            });
+
+            if (currentPanel && targetPanel) {
+                // Simple cross-fade for panels (more reliable than slide)
+                currentPanel.style.transition = 'opacity 0.2s ease';
+                currentPanel.style.opacity = '0';
+                
+                setTimeout(() => {
+                    currentPanel.classList.add('hidden');
+                    currentPanel.style.transition = '';
+                    currentPanel.style.opacity = '';
+                    
+                    targetPanel.classList.remove('hidden');
+                    targetPanel.style.opacity = '0';
+                    targetPanel.style.transition = 'opacity 0.2s ease';
+                    
+                    // Force reflow
+                    targetPanel.offsetHeight;
+                    
+                    targetPanel.style.opacity = '1';
+                    
+                    setTimeout(() => {
+                        targetPanel.style.transition = '';
+                        targetPanel.style.opacity = '';
+                        this.isAnimating = false;
+                    }, 200);
+                }, 200);
+            } else if (targetPanel) {
+                targetPanel.classList.remove('hidden');
+                this.isAnimating = false;
+            } else {
+                this.isAnimating = false;
+            }
+        } else {
+            // Instant switch (desktop or direct click)
+            this.elements.settingsPanels?.forEach(panel => {
+                const panelName = panel.id.replace('settings-panel-', '');
+                const isTarget = panelName === tabName;
+                panel.classList.toggle('hidden', !isTarget);
+                panel.style.transition = '';
+                panel.style.opacity = '';
+                panel.style.transform = '';
+            });
+            this.isAnimating = false;
+        }
     }
 
     /**

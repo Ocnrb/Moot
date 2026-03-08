@@ -19,6 +19,7 @@ class ChannelSettingsUI {
         this.currentChannelTabIndex = 0;
         this.showDangerTab = false;
         this.showMembersTab = true; // Only for native channels
+        this.isAnimating = false; // Prevent rapid swipes
     }
 
     /**
@@ -52,7 +53,6 @@ class ChannelSettingsUI {
         const isPreviewMode = this.deps.isInPreviewMode?.() || false;
 
         // Update channel info
-        this.elements.channelSettingsName.textContent = currentChannel.name;
         this.elements.channelSettingsType.innerHTML = this.deps.getChannelTypeLabel(currentChannel.type, currentChannel.readOnly);
         this.elements.channelSettingsId.textContent = currentChannel.streamId;
 
@@ -148,6 +148,11 @@ class ChannelSettingsUI {
 
         // Select appropriate starting tab (always info for non-native since members tab is hidden)
         this.selectTab('info');
+
+        // Add body class for mobile slide-in container
+        if (this.isMobileView()) {
+            document.body.classList.add('channel-details-open');
+        }
 
         // Show modal
         modalManager.show('channel-settings-modal');
@@ -278,8 +283,15 @@ class ChannelSettingsUI {
 
     /**
      * Select a channel settings tab
+     * @param {string} tabName - Tab to select
+     * @param {number} direction - Direction of navigation (-1 = left, 1 = right, 0 = direct click)
      */
-    selectTab(tabName) {
+    selectTab(tabName, direction = 0) {
+        // Start animation lock
+        if (direction !== 0) {
+            this.isAnimating = true;
+        }
+
         // Update tab buttons
         document.querySelectorAll('.channel-settings-tab').forEach(tab => {
             const isActive = tab.dataset.channelTab === tabName;
@@ -290,14 +302,65 @@ class ChannelSettingsUI {
 
         // Update carousel for mobile
         if (this.isMobileView()) {
-            this.updateCarousel(tabName);
+            this.updateCarousel(tabName, direction);
         }
 
-        // Update panels
-        document.querySelectorAll('.channel-settings-panel').forEach(panel => {
-            const panelName = panel.id.replace('channel-panel-', '');
-            panel.classList.toggle('hidden', panelName !== tabName);
-        });
+        // Animate panel transition on mobile
+        const isMobile = this.isMobileView();
+        
+        if (isMobile && direction !== 0) {
+            // Find current and target panels
+            let currentPanel = null;
+            let targetPanel = null;
+            
+            document.querySelectorAll('.channel-settings-panel').forEach(panel => {
+                const panelName = panel.id.replace('channel-panel-', '');
+                if (panelName === tabName) {
+                    targetPanel = panel;
+                } else if (!panel.classList.contains('hidden')) {
+                    currentPanel = panel;
+                }
+            });
+
+            if (currentPanel && targetPanel) {
+                // Cross-fade for panels
+                currentPanel.style.transition = 'opacity 0.2s ease';
+                currentPanel.style.opacity = '0';
+                
+                setTimeout(() => {
+                    currentPanel.classList.add('hidden');
+                    currentPanel.style.transition = '';
+                    currentPanel.style.opacity = '';
+                    
+                    targetPanel.classList.remove('hidden');
+                    targetPanel.style.opacity = '0';
+                    targetPanel.style.transition = 'opacity 0.2s ease';
+                    
+                    // Force reflow
+                    targetPanel.offsetHeight;
+                    
+                    targetPanel.style.opacity = '1';
+                    
+                    setTimeout(() => {
+                        targetPanel.style.transition = '';
+                        targetPanel.style.opacity = '';
+                        this.isAnimating = false;
+                    }, 200);
+                }, 200);
+            } else if (targetPanel) {
+                targetPanel.classList.remove('hidden');
+                this.isAnimating = false;
+            } else {
+                this.isAnimating = false;
+            }
+        } else {
+            // Instant switch (desktop or direct click)
+            document.querySelectorAll('.channel-settings-panel').forEach(panel => {
+                const panelName = panel.id.replace('channel-panel-', '');
+                panel.classList.toggle('hidden', panelName !== tabName);
+            });
+            this.isAnimating = false;
+        }
     }
 
     /**
@@ -314,6 +377,7 @@ class ChannelSettingsUI {
         const tabs = ['info'];
         if (this.showMembersTab) tabs.push('members');
         tabs.push('notifications');
+        tabs.push('storage');
         if (this.showDangerTab) tabs.push('danger');
         return tabs;
     }
@@ -395,22 +459,30 @@ class ChannelSettingsUI {
      * Navigate carousel by offset (-1 for prev, +1 for next)
      */
     navigateCarousel(offset) {
+        // Prevent rapid swipes
+        if (this.isAnimating) return;
+        
         const availableTabs = this.getAvailableTabs();
         const total = availableTabs.length;
         this.currentChannelTabIndex = (this.currentChannelTabIndex + offset + total) % total;
         const tabName = availableTabs[this.currentChannelTabIndex];
-        this.selectTab(tabName);
+        this.selectTab(tabName, offset);
     }
 
     /**
      * Update carousel display with current, prev, and next tabs
+     * @param {string} tabName - Tab to display
+     * @param {number} direction - Direction of navigation (-1 = left, 1 = right, 0 = direct)
      */
-    updateCarousel(tabName) {
+    updateCarousel(tabName, direction = 0) {
         const carousel = document.getElementById('channel-settings-carousel');
         if (!carousel) return;
 
         const tabs = carousel.querySelectorAll('.carousel-tab');
         if (tabs.length !== 3) return;
+
+        const tabsContainer = carousel.querySelector('.carousel-tabs');
+        if (!tabsContainer) return;
 
         const availableTabs = this.getAvailableTabs();
         const total = availableTabs.length;
@@ -430,27 +502,67 @@ class ChannelSettingsUI {
             'danger': 'Delete'
         };
 
-        // Update tab displays: [prev] [current] [next]
-        tabs[0].textContent = tabLabels[availableTabs[prevIndex]];
-        tabs[0].dataset.tab = availableTabs[prevIndex];
-        tabs[0].classList.remove('active');
-        tabs[0].classList.add('adjacent');
+        const newLabels = [
+            tabLabels[availableTabs[prevIndex]],
+            tabLabels[availableTabs[currentIndex]],
+            tabLabels[availableTabs[nextIndex]]
+        ];
 
-        tabs[1].textContent = tabLabels[availableTabs[currentIndex]];
-        tabs[1].dataset.tab = availableTabs[currentIndex];
-        tabs[1].classList.add('active');
-        tabs[1].classList.remove('adjacent');
+        // Cross-fade animation for tabs
+        if (direction !== 0) {
+            // Fade out
+            tabsContainer.style.transition = 'opacity 0.15s ease';
+            tabsContainer.style.opacity = '0';
+            
+            setTimeout(() => {
+                // Update labels while hidden
+                tabs[0].textContent = newLabels[0];
+                tabs[0].dataset.tab = availableTabs[prevIndex];
+                tabs[0].classList.remove('active');
+                tabs[0].classList.add('adjacent');
 
-        tabs[2].textContent = tabLabels[availableTabs[nextIndex]];
-        tabs[2].dataset.tab = availableTabs[nextIndex];
-        tabs[2].classList.remove('active');
-        tabs[2].classList.add('adjacent');
+                tabs[1].textContent = newLabels[1];
+                tabs[1].dataset.tab = availableTabs[currentIndex];
+                tabs[1].classList.add('active');
+                tabs[1].classList.remove('adjacent');
+
+                tabs[2].textContent = newLabels[2];
+                tabs[2].dataset.tab = availableTabs[nextIndex];
+                tabs[2].classList.remove('active');
+                tabs[2].classList.add('adjacent');
+
+                // Fade in
+                tabsContainer.style.opacity = '1';
+                
+                setTimeout(() => {
+                    tabsContainer.style.transition = '';
+                    tabsContainer.style.opacity = '';
+                }, 150);
+            }, 150);
+        } else {
+            // Instant update (no animation)
+            tabs[0].textContent = newLabels[0];
+            tabs[0].dataset.tab = availableTabs[prevIndex];
+            tabs[0].classList.remove('active');
+            tabs[0].classList.add('adjacent');
+
+            tabs[1].textContent = newLabels[1];
+            tabs[1].dataset.tab = availableTabs[currentIndex];
+            tabs[1].classList.add('active');
+            tabs[1].classList.remove('adjacent');
+
+            tabs[2].textContent = newLabels[2];
+            tabs[2].dataset.tab = availableTabs[nextIndex];
+            tabs[2].classList.remove('active');
+            tabs[2].classList.add('adjacent');
+        }
     }
 
     /**
      * Hide channel settings modal
      */
     hide() {
+        document.body.classList.remove('channel-details-open');
         modalManager.hide('channel-settings-modal');
         this.elements.addMemberInput.value = '';
     }

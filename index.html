@@ -12,7 +12,14 @@
     <link rel="shortcut icon" href="/favicon/favicon.ico">
     <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png">
     <link rel="manifest" href="/favicon/site.webmanifest">
-    <meta name="theme-color" content="#121212">
+    <meta name="theme-color" content="#0d0d0d">
+    <!-- Android: additional theme colors for dark mode detection -->
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0d0d0d">
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#0d0d0d">
+    <meta name="color-scheme" content="dark">
+    <!-- iOS PWA -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
 
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -965,10 +972,7 @@
         <div class="bg-[#141414] rounded-2xl w-[640px] max-w-[95vw] mx-4 shadow-2xl border border-white/5 overflow-hidden">
             <!-- Header -->
             <div class="flex items-center justify-between px-6 py-4 border-b border-white/5">
-                <div>
-                    <h3 class="text-lg font-medium text-white/90">Channel Details</h3>
-                    <p id="channel-settings-name" class="text-sm text-white/40 mt-0.5"></p>
-                </div>
+                <h3 class="text-lg font-medium text-white/90">Channel Details</h3>
                 <button id="close-channel-settings-btn" class="text-white/40 hover:text-white/80 transition p-1">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
@@ -1345,7 +1349,7 @@
                         </button>
                         <button data-settings-tab="linkpreviews" class="settings-tab w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left transition-all text-white/60 hover:text-white/90 hover:bg-white/5">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/></svg>
-                            <span>Link Previews</span>
+                            <span>Content</span>
                         </button>
                         <div class="my-2 mx-3 border-t border-white/5 hidden md:block"></div>
                         <button data-settings-tab="security" class="settings-tab w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left transition-all text-white/60 hover:text-white/90 hover:bg-white/5">
@@ -1406,19 +1410,6 @@
                                     Fund with MetaMask
                                 </button>
                                 <p class="text-sm text-white/30 mt-2 text-center">Send POL from your MetaMask wallet</p>
-                            </div>
-                            <div class="my-4 border-t border-white/5"></div>
-                            <div class="flex items-start justify-between p-4 bg-white/5 rounded-xl border border-white/5">
-                                <div class="flex-1 mr-4">
-                                    <h4 class="text-base font-medium text-white/90 mb-1">Show Sensitive Content</h4>
-                                    <p class="text-sm text-white/40 leading-relaxed">
-                                        Enable NSFW filter in channel exploration
-                                    </p>
-                                </div>
-                                <label class="relative inline-flex items-center cursor-pointer">
-                                    <input type="checkbox" id="nsfw-enabled" class="sr-only peer">
-                                    <div class="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white/60 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#F6851B]"></div>
-                                </label>
                             </div>
                         </div>
                     </div>
@@ -1489,7 +1480,7 @@
                         </div>
                     </div>
 
-                    <!-- Link Previews Panel -->
+                    <!-- Content Panel -->
                     <div id="settings-panel-linkpreviews" class="settings-panel hidden">
                         <div class="space-y-6">
                             <div class="flex items-start justify-between p-4 bg-white/5 rounded-xl border border-white/5">
@@ -1502,6 +1493,18 @@
                                 <label class="relative inline-flex items-center cursor-pointer">
                                     <input type="checkbox" id="youtube-embeds-enabled" class="sr-only peer" checked>
                                     <div class="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white/60 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#ff0000]"></div>
+                                </label>
+                            </div>
+                            <div class="flex items-start justify-between p-4 bg-white/5 rounded-xl border border-white/5">
+                                <div class="flex-1 mr-4">
+                                    <h4 class="text-base font-medium text-white/90 mb-1">Show Sensitive Content</h4>
+                                    <p class="text-sm text-white/40 leading-relaxed">
+                                        Enable NSFW filter in channel exploration
+                                    </p>
+                                </div>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="nsfw-enabled" class="sr-only peer">
+                                    <div class="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white/60 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#F6851B]"></div>
                                 </label>
                             </div>
                         </div>

@@ -15,6 +15,7 @@ import { streamrController } from './streamr.js';
 import { subscriptionManager } from './subscriptionManager.js';
 import { historyManager } from './historyManager.js';
 import { relayManager } from './relayManager.js';
+import { dmManager } from './dm.js';
 
 // UI Modules
 import { notificationUI } from './ui/NotificationUI.js';
@@ -37,6 +38,7 @@ import { inputUI } from './ui/InputUI.js';
 import { headerUI } from './ui/HeaderUI.js';
 import { previewModeUI } from './ui/PreviewModeUI.js';
 import { channelModalsUI } from './ui/ChannelModalsUI.js';
+import { dmModalsUI } from './ui/DMModalsUI.js';
 import { init as initJoinChannelUI, getInstance as getJoinChannelUI } from './ui/JoinChannelUI.js';
 import { inviteUI } from './ui/InviteUI.js';
 import { channelViewUI } from './ui/ChannelViewUI.js';
@@ -131,6 +133,7 @@ class UIController {
             relayManager,
             notificationUI,
             contactsUI,
+            dmManager,
             showNotification: (msg, type) => this.showNotification(msg, type),
             updateWalletInfo: (address, isGuest) => headerUI.updateWalletInfo(address, isGuest),
             updateDisplayName: (username) => headerUI.updateDisplayName(username),
@@ -194,6 +197,16 @@ class UIController {
             selectChannel: (streamId) => this.selectChannel(streamId),
             updateQuickJoinHash: () => this.updateQuickJoinHash(),
             updateBrowseJoinButton: () => this.updateBrowseJoinButton()
+        });
+
+        // DMModalsUI
+        dmModalsUI.setDependencies({
+            dmManager,
+            modalManager,
+            authManager,
+            Logger,
+            showNotification: (msg, type) => this.showNotification(msg, type),
+            renderChannelList: () => this.renderChannelList()
         });
     }
     
@@ -279,6 +292,11 @@ class UIController {
             channelSettingsId: document.getElementById('channel-settings-id'),
             channelSettingsName: document.getElementById('channel-settings-name'),
             channelNameSection: document.getElementById('channel-name-section'),
+            editChannelNameBtn: document.getElementById('edit-channel-name-btn'),
+            channelNameEditContainer: document.getElementById('channel-name-edit-container'),
+            channelSettingsNameInput: document.getElementById('channel-settings-name-input'),
+            saveChannelNameBtn: document.getElementById('save-channel-name-btn'),
+            cancelChannelNameBtn: document.getElementById('cancel-channel-name-btn'),
             copyStreamIdBtn: document.getElementById('copy-stream-id-btn'),
             membersSection: document.getElementById('members-section'),
             nonNativeMessage: document.getElementById('non-native-message'),
@@ -1069,6 +1087,9 @@ class UIController {
 
         // Initialize contacts UI
         contactsUI.init();
+
+        // Initialize DM modals UI
+        dmModalsUI.init();
         
         // Initialize settings UI (delegates to SettingsUI)
         settingsUI.init();
@@ -1092,6 +1113,8 @@ class UIController {
     renderChannelList() {
         channelListUI.setFilter(this.currentChannelFilter);
         channelListUI.render();
+        // Update DM sidebar buttons visibility
+        dmModalsUI.updateVisibility();
     }
 
     /**
@@ -1417,8 +1440,7 @@ class UIController {
                 break;
                 
             case 'start-dm':
-                // TODO: Implement DM functionality
-                this.showNotification('DM feature coming soon!', 'info');
+                dmModalsUI.showNewDMModalWithAddress(address);
                 break;
         }
     }
@@ -1543,8 +1565,8 @@ class UIController {
                 const isSeeding = mediaController.isSeeding(fileId);
                 
                 // Defense-in-depth: sanitize network-provided metadata
-                const safeFileName = _escapeHtml(sanitizeText(metadata.fileName));
-                const safeFileType = _escapeHtml(sanitizeText(metadata.fileType));
+                const safeFileName = sanitizeText(metadata.fileName);
+                const safeFileType = sanitizeText(metadata.fileType);
                 
                 if (metadata.fileType.startsWith('video/')) {
                     // Check if video format is playable in browser

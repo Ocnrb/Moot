@@ -171,7 +171,7 @@ class JoinChannelUI {
             return;
         }
 
-        // For public visible channels with name, try direct join
+        // For channels with on-chain name, join directly - name is immutable
         try {
             notificationUI.showLoadingToast('Joining channel...', 'This may take a moment');
             await channelManager.joinChannel(streamId, null, {

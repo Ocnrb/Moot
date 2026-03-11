@@ -11,6 +11,9 @@ import { streamrController, deriveEphemeralId } from './streamr.js';
 import { authManager } from './auth.js';
 import { identityManager } from './identity.js';
 import { channelManager } from './channels.js';
+import { secureStorage } from './secureStorage.js';
+import { dmManager } from './dm.js';
+import { dmCrypto } from './dmCrypto.js';
 
 // === CONFIGURATION ===
 const CONFIG = {
@@ -346,8 +349,30 @@ class MediaController {
             channelManager.notifyHandlers('message', { streamId: messageStreamId, message: announcement });
         }
         
-        // Publish announcement with embedded data to messageStream (stored)
-        await streamrController.publishMessage(messageStreamId, announcement, password);
+        // DM channels: E2E encrypt and always persist locally
+        if (channel?.type === 'dm' && channel.peerAddress) {
+            const privateKey = authManager.wallet?.privateKey;
+            if (!privateKey) {
+                throw new Error('Cannot send DM image: wallet private key not available');
+            }
+            const peerPubKey = await dmManager.getPeerPublicKey(channel.peerAddress);
+            if (!peerPubKey) {
+                throw new Error('Cannot send DM image: peer public key not available');
+            }
+            const aesKey = await dmCrypto.getSharedKey(privateKey, channel.peerAddress, peerPubKey);
+            const { verified, ...cleanAnnouncement } = announcement;
+            const encrypted = await dmCrypto.encrypt(cleanAnnouncement, aesKey);
+            await streamrController.publishMessage(messageStreamId, encrypted, null);
+            await secureStorage.addSentMessage(messageStreamId, announcement);
+        } else {
+            // Regular channels: publish with optional Streamr-level encryption
+            await streamrController.publishMessage(messageStreamId, announcement, password);
+            // Persist locally for write-only channels
+            if (channel?.writeOnly) {
+                await secureStorage.addSentMessage(messageStreamId, announcement);
+            }
+        }
+        
         Logger.debug('Image message sent with data:', imageId);
         
         return { messageId, imageId, data: base64Data };
@@ -555,6 +580,12 @@ class MediaController {
                         
                         // Publish announcement to messageStream (stored)
                         await streamrController.publishMessage(messageStreamId, announcement, password);
+                        
+                        // Persist locally for write-only channels
+                        if (channel?.writeOnly) {
+                            await secureStorage.addSentMessage(messageStreamId, announcement);
+                        }
+                        
                         Logger.info('Video announced:', metadata.fileId, metadata.fileName);
                         
                         resolve({ messageId: announcement.id, metadata });

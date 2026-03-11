@@ -508,6 +508,132 @@ class SecureStorage {
         }
     }
 
+    // ==================== Sent Messages (Write-Only Channels) ====================
+
+    /**
+     * Get locally stored sent messages for a write-only channel
+     * @param {string} streamId - Stream ID
+     * @returns {Array} - Array of sent messages
+     */
+    getSentMessages(streamId) {
+        if (!this.isUnlocked) return [];
+        return this.cache.sentMessages?.[streamId] || [];
+    }
+
+    /**
+     * Add a sent message to local storage (for write-only channels)
+     * Stores text, image, and video_announce messages
+     * Keeps last 200 messages per channel to avoid storage bloat
+     * @param {string} streamId - Stream ID
+     * @param {Object} message - Message object to store
+     */
+    async addSentMessage(streamId, message) {
+        if (!this.isUnlocked) return;
+        if (!this.cache.sentMessages) {
+            this.cache.sentMessages = {};
+        }
+        if (!this.cache.sentMessages[streamId]) {
+            this.cache.sentMessages[streamId] = [];
+        }
+        // Store fields based on message type
+        const stored = {
+            id: message.id,
+            sender: message.sender,
+            timestamp: message.timestamp,
+            signature: message.signature,
+            channelId: message.channelId
+        };
+        if (message.type === 'image') {
+            stored.type = 'image';
+            stored.imageId = message.imageId;
+            stored.imageData = message.imageData;
+        } else if (message.type === 'video_announce') {
+            stored.type = 'video_announce';
+            stored.metadata = message.metadata;
+        } else {
+            // Text message
+            stored.text = message.text;
+            stored.replyTo = message.replyTo || null;
+        }
+        this.cache.sentMessages[streamId].push(stored);
+        // Cap at 200 messages per channel
+        if (this.cache.sentMessages[streamId].length > 200) {
+            this.cache.sentMessages[streamId] = this.cache.sentMessages[streamId].slice(-200);
+        }
+        await this.saveToStorage();
+    }
+
+    /**
+     * Clear sent messages for a channel
+     * @param {string} streamId - Stream ID
+     */
+    async clearSentMessages(streamId) {
+        if (!this.isUnlocked) return;
+        if (this.cache.sentMessages?.[streamId]) {
+            delete this.cache.sentMessages[streamId];
+            await this.saveToStorage();
+        }
+    }
+
+    /**
+     * Clear sent reactions for a channel
+     * @param {string} streamId - Stream ID
+     */
+    async clearSentReactions(streamId) {
+        if (!this.isUnlocked) return;
+        if (this.cache.sentReactions?.[streamId]) {
+            delete this.cache.sentReactions[streamId];
+            await this.saveToStorage();
+        }
+    }
+
+    /**
+     * Get locally stored reactions for a write-only channel
+     * @param {string} streamId - Stream ID
+     * @returns {Object} - Reactions object { messageId -> { emoji -> [users] } }
+     */
+    getSentReactions(streamId) {
+        if (!this.isUnlocked) return {};
+        return this.cache.sentReactions?.[streamId] || {};
+    }
+
+    /**
+     * Add a reaction to local storage (for write-only channels)
+     * @param {string} streamId - Stream ID
+     * @param {string} messageId - Message ID
+     * @param {string} emoji - Emoji
+     * @param {string} user - User address
+     * @param {string} action - 'add' or 'remove'
+     */
+    async addSentReaction(streamId, messageId, emoji, user, action = 'add') {
+        if (!this.isUnlocked) return;
+        if (!this.cache.sentReactions) {
+            this.cache.sentReactions = {};
+        }
+        if (!this.cache.sentReactions[streamId]) {
+            this.cache.sentReactions[streamId] = {};
+        }
+        const reactions = this.cache.sentReactions[streamId];
+        if (!reactions[messageId]) {
+            reactions[messageId] = {};
+        }
+        if (!reactions[messageId][emoji]) {
+            reactions[messageId][emoji] = [];
+        }
+        const normalizedUser = user.toLowerCase();
+        const idx = reactions[messageId][emoji].findIndex(u => u.toLowerCase() === normalizedUser);
+        if (action === 'remove') {
+            if (idx >= 0) {
+                reactions[messageId][emoji].splice(idx, 1);
+                if (reactions[messageId][emoji].length === 0) delete reactions[messageId][emoji];
+                if (Object.keys(reactions[messageId]).length === 0) delete reactions[messageId];
+            }
+        } else {
+            if (idx < 0) reactions[messageId][emoji].push(user);
+        }
+        await this.saveToStorage();
+    }
+
     // ==================== Last Opened Channel ====================
 
     /**
@@ -603,7 +729,8 @@ class SecureStorage {
                 trustedContacts: this.cache.trustedContacts || {},
                 ensCache: this.cache.ensCache || {},
                 username: this.cache.username,
-                graphApiKey: this.cache.graphApiKey
+                graphApiKey: this.cache.graphApiKey,
+                sentMessages: this.cache.sentMessages || {}
             }
         };
 

@@ -409,22 +409,18 @@ body {
 /* Dropdown open/close animation */
 @keyframes dropdownOpen {
     from {
-        opacity: 0;
         transform: scale(0.95) translateY(-4px);
     }
     to {
-        opacity: 1;
         transform: scale(1) translateY(0);
     }
 }
 
 @keyframes dropdownOpenUp {
     from {
-        opacity: 0;
         transform: scale(0.95) translateY(4px);
     }
     to {
-        opacity: 1;
         transform: scale(1) translateY(0);
     }
 }
@@ -1608,6 +1604,11 @@ body {
         display: none !important;
     }
 
+    /* Add top spacing to settings modal since header is hidden */
+    #settings-modal > div {
+        padding-top: 2rem !important;
+    }
+
     /* Hide contacts modal header and close button on mobile */
     #contacts-modal > div > .flex.items-center.gap-2.mb-4 {
         display: none !important;
@@ -1730,35 +1731,19 @@ body {
         padding: 0;
         margin: 0;
         gap: 0;
+        background: rgba(255, 255, 255, 0.02);
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
         border-bottom: 1px solid rgba(255, 255, 255, 0.06);
         position: relative;
         box-sizing: border-box;
     }
 
-    /* Subtle orange glow on edges to indicate scroll */
+    /* Remove the orange glow effects */
     #settings-carousel::before,
     #settings-carousel::after,
     #channel-settings-carousel::before,
     #channel-settings-carousel::after {
-        content: '';
-        position: absolute;
-        top: 0;
-        bottom: 0;
-        width: 20px;
-        pointer-events: none;
-        z-index: 1;
-    }
-
-    #settings-carousel::before,
-    #channel-settings-carousel::before {
-        left: 0;
-        background: linear-gradient(to right, rgba(246, 133, 27, 0.15), transparent);
-    }
-
-    #settings-carousel::after,
-    #channel-settings-carousel::after {
-        right: 0;
-        background: linear-gradient(to left, rgba(246, 133, 27, 0.15), transparent);
+        display: none;
     }
 
     #settings-carousel .carousel-tabs,
@@ -1772,25 +1757,24 @@ body {
 
     #settings-carousel .carousel-tab,
     #channel-settings-carousel .carousel-tab {
-        padding: 0.75rem 0;
+        padding: 0.875rem 0 0.75rem 0;
         margin: 0;
-        font-size: 10px;
-        font-weight: 300;
-        text-transform: uppercase;
-        color: rgba(255, 255, 255, 0.3);
+        font-size: 14px;
+        font-weight: 500;
+        text-transform: none;
+        color: rgba(255, 255, 255, 0.6);
         transition: all 0.3s ease;
         white-space: nowrap;
         text-align: center;
         cursor: pointer;
         border-bottom: 2px solid transparent;
-        margin-bottom: -1px;
         box-sizing: border-box;
     }
 
     #settings-carousel .carousel-tab.active,
     #channel-settings-carousel .carousel-tab.active {
-        color: #F6851B;
-        font-weight: 400;
+        color: white;
+        font-weight: 500;
         cursor: default;
         border-bottom-color: #F6851B;
     }

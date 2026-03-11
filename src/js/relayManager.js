@@ -383,6 +383,7 @@ class RelayManager {
         }
         
         const channels = [];
+        const dmPeers = []; // Mapping of peer addresses to names for DM notifications
         
         // Default storage endpoints (March 2026)
         const DEFAULT_STORAGE_ENDPOINTS = [
@@ -394,34 +395,68 @@ class RelayManager {
             'https://storage-cluster-6.streamr.network:8002',
         ];
         
-        // Public/password channels
+        // Build DM peers mapping from all DM channels
+        for (const [streamId, channel] of channelManager.channels) {
+            if (channel.type === 'dm' && channel.peerAddress && channel.name) {
+                dmPeers.push({
+                    address: channel.peerAddress.toLowerCase(),
+                    name: channel.name
+                });
+            }
+        }
+        
+        // Public/password channels (and DM inboxes)
         for (const streamId of this.subscribedChannels) {
             const channelInfo = channelManager.channels.get(streamId);
             const channelTag = calculateChannelTag(streamId);
             
+            // Determine name and type based on channel info or stream ID pattern
+            let name = 'Channel';
+            let type = channelInfo?.isPrivate ? 'private' : 'public';
+            
+            // Check if this is a DM inbox (user's own inbox for receiving DMs)
+            const isDMInbox = streamId.toLowerCase().includes('/pombo-dm-');
+            
+            if (channelInfo?.type === 'dm') {
+                // DM channel - use saved name or fallback
+                name = channelInfo.name || 'Direct Message';
+                type = 'dm';
+            } else if (isDMInbox && !channelInfo) {
+                // DM inbox subscription without channel info
+                name = 'Direct Message';
+                type = 'dm';
+            } else if (channelInfo?.name) {
+                name = channelInfo.name;
+            }
+            
             channels.push({
                 streamId,
-                type: channelInfo?.isPrivate ? 'private' : 'public',
-                name: channelInfo?.name || 'Channel',
+                type,
+                name,
                 tag: channelTag,
                 storageEndpoints: channelInfo?.storageEndpoints || DEFAULT_STORAGE_ENDPOINTS
             });
         }
         
-        // Native channels (DMs)
+        // Native channels (group chats, not DMs)
         for (const streamId of this.subscribedNativeChannels) {
             const channelInfo = channelManager.channels.get(streamId);
             const channelTag = calculateNativeChannelTag(streamId);
             
-            // For DMs, try to get the other participant's name
-            let name = 'Direct Message';
-            if (channelInfo?.participants) {
+            // Use saved name first, then try to get from participants, then fallback
+            let name = channelInfo?.name;
+            
+            if (!name && channelInfo?.participants) {
                 const otherParticipant = channelInfo.participants.find(
                     p => p.address?.toLowerCase() !== this.walletAddress?.toLowerCase()
                 );
                 if (otherParticipant?.nickname) {
                     name = otherParticipant.nickname;
                 }
+            }
+            
+            if (!name) {
+                name = 'Direct Message';
             }
             
             channels.push({
@@ -435,10 +470,11 @@ class RelayManager {
         
         navigator.serviceWorker.controller.postMessage({
             type: 'SYNC_CHANNELS',
-            channels
+            channels,
+            dmPeers
         });
         
-        Logger.debug('Synced', channels.length, 'channels to Service Worker');
+        Logger.debug('Synced', channels.length, 'channels and', dmPeers.length, 'DM peers to Service Worker');
     }
     
     /**

@@ -51,6 +51,18 @@ export const CONFIG = {
         defaultRetentionDays: 180
     },
 
+    // DM Configuration
+    dm: {
+        // Deterministic stream path prefix
+        streamPrefix: 'Pombo-DM',
+        // Max conversations stored locally
+        maxConversations: 100,
+        // Max sent messages per conversation (local storage)
+        maxSentMessages: 200,
+        // Inbox history to load on login
+        inboxHistoryCount: 100,
+    },
+
     // Application Metadata
     app: {
         name: 'pombo',

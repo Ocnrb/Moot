@@ -146,6 +146,17 @@ class ChannelModalsUI {
             content.classList.toggle('hidden', content.id !== `tab-${tabType}`);
         });
         
+        // Show/hide type-specific fields
+        const passwordSection = document.getElementById('password-field-section');
+        const nativeSection = document.getElementById('native-fields-section');
+        
+        if (passwordSection) {
+            passwordSection.classList.toggle('hidden', tabType !== 'password');
+        }
+        if (nativeSection) {
+            nativeSection.classList.toggle('hidden', tabType !== 'native');
+        }
+        
         // Update cost display in footer
         document.querySelectorAll('.channel-cost-display').forEach(cost => {
             cost.classList.add('hidden');

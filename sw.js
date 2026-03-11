@@ -4,18 +4,19 @@
 // to have scope over all pages.
 // ================================================
 
-const SW_VERSION = '2.0.0';
+const SW_VERSION = '2.1.0';
 
 // ================================================
 // INDEXEDDB CONFIGURATION
 // ================================================
 
 const DB_NAME = 'pombo-sw';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORES = {
     CHANNELS: 'channels',
     LAST_SEEN: 'lastSeen',
-    CONFIG: 'config'
+    CONFIG: 'config',
+    DM_PEERS: 'dmPeers'
 };
 
 let db = null;
@@ -73,6 +74,12 @@ async function openDatabase() {
             if (!database.objectStoreNames.contains(STORES.CONFIG)) {
                 database.createObjectStore(STORES.CONFIG, { keyPath: 'key' });
                 console.log('[SW] Created config store');
+            }
+            
+            // DM Peers store (address -> name mapping)
+            if (!database.objectStoreNames.contains(STORES.DM_PEERS)) {
+                database.createObjectStore(STORES.DM_PEERS, { keyPath: 'address' });
+                console.log('[SW] Created dmPeers store');
             }
         };
     });
@@ -166,6 +173,54 @@ async function syncChannelsToIndexedDB(channels) {
     });
 }
 
+async function syncDMPeersToIndexedDB(dmPeers) {
+    if (!db) await openDatabase();
+    if (!dmPeers || dmPeers.length === 0) return;
+    
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORES.DM_PEERS, 'readwrite');
+        const store = tx.objectStore(STORES.DM_PEERS);
+        
+        // Clear old peers
+        const clearReq = store.clear();
+        
+        clearReq.onsuccess = () => {
+            // Add new peers
+            for (const peer of dmPeers) {
+                store.put({
+                    address: peer.address.toLowerCase(),
+                    name: peer.name
+                });
+            }
+        };
+        
+        tx.oncomplete = () => {
+            console.log('[SW] Synced', dmPeers.length, 'DM peers to IndexedDB');
+            resolve();
+        };
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+async function getDMPeerName(address) {
+    if (!db) await openDatabase();
+    if (!address) return null;
+    
+    return new Promise((resolve) => {
+        const tx = db.transaction(STORES.DM_PEERS, 'readonly');
+        const store = tx.objectStore(STORES.DM_PEERS);
+        
+        const request = store.get(address.toLowerCase());
+        
+        request.onsuccess = () => {
+            resolve(request.result?.name || null);
+        };
+        request.onerror = () => {
+            resolve(null);
+        };
+    });
+}
+
 // ================================================
 // HTTP VERIFICATION FUNCTIONS
 // ================================================
@@ -252,9 +307,9 @@ async function verifyChannel(channel) {
 function getMessagePreview(channel) {
     const { type, content } = channel;
     
-    // Private/native channels - content is encrypted
-    if (type === 'private' || type === 'native') {
-        return type === 'native' 
+    // DM/Private/native channels - content is encrypted
+    if (type === 'dm' || type === 'private' || type === 'native') {
+        return (type === 'dm' || type === 'native')
             ? 'New direct message' 
             : 'New encrypted message';
     }
@@ -374,7 +429,16 @@ async function handlePushWithVerification(pushData) {
 }
 
 async function showVerifiedNotification(channelWithNews) {
-    const title = channelWithNews.name || 'Pombo';
+    // For DM notifications, look up the sender's name
+    let title = channelWithNews.name || 'Pombo';
+    
+    if (channelWithNews.type === 'dm' && channelWithNews.publisherId) {
+        const senderName = await getDMPeerName(channelWithNews.publisherId);
+        if (senderName) {
+            title = senderName;
+        }
+    }
+    
     const body = getMessagePreview(channelWithNews);
     
     const options = {
@@ -489,6 +553,12 @@ self.addEventListener('message', async (event) => {
     if (type === 'SYNC_CHANNELS') {
         console.log('[SW] Syncing channels:', event.data.channels?.length || 0);
         await syncChannelsToIndexedDB(event.data.channels || []);
+        
+        // Also sync DM peer names if provided
+        if (event.data.dmPeers && event.data.dmPeers.length > 0) {
+            console.log('[SW] Syncing DM peers:', event.data.dmPeers.length);
+            await syncDMPeersToIndexedDB(event.data.dmPeers);
+        }
         return;
     }
     

@@ -591,6 +591,169 @@ class StreamrController {
         }, { maxRetries: retries });
     }
 
+
+
+    /**
+     * Get the deterministic DM inbox (message) stream ID for an address
+     * @param {string} address - Ethereum address
+     * @returns {string} - Stream ID: {address}/Pombo-DM-1
+     */
+    getDMInboxId(address) {
+        return `${address.toLowerCase()}/${CONFIG.dm.streamPrefix}-1`;
+    }
+
+    /**
+     * Get the deterministic DM ephemeral stream ID for an address
+     * @param {string} address - Ethereum address
+     * @returns {string} - Stream ID: {address}/Pombo-DM-2
+     */
+    getDMEphemeralId(address) {
+        return `${address.toLowerCase()}/${CONFIG.dm.streamPrefix}-2`;
+    }
+
+    /**
+     * Fetch the public key stored in a DM inbox stream's metadata.
+     * @param {string} address - Ethereum address of the inbox owner
+     * @returns {Promise<string|null>} - Compressed public key hex, or null if not found
+     */
+    async getDMPublicKey(address) {
+        const streamId = this.getDMInboxId(address);
+        try {
+            const stream = await this.client.getStream(streamId);
+            if (!stream) {
+                Logger.warn('DM: getStream returned null for', streamId);
+                return null;
+            }
+            const desc = await stream.getDescription();
+            if (!desc) return null;
+            const meta = JSON.parse(desc);
+            return meta.pk || null;
+        } catch (e) {
+            Logger.warn('DM: Could not fetch public key for', address, ':', e.message);
+            return null;
+        }
+    }
+
+    /**
+     * Create the DM inbox for the current user (dual-stream: message + ephemeral)
+     * Idempotent — if streams already exist, returns their IDs without recreating.
+     * Permissions: public SUBSCRIBE + PUBLISH (Streamr is a blind pipe; E2E encryption at app layer)
+     * @param {string} publicKey - Owner's compressed public key (hex, for ECDH)
+     * @param {Object} options - Storage options
+     * @param {string} options.storageProvider - 'streamr' or 'logstore' (default: 'streamr')
+     * @param {number} options.storageDays - Retention days for Streamr (default: 180)
+     * @returns {Promise<{messageStreamId: string, ephemeralStreamId: string}>}
+     */
+    async createDMInbox(publicKey, options = {}) {
+        if (!this.client) {
+            throw new Error('Streamr client not initialized');
+        }
+
+        const myAddress = this.address;
+        const messageStreamId = this.getDMInboxId(myAddress);
+        const ephemeralStreamId = this.getDMEphemeralId(myAddress);
+
+        Logger.info('Creating DM inbox:', { messageStreamId, ephemeralStreamId, options });
+
+        const metadata = JSON.stringify({
+            a: CONFIG.app.name,
+            v: CONFIG.app.version,
+            t: 'dm-inbox',
+            pk: publicKey
+        });
+
+        const ephemeralMetadata = JSON.stringify({
+            a: CONFIG.app.name,
+            v: CONFIG.app.version,
+            ln: messageStreamId
+        });
+
+        // Helper: get existing stream or create new one
+        const getOrCreate = async (streamId, desc, partitions) => {
+            try {
+                const existing = await this.client.getStream(streamId);
+                Logger.info(`DM stream already exists: ${streamId}`);
+                // Update metadata if public key is missing (upgrade path for pre-E2E inboxes)
+                if (publicKey && streamId === messageStreamId) {
+                    try {
+                        const currentDesc = await existing.getDescription();
+                        const meta = currentDesc ? JSON.parse(currentDesc) : {};
+                        if (!meta.pk) {
+                            meta.pk = publicKey;
+                            await existing.setDescription(JSON.stringify(meta));
+                            Logger.info('DM: Updated inbox metadata with public key');
+                        }
+                    } catch (metaErr) {
+                        Logger.debug('DM: Could not update stream metadata:', metaErr.message);
+                    }
+                }
+                return existing;
+            } catch (e) {
+                // Stream doesn't exist — create it
+                Logger.info(`Creating DM stream: ${streamId}`);
+                return executeWithRetryAndVerify(
+                    `createDMStream(${streamId})`,
+                    async () => {
+                        const stream = await this.client.createStream({
+                            id: streamId,
+                            description: desc,
+                            partitions
+                        });
+                        return stream;
+                    },
+                    async () => {
+                        const s = await this.client.getStream(streamId);
+                        return s || null;
+                    },
+                    { maxRetries: 7 }
+                );
+            }
+        };
+
+        // Step 1: Create/get message stream (sequential to avoid nonce conflicts)
+        const messageStream = await getOrCreate(
+            messageStreamId,
+            metadata,
+            STREAM_CONFIG.MESSAGE_STREAM.PARTITIONS
+        );
+
+        // Step 2: Create/get ephemeral stream
+        const ephemeralStream = await getOrCreate(
+            ephemeralStreamId,
+            ephemeralMetadata,
+            STREAM_CONFIG.EPHEMERAL_STREAM.PARTITIONS
+        );
+
+        // Step 3: Set public subscribe+publish permissions (E2E encrypted at app layer)
+        try {
+            await this.grantPublicPermissions(messageStream);
+            Logger.info('✓ DM message stream: public subscribe+publish permissions set');
+        } catch (e) {
+            Logger.error('✗ DM message stream permissions failed:', e.message);
+        }
+
+        try {
+            await this.grantPublicPermissions(ephemeralStream);
+            Logger.info('✓ DM ephemeral stream: public subscribe+publish permissions set');
+        } catch (e) {
+            Logger.error('✗ DM ephemeral stream permissions failed:', e.message);
+        }
+
+        // Step 4: Enable storage on message stream with user-selected options
+        try {
+            await this.enableStorage(messageStreamId, {
+                storageProvider: options.storageProvider,
+                storageDays: options.storageDays
+            });
+            Logger.info('✓ DM inbox storage enabled');
+        } catch (e) {
+            Logger.warn('DM inbox storage failed (continuing):', e.message);
+        }
+
+        Logger.info('✓ DM inbox ready:', messageStreamId);
+        return { messageStreamId, ephemeralStreamId };
+    }
+
     /**
      * Grant permissions to specific addresses (for native private channels)
      * Uses client.setPermissions for batch operation (single transaction)
@@ -1108,7 +1271,8 @@ class StreamrController {
         // These are UI state that should not be sent over the network:
         // - verified: each receiver must verify independently
         // - pending: only meaningful to the sender
-        const { verified, pending, ...networkMessage } = message;
+        // - _dmSent: local DM tracking flag
+        const { verified, pending, _dmSent, ...networkMessage } = message;
         
         return await this.publish(messageStreamId, STREAM_CONFIG.MESSAGE_STREAM.MESSAGES, networkMessage, password);
     }
@@ -1277,10 +1441,18 @@ class StreamrController {
         if (this.client) {
             // Unsubscribe from all streams
             for (const streamId of this.subscriptions.keys()) {
-                await this.unsubscribe(streamId);
+                try {
+                    await this.unsubscribe(streamId);
+                } catch (e) {
+                    Logger.warn(`Unsubscribe failed for ${streamId} during disconnect:`, e.message);
+                }
             }
 
-            await this.client.destroy();
+            try {
+                await this.client.destroy();
+            } catch (e) {
+                Logger.warn('Streamr client destroy error (ignored):', e.message);
+            }
             this.client = null;
             Logger.info('Streamr client disconnected');
         }
@@ -1658,9 +1830,14 @@ class StreamrController {
             // Helper to check if message is a video announcement
             const isVideoMessage = (msg) => msg?.type === 'video_announce' && msg?.metadata;
             
+            // Helper to check if message is an E2E encrypted envelope (DM messages)
+            // These are decrypted downstream by routeInboxMessage, not here
+            // Format: { ct: base64, iv: base64, e: 'aes-256-gcm' }
+            const isEncryptedEnvelope = (msg) => !!(msg && typeof msg.ct === 'string' && typeof msg.iv === 'string' && msg.e === 'aes-256-gcm');
+            
             // Valid message types for partition 0 (stored messages)
             const isValidStoredMessage = (msg) => {
-                return isTextMessage(msg) || isReaction(msg) || isImageMessage(msg) || isVideoMessage(msg);
+                return isTextMessage(msg) || isReaction(msg) || isImageMessage(msg) || isVideoMessage(msg) || isEncryptedEnvelope(msg);
             };
             
             for await (const message of resend) {
@@ -1679,6 +1856,16 @@ class StreamrController {
                             }
                             skippedCount++;
                             continue;
+                        }
+                    }
+
+                    // Inject senderId from StreamMessage (same as realtime handler)
+                    if (typeof content === 'object') {
+                        const publisherId = typeof message.getPublisherId === 'function'
+                            ? message.getPublisherId()
+                            : message.publisherId;
+                        if (publisherId) {
+                            content.senderId = publisherId;
                         }
                     }
                     

@@ -1625,6 +1625,10 @@ video {
   border-color: rgb(255 255 255 / 0.05);
 }
 
+.border-white\/\[0\.01\] {
+  border-color: rgb(255 255 255 / 0.01);
+}
+
 .border-white\/\[0\.04\] {
   border-color: rgb(255 255 255 / 0.04);
 }
@@ -1674,10 +1678,6 @@ video {
 .bg-\[\#09090b\] {
   --tw-bg-opacity: 1;
   background-color: rgb(9 9 11 / var(--tw-bg-opacity, 1));
-}
-
-.bg-\[\#09090b\]\/95 {
-  background-color: rgb(9 9 11 / 0.95);
 }
 
 .bg-\[\#0a0a0a\] {
@@ -2099,6 +2099,10 @@ video {
   padding-bottom: 0.75rem;
 }
 
+.pb-32 {
+  padding-bottom: 8rem;
+}
+
 .pb-4 {
   padding-bottom: 1rem;
 }
@@ -2113,6 +2117,10 @@ video {
 
 .pl-10 {
   padding-left: 2.5rem;
+}
+
+.pl-3 {
+  padding-left: 0.75rem;
 }
 
 .pl-6 {
@@ -2546,12 +2554,6 @@ video {
   backdrop-filter: var(--tw-backdrop-blur) var(--tw-backdrop-brightness) var(--tw-backdrop-contrast) var(--tw-backdrop-grayscale) var(--tw-backdrop-hue-rotate) var(--tw-backdrop-invert) var(--tw-backdrop-opacity) var(--tw-backdrop-saturate) var(--tw-backdrop-sepia);
 }
 
-.backdrop-blur-xl {
-  --tw-backdrop-blur: blur(24px);
-  -webkit-backdrop-filter: var(--tw-backdrop-blur) var(--tw-backdrop-brightness) var(--tw-backdrop-contrast) var(--tw-backdrop-grayscale) var(--tw-backdrop-hue-rotate) var(--tw-backdrop-invert) var(--tw-backdrop-opacity) var(--tw-backdrop-saturate) var(--tw-backdrop-sepia);
-  backdrop-filter: var(--tw-backdrop-blur) var(--tw-backdrop-brightness) var(--tw-backdrop-contrast) var(--tw-backdrop-grayscale) var(--tw-backdrop-hue-rotate) var(--tw-backdrop-invert) var(--tw-backdrop-opacity) var(--tw-backdrop-saturate) var(--tw-backdrop-sepia);
-}
-
 .transition {
   transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, -webkit-backdrop-filter;
   transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter;
@@ -2688,9 +2690,19 @@ select option {
   top: 2px;
 }
 
+.after\:h-4::after {
+  content: var(--tw-content);
+  height: 1rem;
+}
+
 .after\:h-5::after {
   content: var(--tw-content);
   height: 1.25rem;
+}
+
+.after\:w-4::after {
+  content: var(--tw-content);
+  width: 1rem;
 }
 
 .after\:w-5::after {
@@ -2742,6 +2754,10 @@ select option {
 
 .hover\:bg-\[\#F6851B\]\/25:hover {
   background-color: rgb(246 133 27 / 0.25);
+}
+
+.hover\:bg-\[\#F6851B\]\/80:hover {
+  background-color: rgb(246 133 27 / 0.8);
 }
 
 .hover\:bg-\[\#e5780f\]:hover {
@@ -3112,6 +3128,10 @@ select option {
   .md\:px-6 {
     padding-left: 1.5rem;
     padding-right: 1.5rem;
+  }
+
+  .md\:pb-3 {
+    padding-bottom: 0.75rem;
   }
 
   .md\:text-lg {

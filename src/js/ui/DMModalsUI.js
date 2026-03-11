@@ -1,0 +1,313 @@
+/**
+ * DM Modals UI
+ * Handles DM inbox creation button and new-DM modal
+ */
+
+class DMModalsUI {
+    constructor() {
+        this.deps = {};
+        this.selectedStorageProvider = 'streamr';
+        this.selectedStorageDays = 180;
+    }
+
+    setDependencies(deps) {
+        this.deps = { ...this.deps, ...deps };
+    }
+
+    get dmManager() { return this.deps.dmManager; }
+    get modalManager() { return this.deps.modalManager; }
+    get authManager() { return this.deps.authManager; }
+    get Logger() { return this.deps.Logger; }
+
+    showNotification(message, type) {
+        this.deps.showNotification?.(message, type);
+    }
+
+    init() {
+        // Inbox setup button
+        const openDmBtn = document.getElementById('open-dm-btn');
+        if (openDmBtn) {
+            openDmBtn.addEventListener('click', () => this.showCreateInboxModal());
+        }
+
+        // New DM button
+        const newDmBtn = document.getElementById('new-dm-btn');
+        if (newDmBtn) {
+            newDmBtn.addEventListener('click', () => this.showNewDMModal());
+        }
+
+        // Modal buttons
+        const cancelDmBtn = document.getElementById('cancel-dm-btn');
+        if (cancelDmBtn) {
+            cancelDmBtn.addEventListener('click', () => this.hideNewDMModal());
+        }
+
+        const startDmBtn = document.getElementById('start-dm-btn');
+        if (startDmBtn) {
+            startDmBtn.addEventListener('click', () => this.handleStartDM());
+        }
+
+        // Enter key in address input
+        const addressInput = document.getElementById('dm-address-input');
+        if (addressInput) {
+            addressInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') this.handleStartDM();
+            });
+        }
+
+        // Close modal on backdrop click
+        const modal = document.getElementById('new-dm-modal');
+        if (modal) {
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) this.hideNewDMModal();
+            });
+        }
+
+        // Initialize DM Inbox Setup Modal
+        this.initCreateInboxModal();
+    }
+
+    /**
+     * Initialize DM Inbox Setup Modal handlers
+     */
+    initCreateInboxModal() {
+        const modal = document.getElementById('dm-inbox-setup-modal');
+        if (!modal) return;
+
+        // Close buttons
+        const cancelBtn = document.getElementById('cancel-dm-inbox-btn');
+        const cancelBtnFooter = document.getElementById('cancel-dm-inbox-btn-footer');
+        
+        cancelBtn?.addEventListener('click', () => this.hideCreateInboxModal());
+        cancelBtnFooter?.addEventListener('click', () => this.hideCreateInboxModal());
+
+        // Backdrop click
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) this.hideCreateInboxModal();
+        });
+
+        // Create button
+        const createBtn = document.getElementById('create-dm-inbox-btn');
+        createBtn?.addEventListener('click', () => this.handleCreateInbox());
+
+        // Storage provider tabs
+        const storageTabs = modal.querySelectorAll('.dm-storage-provider-tab');
+        storageTabs.forEach(tab => {
+            tab.addEventListener('click', () => this.selectStorageProvider(tab.dataset.dmStorage));
+        });
+
+        // Storage days slider
+        const storageDaysSlider = document.getElementById('dm-storage-days-input');
+        storageDaysSlider?.addEventListener('input', () => {
+            const value = parseInt(storageDaysSlider.value);
+            this.selectedStorageDays = value;
+            this.updateStorageDaysDisplay(value);
+        });
+
+        // Learn more buttons - open storage info modal
+        const learnMoreBtns = modal.querySelectorAll('.dm-storage-learn-more-btn');
+        learnMoreBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.modalManager?.show('storage-info-modal');
+            });
+        });
+    }
+
+    /**
+     * Select storage provider
+     */
+    selectStorageProvider(provider) {
+        this.selectedStorageProvider = provider;
+        
+        const tabs = document.querySelectorAll('.dm-storage-provider-tab');
+        tabs.forEach(tab => {
+            const isActive = tab.dataset.dmStorage === provider;
+            tab.classList.toggle('bg-white/10', isActive);
+            tab.classList.toggle('text-white', isActive);
+            tab.classList.toggle('border-white/10', isActive);
+            tab.classList.toggle('bg-white/5', !isActive);
+            tab.classList.toggle('text-white/50', !isActive);
+            tab.classList.toggle('border-white/5', !isActive);
+        });
+
+        // Show/hide storage days section based on provider
+        const storageDaysSection = document.getElementById('dm-storage-days-section');
+        const logstoreInfo = document.getElementById('dm-logstore-info');
+        
+        if (provider === 'streamr') {
+            storageDaysSection?.classList.remove('hidden');
+            logstoreInfo?.classList.add('hidden');
+        } else {
+            storageDaysSection?.classList.add('hidden');
+            logstoreInfo?.classList.remove('hidden');
+        }
+    }
+
+    /**
+     * Update storage days display
+     */
+    updateStorageDaysDisplay(days) {
+        const display = document.getElementById('dm-storage-days-value');
+        if (display) {
+            display.textContent = `${days} day${days !== 1 ? 's' : ''}`;
+        }
+    }
+
+    /**
+     * Show Create Inbox Modal
+     */
+    showCreateInboxModal() {
+        // Reset to defaults
+        this.selectedStorageProvider = 'streamr';
+        this.selectedStorageDays = 180;
+        
+        // Reset UI
+        this.selectStorageProvider('streamr');
+        const slider = document.getElementById('dm-storage-days-input');
+        if (slider) slider.value = '180';
+        this.updateStorageDaysDisplay(180);
+        
+        this.modalManager?.show('dm-inbox-setup-modal');
+    }
+
+    /**
+     * Hide Create Inbox Modal
+     */
+    hideCreateInboxModal() {
+        this.modalManager?.hide('dm-inbox-setup-modal');
+    }
+
+    /**
+     * Update sidebar DM buttons visibility based on inbox state
+     */
+    async updateVisibility() {
+        const setupWrap = document.getElementById('dm-inbox-setup');
+        const newBtnWrap = document.getElementById('dm-new-btn-wrap');
+
+        if (!this.dmManager || !this.authManager) {
+            setupWrap?.classList.add('hidden');
+            newBtnWrap?.classList.add('hidden');
+            return;
+        }
+
+        // Only show for non-guest connected users
+        if (!this.authManager.isConnected() || this.authManager.isGuestMode?.()) {
+            setupWrap?.classList.add('hidden');
+            newBtnWrap?.classList.add('hidden');
+            return;
+        }
+
+        const hasInbox = await this.dmManager.hasInbox();
+
+        if (hasInbox) {
+            setupWrap?.classList.add('hidden');
+            newBtnWrap?.classList.remove('hidden');
+        } else {
+            setupWrap?.classList.remove('hidden');
+            newBtnWrap?.classList.add('hidden');
+        }
+    }
+
+    /**
+     * Handle "Create DM Inbox" button click — creates inbox streams with selected options
+     */
+    async handleCreateInbox() {
+        const btn = document.getElementById('create-dm-inbox-btn');
+        if (!btn) return;
+
+        const originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="animate-pulse">Creating inbox...</span>';
+
+        try {
+            // Prepare options based on user selection
+            const options = {
+                storageProvider: this.selectedStorageProvider,
+                storageDays: this.selectedStorageProvider === 'streamr' ? this.selectedStorageDays : null
+            };
+
+            await this.dmManager.createInbox(options);
+            this.hideCreateInboxModal();
+            this.showNotification('DM inbox created!', 'success');
+            await this.updateVisibility();
+        } catch (err) {
+            this.Logger?.error('DMModalsUI: Failed to create inbox', err);
+            this.showNotification('Failed to create DM inbox', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        }
+    }
+
+    /**
+     * Show the "New DM" modal
+     */
+    showNewDMModal() {
+        this.modalManager?.show('new-dm-modal', {
+            clearInputs: true,
+            focusElement: '#dm-address-input'
+        });
+    }
+
+    /**
+     * Show the "New DM" modal pre-filled with an address
+     */
+    showNewDMModalWithAddress(address) {
+        this.showNewDMModal();
+        const input = document.getElementById('dm-address-input');
+        if (input) input.value = address;
+    }
+
+    /**
+     * Hide the "New DM" modal
+     */
+    hideNewDMModal() {
+        this.modalManager?.hide('new-dm-modal');
+    }
+
+    /**
+     * Handle "Start DM" button in the modal
+     */
+    async handleStartDM() {
+        const addressInput = document.getElementById('dm-address-input');
+        const nameInput = document.getElementById('dm-localname-input');
+        const btn = document.getElementById('start-dm-btn');
+
+        const address = addressInput?.value.trim();
+        const localName = nameInput?.value.trim() || undefined;
+
+        if (!address) {
+            this.showNotification('Enter an address or ENS name', 'error');
+            return;
+        }
+
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Starting...';
+        }
+
+        try {
+            await this.dmManager.startDM(address, localName);
+            this.hideNewDMModal();
+            this.deps.renderChannelList?.();
+        } catch (err) {
+            this.Logger?.error('DMModalsUI: startDM failed', err);
+            this.showNotification(err.message || 'Failed to start DM', 'error');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'Start DM';
+            }
+        }
+    }
+
+    /**
+     * Hide all DM sidebar elements (disconnect cleanup)
+     */
+    hideAll() {
+        document.getElementById('dm-inbox-setup')?.classList.add('hidden');
+        document.getElementById('dm-new-btn-wrap')?.classList.add('hidden');
+    }
+}
+
+export const dmModalsUI = new DMModalsUI();

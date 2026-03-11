@@ -223,10 +223,10 @@ class SubscriptionManager {
         if (msg.type === 'presence') {
             channelManager.handlePresenceMessage(streamId, msg);
         } else if (msg.type === 'typing') {
-            // Could notify UI of typing indicators if needed
+            // Use senderId from Streamr SDK (cryptographically guaranteed)
             channelManager.notifyHandlers('typing', { 
                 streamId: streamId, 
-                user: msg.user 
+                user: msg.senderId || msg.user 
             });
         }
     }
@@ -424,8 +424,11 @@ class SubscriptionManager {
 
         try {
             const channels = channelManager.getAllChannels();
-            // Filter out the active channel (compare using messageStreamId)
+            // Filter out the active channel and DM channels
+            // DM channels use E2E encryption and real-time inbox subscription,
+            // not Streamr-level storage polling
             const backgroundChannels = channels.filter(c => {
+                if (c.type === 'dm') return false;
                 const channelMsgId = c.messageStreamId || c.streamId;
                 return channelMsgId !== this.activeChannelId;
             });

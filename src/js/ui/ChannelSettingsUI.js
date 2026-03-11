@@ -34,6 +34,8 @@ class ChannelSettingsUI {
      */
     setElements(elements) {
         this.elements = elements;
+        // Initialize channel name edit handlers after elements are set
+        this.initChannelNameEdit();
     }
 
     /**
@@ -67,7 +69,21 @@ class ChannelSettingsUI {
             this.elements.channelSettingsName.textContent = channelName;
         }
         if (this.elements.channelNameSection) {
-            this.elements.channelNameSection.classList.toggle('hidden', !channelName.trim());
+            // Always show name section for DM/native channels even if name is empty
+            const isDM = currentChannel.type === 'dm';
+            const isNativeType = currentChannel.type === 'native';
+            const showNameSection = channelName.trim() || isDM || isNativeType;
+            this.elements.channelNameSection.classList.toggle('hidden', !showNameSection);
+        }
+
+        // Show edit button for channels with local names (DM, native, or channels without on-chain metadata)
+        const canEditName = currentChannel.type === 'dm' || currentChannel.type === 'native' || !currentChannel.channelInfo?.name;
+        if (this.elements.editChannelNameBtn) {
+            this.elements.editChannelNameBtn.classList.toggle('hidden', !canEditName || isPreviewMode);
+        }
+        // Hide edit container initially
+        if (this.elements.channelNameEditContainer) {
+            this.elements.channelNameEditContainer.classList.add('hidden');
         }
 
         // Determine channel type
@@ -1377,6 +1393,137 @@ class ChannelSettingsUI {
             
         } catch (error) {
             this.elements.permissionsList.innerHTML = `<div class="text-red-400/80 text-sm">Error: ${sanitizeText(error.message)}</div>`;
+        }
+    }
+
+    /**
+     * Initialize channel name edit handlers
+     * Called after elements are set
+     */
+    initChannelNameEdit() {
+        // Edit button click
+        if (this.elements.editChannelNameBtn) {
+            this.elements.editChannelNameBtn.addEventListener('click', () => this.startEditingName());
+        }
+        
+        // Save button click
+        if (this.elements.saveChannelNameBtn) {
+            this.elements.saveChannelNameBtn.addEventListener('click', () => this.saveChannelName());
+        }
+        
+        // Cancel button click
+        if (this.elements.cancelChannelNameBtn) {
+            this.elements.cancelChannelNameBtn.addEventListener('click', () => this.cancelEditingName());
+        }
+        
+        // Enter key in input
+        if (this.elements.channelSettingsNameInput) {
+            this.elements.channelSettingsNameInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.saveChannelName();
+                } else if (e.key === 'Escape') {
+                    this.cancelEditingName();
+                }
+            });
+        }
+    }
+
+    /**
+     * Start editing the channel name
+     */
+    startEditingName() {
+        const currentName = this.elements.channelSettingsName?.textContent || '';
+        
+        // Show edit container, hide name display
+        if (this.elements.channelNameEditContainer) {
+            this.elements.channelNameEditContainer.classList.remove('hidden');
+        }
+        if (this.elements.channelSettingsName) {
+            this.elements.channelSettingsName.classList.add('hidden');
+        }
+        if (this.elements.editChannelNameBtn) {
+            this.elements.editChannelNameBtn.classList.add('hidden');
+        }
+        
+        // Set current name in input and focus
+        if (this.elements.channelSettingsNameInput) {
+            this.elements.channelSettingsNameInput.value = currentName;
+            this.elements.channelSettingsNameInput.focus();
+            this.elements.channelSettingsNameInput.select();
+        }
+    }
+
+    /**
+     * Cancel editing the channel name
+     */
+    cancelEditingName() {
+        // Hide edit container, show name display
+        if (this.elements.channelNameEditContainer) {
+            this.elements.channelNameEditContainer.classList.add('hidden');
+        }
+        if (this.elements.channelSettingsName) {
+            this.elements.channelSettingsName.classList.remove('hidden');
+        }
+        if (this.elements.editChannelNameBtn) {
+            this.elements.editChannelNameBtn.classList.remove('hidden');
+        }
+    }
+
+    /**
+     * Save the edited channel name
+     */
+    async saveChannelName() {
+        const { channelManager, showNotification } = this.deps;
+        
+        const currentChannel = this.deps.getActiveChannel?.() || channelManager.getCurrentChannel();
+        if (!currentChannel) return;
+
+        const newName = this.elements.channelSettingsNameInput?.value?.trim() || '';
+        
+        if (!newName) {
+            showNotification('Name cannot be empty', 'error');
+            return;
+        }
+
+        try {
+            // Update channel name
+            currentChannel.name = newName;
+            
+            // Save to localStorage
+            await channelManager.saveChannels();
+            
+            // Update UI display in modal
+            if (this.elements.channelSettingsName) {
+                this.elements.channelSettingsName.textContent = newName;
+            }
+            
+            // Update chat header if this is the current channel
+            if (this.elements.currentChannelName) {
+                const activeChannelId = channelManager.getCurrentChannel()?.messageStreamId || 
+                                       channelManager.getCurrentChannel()?.streamId;
+                const editedChannelId = currentChannel.messageStreamId || currentChannel.streamId;
+                
+                if (activeChannelId === editedChannelId) {
+                    this.elements.currentChannelName.textContent = newName;
+                }
+            }
+            
+            // Exit edit mode
+            this.cancelEditingName();
+            
+            // Sync with Service Worker for push notifications
+            relayManager.syncWithServiceWorker();
+            
+            // Re-render channel list to show new name
+            this.deps.renderChannelList?.();
+            
+            showNotification('Name updated!', 'success');
+            Logger.debug('Channel name updated:', newName);
+            
+        } catch (error) {
+            showNotification('Failed to save name: ' + error.message, 'error');
+            Logger.error('Failed to save channel name:', error);
         }
     }
 }

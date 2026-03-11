@@ -16,6 +16,8 @@ import { secureStorage } from './secureStorage.js';
 import { graphAPI } from './graph.js';
 import { relayManager } from './relayManager.js';
 import { parseChainError } from './utils/chainErrors.js';
+import { dmManager } from './dm.js';
+import { dmCrypto } from './dmCrypto.js';
 
 class ChannelManager {
     constructor() {
@@ -121,7 +123,11 @@ class ChannelManager {
                 category: ch.category || '',
                 // Channel options
                 readOnly: ch.readOnly || false,
-                classification: ch.classification || null
+                writeOnly: ch.writeOnly || false,
+                classification: ch.classification || null,
+                // DM-specific
+                peerAddress: ch.peerAddress || null,
+                inboxStreamId: ch.inboxStreamId || null
                 // messages: excluded - loaded from storage
                 // reactions: excluded - loaded from storage
             }));
@@ -333,8 +339,9 @@ class ChannelManager {
             
             Logger.debug('Permissions result:', permissions);
 
-            // If user has no subscribe permission at all, they cannot join
-            if (!permissions.canSubscribe) {
+            // User needs at least one permission (publish OR subscribe) to join
+            // Many-to-one streams may grant only publish (public) without subscribe
+            if (!permissions.canSubscribe && !permissions.canPublish) {
                 throw new Error('You do not have permission to access this channel. This is a private channel and you are not a member.');
             }
             
@@ -391,6 +398,7 @@ class ChannelManager {
                 reactions: {}, // messageId -> { emoji -> [users] }
                 classification: classification,
                 readOnly: options.readOnly || false,
+                writeOnly: permissions.canPublish && !permissions.canSubscribe,
                 // Lazy loading state (not persisted)
                 historyLoaded: false,
                 hasMoreHistory: true,
@@ -413,11 +421,17 @@ class ChannelManager {
             
             // OPTIMIZATION: Run storage saves and subscription in parallel
             // Channel is already in memory, so subscription can start immediately
-            await Promise.all([
+            // Skip network subscription for write-only channels (no subscribe permission)
+            const tasks = [
                 this.saveChannels(),
-                secureStorage.addToChannelOrder(messageStreamId),
-                this.subscribeToChannel(messageStreamId, password)
-            ]);
+                secureStorage.addToChannelOrder(messageStreamId)
+            ];
+            if (permissions.canSubscribe) {
+                tasks.push(this.subscribeToChannel(messageStreamId, password));
+            } else {
+                Logger.info('Write-only channel - skipping subscription (no subscribe permission)');
+            }
+            await Promise.all(tasks);
 
             // Notify handlers about channel join (for media seeding re-announcement)
             // Include permissions info so UI can show appropriate feedback
@@ -434,9 +448,12 @@ class ChannelManager {
                 }
             });
 
-            // Log a warning if user only has read access
+            // Log access mode warnings
             if (!permissions.canPublish) {
                 Logger.warn('Joined channel with read-only access (no publish permission)');
+            }
+            if (!permissions.canSubscribe) {
+                Logger.warn('Joined channel with write-only access (no subscribe permission)');
             }
 
             Logger.info('Joined dual-stream channel:', messageStreamId);
@@ -985,6 +1002,52 @@ class ChannelManager {
         const channel = this.channels.get(messageStreamId);
         const pwd = password || (channel ? channel.password : null);
         
+        // DM-2 ephemeral lifecycle: unsubscribe when leaving a DM conversation
+        if (channel?.type !== 'dm') {
+            dmManager.unsubscribeDMEphemeral();
+        }
+        
+        // Skip network subscription for write-only channels (no subscribe permission)
+        // Instead, load locally persisted sent messages and reactions
+        if (channel?.writeOnly) {
+            Logger.debug('Write-only channel - loading local data:', messageStreamId);
+            const sentMessages = secureStorage.getSentMessages(messageStreamId);
+            if (sentMessages.length > 0) {
+                // Filter out messages already in channel (avoid duplicates on re-select)
+                const existingIds = new Set(channel.messages.map(m => m.id));
+                const newMessages = sentMessages.filter(m => !existingIds.has(m.id));
+                if (newMessages.length > 0) {
+                    // Mark all as verified (they're our own messages)
+                    for (const msg of newMessages) {
+                        msg.verified = { valid: true, trustLevel: 2 };
+                        channel.messages.push(msg);
+                    }
+                    this.sortMessagesByTimestamp(channel);
+                    Logger.info(`Loaded ${newMessages.length} local sent messages for write-only channel`);
+                }
+            }
+            // Load persisted reactions
+            const sentReactions = secureStorage.getSentReactions(messageStreamId);
+            if (Object.keys(sentReactions).length > 0) {
+                channel.reactions = sentReactions;
+                Logger.info('Loaded local reactions for write-only channel');
+            }
+            channel.historyLoaded = true;
+            channel.hasMoreHistory = false;
+            return;
+        }
+
+        // DM channels: load merged timeline (sent local + received from inbox)
+        if (channel?.type === 'dm') {
+            Logger.debug('DM channel - loading merged timeline:', messageStreamId);
+            dmManager.loadDMTimeline(channel.peerAddress);
+            channel.historyLoaded = true;
+            channel.hasMoreHistory = false;
+            // Subscribe to DM-2 ephemeral on-demand (typing/presence)
+            dmManager.subscribeDMEphemeral();
+            return;
+        }
+
         // Get or derive ephemeral stream ID
         const ephemeralStreamId = channel?.ephemeralStreamId || deriveEphemeralId(messageStreamId);
 
@@ -1117,11 +1180,15 @@ class ChannelManager {
             this.onlineUsers.set(streamId, new Map());
         }
         
+        // Use senderId from Streamr SDK (cryptographically guaranteed) over self-reported userId
+        const userId = presenceData.senderId || presenceData.userId;
+        if (!userId) return;
+
         const users = this.onlineUsers.get(streamId);
-        users.set(presenceData.userId, {
+        users.set(userId, {
             lastActive: presenceData.lastActive || Date.now(),
             nickname: presenceData.nickname || null,
-            address: presenceData.address || null
+            address: userId
         });
         
         this.notifyOnlineUsersChange(streamId);
@@ -1139,13 +1206,33 @@ class ChannelManager {
         // Use ephemeral stream for presence (not stored)
         const ephemeralStreamId = channel.ephemeralStreamId || deriveEphemeralId(messageStreamId);
         
-        const myAddress = authManager.getAddress();
+        // DM channels: E2E encrypt, minimal payload (senderId from SDK provides identity)
+        if (channel.type === 'dm' && channel.peerAddress) {
+            const privateKey = authManager.wallet?.privateKey;
+            if (privateKey) {
+                const peerPubKey = await dmManager.getPeerPublicKey(channel.peerAddress);
+                if (peerPubKey) {
+                    try {
+                        const aesKey = await dmCrypto.getSharedKey(privateKey, channel.peerAddress, peerPubKey);
+                        const encrypted = await dmCrypto.encrypt({
+                            type: 'presence',
+                            nickname: identityManager.getUsername?.() || null,
+                            lastActive: Date.now()
+                        }, aesKey);
+                        await streamrController.publishControl(ephemeralStreamId, encrypted, null);
+                    } catch (e) {
+                        Logger.warn('Failed to publish DM presence:', e.message);
+                    }
+                }
+            }
+            return;
+        }
+        
+        // Non-DM channels: no self-reported userId/address (senderId from SDK provides identity)
         const myNickname = identityManager.getUsername?.() || null;
         
         const presenceData = {
             type: 'presence',
-            userId: myAddress,
-            address: myAddress,
             nickname: myNickname,
             lastActive: Date.now()
         };
@@ -1198,6 +1285,8 @@ class ChannelManager {
             clearInterval(this.presenceInterval);
             this.presenceInterval = null;
         }
+        // Tear down DM-2 ephemeral when leaving any channel
+        dmManager.unsubscribeDMEphemeral();
     }
 
     // ==================== End Presence Tracking ====================
@@ -1214,16 +1303,18 @@ class ChannelManager {
         }
         
         // Handle different control message types
+        // Use senderId from Streamr SDK (cryptographically guaranteed) instead of self-reported fields
         if (data.type === 'typing') {
-            this.notifyHandlers('typing', { streamId, user: data.user });
+            this.notifyHandlers('typing', { streamId, user: data.senderId || data.user });
         } else if (data.type === 'presence') {
             // Handle presence update
             this.handlePresenceMessage(streamId, data);
         } else if (data.type === 'reaction') {
             // Someone reacted to a message - store in memory only
+            const reactionUser = data.senderId || data.user;
             const channel = this.channels.get(streamId);
-            if (channel && data.messageId && data.emoji && data.user) {
-                this.storeReaction(channel, data.messageId, data.emoji, data.user, data.action || 'add');
+            if (channel && data.messageId && data.emoji && reactionUser) {
+                this.storeReaction(channel, data.messageId, data.emoji, reactionUser, data.action || 'add');
                 // NOTE: No saveChannels() - reactions are not persisted, only in RAM
             }
             
@@ -1232,7 +1323,7 @@ class ChannelManager {
                 streamId, 
                 messageId: data.messageId,
                 emoji: data.emoji,
-                user: data.user,
+                user: reactionUser,
                 action: data.action || 'add'
             });
         } else if (data.type === 'member_update') {
@@ -1526,6 +1617,11 @@ class ChannelManager {
                 throw new Error('Channel not found');
             }
 
+            // DM channels: route through DMManager
+            if (channel.type === 'dm') {
+                return await dmManager.sendMessage(messageStreamId, text, replyTo);
+            }
+
             // Check publish permission using Streamr SDK (real-time on-chain check)
             // This applies to ALL channel types - the SDK handles public permissions correctly
             const currentAddress = authManager.getAddress();
@@ -1596,7 +1692,12 @@ class ChannelManager {
             
             // Mark as sent (remove pending flag)
             message.pending = false;
-            // NOTE: No saveChannels() - messages are not persisted
+            
+            // For write-only channels, persist sent messages locally
+            // (no subscribe permission = can't fetch history from network)
+            if (channel.writeOnly) {
+                await secureStorage.addSentMessage(messageStreamId, message);
+            }
             
             // Notify UI that message is confirmed
             this.notifyHandlers('message_confirmed', { streamId: messageStreamId, messageId: message.id });
@@ -1688,6 +1789,16 @@ class ChannelManager {
         const channel = this.channels.get(messageStreamId);
         if (!channel) {
             Logger.warn('Channel not found for loadMoreHistory:', messageStreamId);
+            return { loaded: 0, hasMore: false };
+        }
+
+        // Write-only channels have no network history access
+        if (channel.writeOnly) {
+            return { loaded: 0, hasMore: false };
+        }
+
+        // DM channels: history is managed locally (sent + inbox)
+        if (channel.type === 'dm') {
             return { loaded: 0, hasMore: false };
         }
         
@@ -1798,15 +1909,24 @@ class ChannelManager {
             // Use ephemeral stream for typing (not stored)
             const ephemeralStreamId = channel.ephemeralStreamId || deriveEphemeralId(messageStreamId);
 
-            const control = {
-                type: 'typing',
-                user: authManager.getAddress(),
-                timestamp: Date.now()
-            };
+            // DM channels: E2E encrypt ephemeral, no user field (senderId from SDK provides identity)
+            if (channel.type === 'dm' && channel.peerAddress) {
+                const privateKey = authManager.wallet?.privateKey;
+                if (privateKey) {
+                    const peerPubKey = await dmManager.getPeerPublicKey(channel.peerAddress);
+                    if (peerPubKey) {
+                        const aesKey = await dmCrypto.getSharedKey(privateKey, channel.peerAddress, peerPubKey);
+                        const encrypted = await dmCrypto.encrypt({ type: 'typing', timestamp: Date.now() }, aesKey);
+                        await streamrController.publishControl(ephemeralStreamId, encrypted, null);
+                    }
+                }
+                return;
+            }
 
+            // Non-DM channels: no self-reported user field (senderId from SDK provides identity)
             await streamrController.publishControl(
                 ephemeralStreamId,
-                control,
+                { type: 'typing', timestamp: Date.now() },
                 channel.password
             );
         } catch (error) {
@@ -1831,8 +1951,15 @@ class ChannelManager {
             
             const channelType = channel.type || 'unknown';
             
+            // DM channels: Send wake signal using the peer's inbox stream ID
+            // The tag is based on the peer's inbox, so the peer gets notified
+            if (channelType === 'dm') {
+                Logger.debug('Sending DM wake signal for:', messageStreamId.slice(0, 20) + '...');
+                await relayManager.sendChannelWakeSignal(messageStreamId);
+                Logger.debug('DM wake signal sent');
+                
             // Native channels: Send to channel tag (per-channel notifications)
-            if (channelType === 'native') {
+            } else if (channelType === 'native') {
                 Logger.debug('Sending native channel wake signal for:', messageStreamId.slice(0, 20) + '...');
                 await relayManager.sendNativeChannelWakeSignal(messageStreamId);
                 Logger.debug('Native channel wake signal sent');
@@ -1881,16 +2008,39 @@ class ChannelManager {
                 action: action,
                 messageId: messageId,
                 emoji: emoji,
-                user: authManager.getAddress(),
                 timestamp: Date.now()
             };
 
-            // Send to MESSAGE stream (stored) via publishReaction
-            await streamrController.publishReaction(
-                streamId,
-                reaction,
-                channel.password
-            );
+            // DM channels: E2E encrypt reaction before publishing to peer's inbox
+            if (channel.type === 'dm' && channel.peerAddress) {
+                const privateKey = authManager.wallet?.privateKey;
+                const myAddress = authManager.getAddress();
+                if (privateKey) {
+                    const peerPubKey = await dmManager.getPeerPublicKey(channel.peerAddress);
+                    if (peerPubKey) {
+                        const aesKey = await dmCrypto.getSharedKey(privateKey, channel.peerAddress, peerPubKey);
+                        const encrypted = await dmCrypto.encrypt(reaction, aesKey);
+                        await streamrController.publishReaction(streamId, encrypted, null);
+                        
+                        // Persist locally — we won't receive our own reaction back from peer's inbox
+                        await secureStorage.addSentReaction(streamId, messageId, emoji, myAddress, action);
+                    } else {
+                        Logger.warn('DM reaction: peer public key not available');
+                    }
+                }
+            } else {
+                // Regular channels: send to MESSAGE stream (stored) via publishReaction
+                await streamrController.publishReaction(
+                    streamId,
+                    reaction,
+                    channel.password
+                );
+            }
+            
+            // Persist locally for write-only channels
+            if (channel.writeOnly) {
+                await secureStorage.addSentReaction(streamId, messageId, emoji, reaction.user, action);
+            }
             
             Logger.debug('Reaction', action, ':', emoji, 'to message:', messageId);
         } catch (error) {
@@ -1911,6 +2061,15 @@ class ChannelManager {
         try {
             const channel = this.channels.get(messageStreamId);
             const ephemeralStreamId = channel?.ephemeralStreamId || deriveEphemeralId(messageStreamId);
+            
+            // DM-specific cleanup: clear local sent data and cached keys
+            if (channel?.type === 'dm' && channel.peerAddress) {
+                await secureStorage.clearSentMessages(messageStreamId);
+                await secureStorage.clearSentReactions(messageStreamId);
+                dmCrypto.peerPublicKeys.delete(channel.peerAddress);
+                dmManager.conversations.delete(channel.peerAddress);
+                Logger.debug('DM: Cleaned up local data for', channel.peerAddress);
+            }
             
             // Unsubscribe from both streams
             await streamrController.unsubscribeFromDualStream(messageStreamId, ephemeralStreamId);

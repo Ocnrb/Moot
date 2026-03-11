@@ -36,7 +36,7 @@
 </head>
 <body class="h-screen overflow-hidden">
     <!-- Global header spans full width -->
-    <header class="bg-[#09090b]/95 backdrop-blur-xl border-b border-white/[0.06] h-14 flex items-center justify-between px-5 flex-shrink-0">
+    <header class="bg-[#09090b] border-b border-white/[0.01] h-14 flex items-center justify-between px-5 flex-shrink-0">
         <!-- Left side: Logo and brand -->
         <div class="flex items-center gap-3">
             <!-- Logo -->
@@ -158,6 +158,26 @@
                 <div class="p-4 text-center text-white/25 text-sm">
                     No channels yet
                 </div>
+            </div>
+
+            <!-- DM Inbox Setup Button (hidden by default, shown for non-guests without inbox) -->
+            <div id="dm-inbox-setup" class="hidden flex justify-center px-4 pt-3 pb-32 md:pb-3">
+                <button id="open-dm-btn" class="px-5 py-2.5 bg-[#F6851B]/15 hover:bg-[#F6851B]/25 text-white border border-[#F6851B]/30 text-sm font-medium rounded-xl transition-all duration-200 inline-flex items-center gap-2 hover:shadow-lg hover:shadow-[#F6851B]/10">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                    </svg>
+                    Create DM Inbox
+                </button>
+            </div>
+
+            <!-- New DM Button (hidden by default, shown when inbox is ready) -->
+            <div id="dm-new-btn-wrap" class="hidden flex justify-center px-4 pt-3 pb-32 md:pb-3">
+                <button id="new-dm-btn" class="px-5 py-2.5 bg-[#F6851B]/15 hover:bg-[#F6851B]/25 text-white border border-[#F6851B]/30 text-sm font-medium rounded-xl transition-all duration-200 inline-flex items-center gap-2 hover:shadow-lg hover:shadow-[#F6851B]/10">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.5v15m7.5-7.5h-15"/>
+                    </svg>
+                    New DM
+                </button>
             </div>
 
             <!-- Desktop Sidebar Footer (hidden on mobile, replaced by pill) -->
@@ -429,17 +449,6 @@
                 <!-- Content Panel -->
                 <div class="flex-1 p-5 overflow-y-auto">
                     <div class="space-y-5">
-                        <!-- Channel Name -->
-                        <div>
-                            <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Channel Name</label>
-                            <input
-                                type="text"
-                                id="channel-name-input"
-                                placeholder="e.g. general"
-                                class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-white/30 transition placeholder:text-white/20"
-                            />
-                        </div>
-
                         <!-- Tab Content: Public -->
                         <div id="tab-public" class="channel-tab-content space-y-4">
                             <div class="p-4 bg-white/5 rounded-xl border border-white/5">
@@ -454,7 +463,7 @@
                             <input type="hidden" name="channel-type" value="public" class="channel-type-input">
                         </div>
 
-                        <!-- Tab Content: Password -->
+                        <!-- Tab Content: Password (description only) -->
                         <div id="tab-password" class="channel-tab-content hidden space-y-4">
                             <div class="p-4 bg-white/5 rounded-xl border border-white/5">
                                 <p class="text-sm text-white/50 leading-relaxed mb-2">
@@ -465,20 +474,10 @@
                                     <span>Learn more</span>
                                 </button>
                             </div>
-                            <div>
-                                <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Password</label>
-                                <input
-                                    type="password"
-                                    id="channel-password-input"
-                                    placeholder="Enter a secure password"
-                                    autocomplete="new-password"
-                                    class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-white/30 transition placeholder:text-white/20"
-                                />
-                            </div>
                             <input type="hidden" name="channel-type" value="password" class="channel-type-input">
                         </div>
 
-                        <!-- Tab Content: Native (Closed) -->
+                        <!-- Tab Content: Native (Closed) (description only) -->
                         <div id="tab-native" class="channel-tab-content hidden space-y-4">
                             <div class="p-4 bg-white/5 rounded-xl border border-white/5">
                                 <div class="flex items-center gap-2 mb-2">
@@ -492,6 +491,34 @@
                                     <span>Learn more</span>
                                 </button>
                             </div>
+                            <input type="hidden" name="channel-type" value="native" class="channel-type-input">
+                        </div>
+
+                        <!-- Channel Name (common for all tabs) -->
+                        <div>
+                            <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Channel Name</label>
+                            <input
+                                type="text"
+                                id="channel-name-input"
+                                placeholder="e.g. general"
+                                class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-white/30 transition placeholder:text-white/20"
+                            />
+                        </div>
+
+                        <!-- Password field (shown only for Password tab) -->
+                        <div id="password-field-section" class="hidden">
+                            <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Password</label>
+                            <input
+                                type="password"
+                                id="channel-password-input"
+                                placeholder="Enter a secure password"
+                                autocomplete="new-password"
+                                class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-white/30 transition placeholder:text-white/20"
+                            />
+                        </div>
+
+                        <!-- Native fields (shown only for Closed tab) -->
+                        <div id="native-fields-section" class="hidden space-y-5">
                             <div>
                                 <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Member Addresses</label>
                                 <textarea
@@ -514,11 +541,62 @@
                                 </div>
                                 <p class="text-xs text-white/30 mt-2">For organizing your channels locally.</p>
                             </div>
-                            <input type="hidden" name="channel-type" value="native" class="channel-type-input">
                         </div>
 
                         <!-- Divider -->
                         <div class="border-t border-white/5"></div>
+
+                        <!-- Visible Channel Fields (shown when visibility is ON) -->
+                        <div id="visible-fields" class="hidden space-y-4">
+                            <div>
+                                <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Description</label>
+                                <textarea
+                                    id="channel-description-input"
+                                    placeholder="What's this channel about?"
+                                    rows="2"
+                                    maxlength="200"
+                                    class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-white/30 transition resize-none placeholder:text-white/20"
+                                ></textarea>
+                            </div>
+                            <div class="flex gap-3">
+                                <div class="flex-1">
+                                    <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Language</label>
+                                    <select id="channel-language-input" class="w-full bg-white/[0.05] border border-white/10 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-white/30 transition cursor-pointer">
+                                        <option value="en">English</option>
+                                        <option value="pt">Português</option>
+                                        <option value="es">Español</option>
+                                        <option value="fr">Français</option>
+                                        <option value="de">Deutsch</option>
+                                        <option value="it">Italiano</option>
+                                        <option value="zh">中文</option>
+                                        <option value="ja">日本語</option>
+                                        <option value="ko">한국어</option>
+                                        <option value="ru">Русский</option>
+                                        <option value="ar">العربية</option>
+                                        <option value="other">Other</option>
+                                    </select>
+                                </div>
+                                <div class="flex-1">
+                                    <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Category</label>
+                                    <select id="channel-category-input" class="w-full bg-white/[0.05] border border-white/10 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-white/30 transition cursor-pointer">
+                                        <option value="politics">Politics</option>
+                                        <option value="news">News</option>
+                                        <option value="tech">Tech & AI</option>
+                                        <option value="crypto">Crypto & Web3</option>
+                                        <option value="finance">Business & Finance</option>
+                                        <option value="science">Science</option>
+                                        <option value="gaming">Gaming</option>
+                                        <option value="entertainment">Entertainment</option>
+                                        <option value="sports">Sports</option>
+                                        <option value="education">Education</option>
+                                        <option value="comedy">Comedy & Memes</option>
+                                        <option value="general">General</option>
+                                        <option value="nsfw">NSFW (18+)</option>
+                                        <option value="adult">Adult (18+)</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
 
                         <!-- Visibility Toggle -->
                         <div id="exposure-section" class="flex items-center justify-between">
@@ -591,58 +669,6 @@
                                     <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                                     <span>Learn more about storage</span>
                                 </button>
-                            </div>
-                        </div>
-
-                        <!-- Visible Channel Fields -->
-                        <div id="visible-fields" class="hidden space-y-4">
-                            <div>
-                                <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Description</label>
-                                <textarea
-                                    id="channel-description-input"
-                                    placeholder="What's this channel about?"
-                                    rows="2"
-                                    maxlength="200"
-                                    class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-white/30 transition resize-none placeholder:text-white/20"
-                                ></textarea>
-                            </div>
-                            <div class="flex gap-3">
-                                <div class="flex-1">
-                                    <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Language</label>
-                                    <select id="channel-language-input" class="w-full bg-white/[0.05] border border-white/10 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-white/30 transition cursor-pointer">
-                                        <option value="en">English</option>
-                                        <option value="pt">Português</option>
-                                        <option value="es">Español</option>
-                                        <option value="fr">Français</option>
-                                        <option value="de">Deutsch</option>
-                                        <option value="it">Italiano</option>
-                                        <option value="zh">中文</option>
-                                        <option value="ja">日本語</option>
-                                        <option value="ko">한국어</option>
-                                        <option value="ru">Русский</option>
-                                        <option value="ar">العربية</option>
-                                        <option value="other">Other</option>
-                                    </select>
-                                </div>
-                                <div class="flex-1">
-                                    <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Category</label>
-                                    <select id="channel-category-input" class="w-full bg-white/[0.05] border border-white/10 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-white/30 transition cursor-pointer">
-                                        <option value="politics">Politics</option>
-                                        <option value="news">News</option>
-                                        <option value="tech">Tech & AI</option>
-                                        <option value="crypto">Crypto & Web3</option>
-                                        <option value="finance">Business & Finance</option>
-                                        <option value="science">Science</option>
-                                        <option value="gaming">Gaming</option>
-                                        <option value="entertainment">Entertainment</option>
-                                        <option value="sports">Sports</option>
-                                        <option value="education">Education</option>
-                                        <option value="comedy">Comedy & Memes</option>
-                                        <option value="general">General</option>
-                                        <option value="nsfw">NSFW (18+)</option>
-                                        <option value="adult">Adult (18+)</option>
-                                    </select>
-                                </div>
                             </div>
                         </div>
 
@@ -859,6 +885,160 @@
     </div>
 
     <!-- Modal: Join Channel -->
+    <!-- Modal: New DM -->
+    <div id="new-dm-modal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+        <div class="bg-[#111113] rounded-2xl p-5 w-[340px] max-w-full mx-4 border border-white/[0.06]">
+            <h3 class="text-base font-medium mb-4 text-white">New DM</h3>
+
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-sm text-white/30 mb-1.5 uppercase tracking-wide">Address or ENS</label>
+                    <input
+                        type="text"
+                        id="dm-address-input"
+                        placeholder="0x... or name.eth"
+                        autocomplete="off"
+                        class="w-full bg-white/[0.05] border border-white/[0.08] text-white px-3 py-2 rounded-xl text-sm focus:outline-none focus:border-white/[0.15] transition"
+                    />
+                </div>
+
+                <div>
+                    <label class="block text-sm text-white/30 mb-1.5 uppercase tracking-wide">Local Name (optional)</label>
+                    <input
+                        type="text"
+                        id="dm-localname-input"
+                        placeholder="e.g. Alice"
+                        autocomplete="off"
+                        maxlength="30"
+                        class="w-full bg-white/[0.05] border border-white/[0.08] text-white px-3 py-2 rounded-xl text-sm focus:outline-none focus:border-white/[0.15] transition"
+                    />
+                    <p class="text-sm text-white/25 mt-1">Stored locally, only visible to you</p>
+                </div>
+            </div>
+
+            <div class="flex gap-2 mt-5">
+                <button id="cancel-dm-btn" class="flex-1 bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.08] text-white/50 text-sm font-medium px-3 py-2.5 rounded-xl transition">
+                    Cancel
+                </button>
+                <button id="start-dm-btn" class="flex-1 bg-white hover:bg-[#f0f0f0] text-black text-sm font-medium px-3 py-2.5 rounded-xl transition">
+                    Start DM
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Create DM Inbox -->
+    <div id="dm-inbox-setup-modal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4 md:p-4">
+        <div class="bg-[#111113] rounded-2xl w-[420px] max-w-[95vw] shadow-2xl border border-white/[0.06] overflow-hidden flex flex-col max-h-[95vh] md:max-h-[90vh]">
+            <!-- Header -->
+            <div class="flex items-center justify-between px-6 py-4 border-b border-white/5 flex-shrink-0">
+                <div class="flex items-center gap-3">
+                    <div class="w-9 h-9 rounded-xl bg-[#F6851B]/15 flex items-center justify-center">
+                        <svg class="w-5 h-5 text-[#F6851B]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                        </svg>
+                    </div>
+                    <h3 class="text-lg font-medium text-white/90">Create DM Inbox</h3>
+                </div>
+                <button id="cancel-dm-inbox-btn" class="text-white/40 hover:text-white/80 transition p-1">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            
+            <!-- Content -->
+            <div class="flex-1 p-5 overflow-y-auto">
+                <div class="space-y-5">
+                    <!-- Explanation -->
+                    <div class="p-4 bg-white/5 rounded-xl border border-white/5">
+                        <div class="flex items-start gap-3">
+                            <svg class="w-5 h-5 text-[#F6851B] flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                            </svg>
+                            <div class="space-y-2">
+                                <p class="text-sm text-white/70 leading-relaxed">
+                                    <strong class="text-white/90">One-time setup</strong> — Creating your DM inbox requires a small gas fee. Once created, there are no additional costs.
+                                </p>
+                                <p class="text-sm text-white/50 leading-relaxed">
+                                    Anyone with your Pombo/Ethereum address can send you direct messages. You can also message any address that has a DM inbox.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Divider -->
+                    <div class="border-t border-white/5"></div>
+
+                    <!-- Storage Provider Selection -->
+                    <div id="dm-storage-section" class="space-y-3">
+                        <label class="block text-xs font-medium text-white/30 uppercase tracking-wider">Message Storage</label>
+                        <div class="flex gap-2">
+                            <button type="button" data-dm-storage="streamr" class="dm-storage-provider-tab flex-1 px-3 py-2.5 rounded-lg text-xs font-medium transition bg-white/10 text-white border border-white/10">
+                                <div class="flex items-center gap-2 justify-center">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>
+                                    <span>Streamr</span>
+                                </div>
+                            </button>
+                            <button type="button" data-dm-storage="logstore" class="dm-storage-provider-tab flex-1 px-3 py-2.5 rounded-lg text-xs font-medium transition bg-white/5 text-white/50 border border-white/5 hover:bg-white/10 hover:text-white/70">
+                                <div class="flex items-center gap-2 justify-center">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/></svg>
+                                    <span>LogStore</span>
+                                    <span class="text-[10px] px-1 py-0.5 bg-amber-500/20 text-amber-400 rounded font-semibold">BETA</span>
+                                </div>
+                            </button>
+                        </div>
+                        
+                        <!-- Storage Days (only for Streamr) -->
+                        <div id="dm-storage-days-section" class="mt-3">
+                            <div class="flex items-center justify-between mb-3">
+                                <label class="text-xs font-medium text-white/40 uppercase tracking-wider">Message Retention</label>
+                                <span id="dm-storage-days-value" class="text-sm font-medium text-[#F6851B]">180 days</span>
+                            </div>
+                            <div class="relative">
+                                <input type="range" id="dm-storage-days-input" min="1" max="365" value="180" class="storage-slider w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer">
+                                <div class="flex justify-between text-[10px] text-white/20 mt-2 px-0.5">
+                                    <span>1 day</span>
+                                    <span>6 months</span>
+                                    <span>1 year</span>
+                                </div>
+                            </div>
+                            <button type="button" class="dm-storage-learn-more-btn text-xs text-white/30 hover:text-white/50 transition mt-2 flex items-center gap-1">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                <span>Learn more about storage</span>
+                            </button>
+                        </div>
+                        
+                        <!-- LogStore Info (hidden by default) -->
+                        <div id="dm-logstore-info" class="hidden mt-3 p-3 bg-white/5 rounded-lg border border-white/5">
+                            <p class="text-xs text-white/40">LogStore uses optimized caching. Data may persist indefinitely but retention is not guaranteed.</p>
+                            <button type="button" class="dm-storage-learn-more-btn text-xs text-white/30 hover:text-white/50 transition mt-2 flex items-center gap-1">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                <span>Learn more about storage</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="flex items-center justify-between px-6 py-4 border-t border-white/5 bg-[#0a0a0a] flex-shrink-0">
+                <div class="flex items-center gap-2 text-sm whitespace-nowrap">
+                    <span class="text-white/40">Est. cost:</span>
+                    <span id="dm-inbox-cost" class="text-white/80 font-medium">~0.01 MATIC</span>
+                </div>
+                <div class="flex gap-3 flex-shrink-0">
+                    <button id="cancel-dm-inbox-btn-footer" class="hidden md:block px-5 py-2.5 rounded-xl text-sm font-medium text-white/60 hover:text-white/90 hover:bg-white/5 transition whitespace-nowrap">
+                        Cancel
+                    </button>
+                    <button id="create-dm-inbox-btn" class="px-5 py-2.5 bg-[#F6851B]/15 hover:bg-[#F6851B]/25 text-[#FFFFFF] border border-[#F6851B]/40 text-sm font-medium rounded-lg transition whitespace-nowrap">
+                        Create Inbox
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="join-channel-modal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50">
         <div class="bg-[#111113] rounded-2xl p-5 w-[340px] max-w-full mx-4 border border-white/[0.06]">
             <h3 class="text-base font-medium mb-4 text-white">Join Channel</h3>
@@ -1093,7 +1273,24 @@
                             <!-- Channel Name -->
                             <div id="channel-name-section" class="hidden">
                                 <label class="block text-sm font-medium text-white/40 uppercase tracking-wider mb-2">Name</label>
-                                <div id="channel-settings-name" class="text-sm text-white/80"></div>
+                                <div class="flex items-center gap-2">
+                                    <div id="channel-settings-name" class="text-sm text-white/80"></div>
+                                    <button id="edit-channel-name-btn" class="hidden p-1 hover:bg-white/5 rounded transition" title="Edit name">
+                                        <svg class="w-3.5 h-3.5 text-white/40 hover:text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10"/></svg>
+                                    </button>
+                                </div>
+                                <!-- Edit input (hidden by default) -->
+                                <div id="channel-name-edit-container" class="hidden mt-2">
+                                    <div class="flex items-center gap-2">
+                                        <input type="text" id="channel-settings-name-input" class="flex-1 bg-white/5 border border-white/10 text-white px-3 py-2 rounded-lg text-sm focus:outline-none focus:border-white/30 transition" placeholder="Enter name">
+                                        <button id="save-channel-name-btn" class="p-2 bg-[#F6851B] hover:bg-[#F6851B]/80 rounded-lg transition" title="Save">
+                                            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                                        </button>
+                                        <button id="cancel-channel-name-btn" class="p-2 bg-white/10 hover:bg-white/20 rounded-lg transition" title="Cancel">
+                                            <svg class="w-4 h-4 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                             <div>
                                 <div class="flex items-center gap-2 mb-2">
@@ -1415,6 +1612,10 @@
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/></svg>
                             <span>Account</span>
                         </button>
+                        <button data-settings-tab="wallet" class="settings-tab w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left transition-all text-white/60 hover:text-white/90 hover:bg-white/5">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 12a2.25 2.25 0 00-2.25-2.25H15a3 3 0 11-6 0H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9m18 0V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v3"/></svg>
+                            <span>Wallet</span>
+                        </button>
                         <button data-settings-tab="notifications" class="settings-tab w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left transition-all text-white/60 hover:text-white/90 hover:bg-white/5">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
                             <span>Notifications</span>
@@ -1447,17 +1648,17 @@
                     <div id="settings-panel-profile" class="settings-panel hidden">
                         <div class="space-y-6">
                             <div>
-                                <label class="block text-sm font-medium text-white/40 uppercase tracking-wider mb-2">Display Name</label>
+                                <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Display Name</label>
                                 <input
                                     type="text"
                                     id="settings-username"
                                     placeholder="Enter your name"
-                                    class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-base focus:outline-none focus:border-white/30 transition placeholder:text-white/20"
+                                    class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-white/30 transition placeholder:text-white/20"
                                 />
-                                <p class="text-sm text-white/30 mt-2">Visible to other users</p>
+                                <p class="text-xs text-white/30 mt-2">Visible to other users</p>
                             </div>
                             <div>
-                                <label class="block text-sm font-medium text-white/40 uppercase tracking-wider mb-2">Account Address</label>
+                                <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Account Address</label>
                                 <div class="flex gap-2">
                                     <input
                                         type="text"
@@ -1470,22 +1671,53 @@
                                     </button>
                                 </div>
                             </div>
+                            
+                            <!-- Divider -->
+                            <div class="border-t border-white/5"></div>
+                            
+                            <!-- Backup & Restore -->
                             <div>
-                                <label class="block text-sm font-medium text-white/40 uppercase tracking-wider mb-2">POL Balance</label>
+                                <h4 class="text-sm font-medium text-white/90 mb-1 flex items-center gap-2">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125"/></svg>
+                                    Backup & Restore
+                                </h4>
+                                <p class="text-xs text-white/40 mb-4">Export data to restore on another device</p>
+                                
+                                <div class="grid grid-cols-2 gap-3">
+                                    <button id="export-all-data-btn" class="bg-white/10 hover:bg-white/20 text-white border border-white/20 px-4 py-3 rounded-xl text-sm transition flex items-center justify-center gap-2">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/></svg>
+                                        Export
+                                    </button>
+                                    <input type="file" id="import-data-file" accept=".json" class="hidden" />
+                                    <button id="import-data-btn" class="bg-white/5 hover:bg-white/10 text-white/60 border border-white/10 px-4 py-3 rounded-xl text-sm transition flex items-center justify-center gap-2">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+                                        Import
+                                    </button>
+                                </div>
+                                <p class="text-xs text-white/30 mt-3">Passwords not included — you'll need them to unlock</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Wallet Panel -->
+                    <div id="settings-panel-wallet" class="settings-panel hidden">
+                        <div class="space-y-6">
+                            <div>
+                                <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">POL Balance</label>
                                 <div class="bg-white/5 border border-white/10 px-4 py-3 rounded-xl">
                                     <div class="flex items-center justify-between">
-                                        <span id="settings-balance" class="text-white text-base font-medium">Loading...</span>
+                                        <span id="settings-balance" class="text-white text-sm font-medium">Loading...</span>
                                         <button id="refresh-balance-btn" class="text-white/40 hover:text-white/60 transition p-1" title="Refresh">
                                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
                                         </button>
                                     </div>
-                                    <p class="text-sm text-white/30 mt-1">On Polygon network</p>
+                                    <p class="text-xs text-white/30 mt-1">On Polygon network</p>
                                 </div>
                                 <button id="fund-metamask-btn" class="w-full mt-3 bg-[#F6851B]/10 hover:bg-[#F6851B]/20 text-[#F6851B] border border-[#F6851B]/30 px-4 py-2.5 rounded-xl text-sm transition flex items-center justify-center gap-2">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 12a2.25 2.25 0 00-2.25-2.25H15a3 3 0 11-6 0H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9m18 0V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v3"/></svg>
                                     Fund with MetaMask
                                 </button>
-                                <p class="text-sm text-white/30 mt-2 text-center">Send POL from your MetaMask wallet</p>
+                                <p class="text-xs text-white/30 mt-2 text-center">Send POL from your MetaMask wallet</p>
                             </div>
                         </div>
                     </div>
@@ -1497,13 +1729,13 @@
                             <div class="flex items-start justify-between p-4 bg-white/5 rounded-xl border border-white/5">
                                 <div class="flex-1 mr-4">
                                     <div class="flex items-center gap-2 mb-1">
-                                        <h4 class="text-base font-medium text-white/90">Push Notifications</h4>
+                                        <h4 class="text-sm font-medium text-white/90">Push Notifications</h4>
                                         <button id="push-learn-more-btn" class="inline-flex items-center gap-1 text-xs text-white/40 hover:text-white/60 transition">
                                             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg>
                                             <span>Learn more</span>
                                         </button>
                                     </div>
-                                    <p class="text-sm text-white/40 leading-relaxed">
+                                    <p class="text-xs text-white/40 leading-relaxed">
                                         Get notified when new messages arrive (even when app is closed)
                                     </p>
                                 </div>
@@ -1514,13 +1746,29 @@
                             </div>
                             <div id="push-notifications-status" class="text-xs text-white/40"></div>
                             
+                            <!-- DM Push Notifications (sub-option) -->
+                            <div id="dm-push-section" class="mt-3 ml-2 pl-3 border-l border-white/10 hidden">
+                                <div class="flex items-center justify-between py-2">
+                                    <div class="flex-1 mr-4">
+                                        <h4 class="text-xs font-medium text-white/70">Direct Messages</h4>
+                                        <p class="text-xs text-white/30 leading-relaxed">
+                                            Get notified for new DMs
+                                        </p>
+                                    </div>
+                                    <label class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" id="dm-push-enabled" class="sr-only peer">
+                                        <div class="w-9 h-5 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white/60 after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#F6851B]"></div>
+                                    </label>
+                                </div>
+                            </div>
+                            
                             <div class="my-4 border-t border-white/5"></div>
                             
                             <!-- Channel Invites (On-chain) -->
                             <div class="flex items-start justify-between p-4 bg-white/5 rounded-xl border border-white/5">
                                 <div class="flex-1 mr-4">
-                                    <h4 class="text-base font-medium text-white/90 mb-1">Channel Invites</h4>
-                                    <p class="text-sm text-white/40 leading-relaxed">
+                                    <h4 class="text-sm font-medium text-white/90 mb-1">Channel Invites</h4>
+                                    <p class="text-xs text-white/40 leading-relaxed">
                                         Receive channel invites from other users
                                     </p>
                                 </div>
@@ -1541,14 +1789,14 @@
                     <div id="settings-panel-api" class="settings-panel hidden">
                         <div class="space-y-6">
                             <div>
-                                <label class="block text-sm font-medium text-white/40 uppercase tracking-wider mb-2">The Graph API Key</label>
+                                <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">The Graph API Key</label>
                                 <input
                                     type="password"
                                     id="settings-graph-api-key"
                                     placeholder="Optional - uses default if empty"
-                                    class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-base focus:outline-none focus:border-white/30 transition placeholder:text-white/20"
+                                    class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-white/30 transition placeholder:text-white/20"
                                 />
-                                <p class="text-sm text-white/30 mt-2">
+                                <p class="text-xs text-white/30 mt-2">
                                     Get yours at <a href="https://thegraph.com/studio/apikeys/" target="_blank" class="text-white/60 hover:text-white transition">thegraph.com/studio</a>
                                 </p>
                             </div>
@@ -1561,8 +1809,8 @@
                         <div class="space-y-6">
                             <div class="flex items-start justify-between p-4 bg-white/5 rounded-xl border border-white/5">
                                 <div class="flex-1 mr-4">
-                                    <h4 class="text-base font-medium text-white/90 mb-1">YouTube Embeds</h4>
-                                    <p class="text-sm text-white/40 leading-relaxed">
+                                    <h4 class="text-sm font-medium text-white/90 mb-1">YouTube Embeds</h4>
+                                    <p class="text-xs text-white/40 leading-relaxed">
                                         Show video player when YouTube links are shared
                                     </p>
                                 </div>
@@ -1573,8 +1821,8 @@
                             </div>
                             <div class="flex items-start justify-between p-4 bg-white/5 rounded-xl border border-white/5">
                                 <div class="flex-1 mr-4">
-                                    <h4 class="text-base font-medium text-white/90 mb-1">Show Sensitive Content</h4>
-                                    <p class="text-sm text-white/40 leading-relaxed">
+                                    <h4 class="text-sm font-medium text-white/90 mb-1">Show Sensitive Content</h4>
+                                    <p class="text-xs text-white/40 leading-relaxed">
                                         Enable NSFW filter in channel exploration
                                     </p>
                                 </div>
@@ -1586,16 +1834,16 @@
                         </div>
                     </div>
 
-                    <!-- Account Panel (Security + Backup) -->
+                    <!-- Security Panel -->
                     <div id="settings-panel-security" class="settings-panel hidden">
                         <div class="space-y-6">
                             <!-- Export Private Key -->
                             <div class="p-4 bg-red-500/5 rounded-xl border border-red-500/10">
-                                <h4 class="text-base font-medium text-white/90 mb-1 flex items-center gap-2">
+                                <h4 class="text-sm font-medium text-white/90 mb-1 flex items-center gap-2">
                                     <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
                                     Private Key
                                 </h4>
-                                <p class="text-sm text-white/40 mb-4">Anyone with this key has full control of your account</p>
+                                <p class="text-xs text-white/40 mb-4">Anyone with this key has full control of your account</p>
                                 
                                 <div id="export-key-step1" class="space-y-3">
                                     <input
@@ -1635,38 +1883,13 @@
                             <!-- Divider -->
                             <div class="border-t border-white/5"></div>
 
-                            <!-- Backup & Restore -->
-                            <div>
-                                <h4 class="text-base font-medium text-white/90 mb-1 flex items-center gap-2">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125"/></svg>
-                                    Backup & Restore
-                                </h4>
-                                <p class="text-sm text-white/40 mb-4">Export data to restore on another device</p>
-                                
-                                <div class="grid grid-cols-2 gap-3">
-                                    <button id="export-all-data-btn" class="bg-white/10 hover:bg-white/20 text-white border border-white/20 px-4 py-3 rounded-xl text-sm transition flex items-center justify-center gap-2">
-                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/></svg>
-                                        Export
-                                    </button>
-                                    <input type="file" id="import-data-file" accept=".json" class="hidden" />
-                                    <button id="import-data-btn" class="bg-white/5 hover:bg-white/10 text-white/60 border border-white/10 px-4 py-3 rounded-xl text-sm transition flex items-center justify-center gap-2">
-                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
-                                        Import
-                                    </button>
-                                </div>
-                                <p class="text-sm text-white/30 mt-3">Passwords not included — you'll need them to unlock</p>
-                            </div>
-
-                            <!-- Divider -->
-                            <div class="border-t border-white/5"></div>
-
                             <!-- Delete Account -->
                             <div class="p-4 bg-red-500/5 rounded-xl border border-red-500/10">
-                                <h4 class="text-base font-medium text-white/90 mb-1 flex items-center gap-2">
+                                <h4 class="text-sm font-medium text-white/90 mb-1 flex items-center gap-2">
                                     <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
                                     Delete Account
                                 </h4>
-                                <p class="text-sm text-white/40 mb-4">Permanently delete this account and all its data</p>
+                                <p class="text-xs text-white/40 mb-4">Permanently delete this account and all its data</p>
                                 
                                 <div id="delete-account-step1" class="space-y-3">
                                     <input
@@ -1702,11 +1925,11 @@
                     <div id="settings-panel-about" class="settings-panel hidden">
                         <div class="space-y-6">
                             <div>
-                                <h4 class="text-base font-medium text-white/90 mb-3 flex items-center gap-2">
+                                <h4 class="text-sm font-medium text-white/90 mb-3 flex items-center gap-2">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z"/></svg>
                                     Disclaimer
                                 </h4>
-                                <p class="text-sm text-white/50 leading-relaxed">
+                                <p class="text-xs text-white/50 leading-relaxed">
                                     We provide a decentralized interface. We do not host content. By using this, you agree not to post illegal content. We reserve the right to block access to illegal content via this specific gateway.
                                 </p>
                             </div>

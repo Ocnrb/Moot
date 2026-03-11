@@ -11,7 +11,7 @@ class SettingsUI {
     constructor() {
         this.deps = {};
         this.elements = {};
-        this.settingsTabOrder = ['profile', 'notifications', 'api', 'linkpreviews', 'security', 'about'];
+        this.settingsTabOrder = ['profile', 'wallet', 'notifications', 'api', 'linkpreviews', 'security', 'about'];
         this.currentSettingsTabIndex = 0;
         this.isAnimating = false; // Prevent multiple simultaneous animations
     }
@@ -36,6 +36,7 @@ class SettingsUI {
     get notificationManager() { return this.deps.notificationManager; }
     get relayManager() { return this.deps.relayManager; }
     get notificationUI() { return this.deps.notificationUI; }
+    get dmManager() { return this.deps.dmManager; }
     get isMobileView() { return this.deps.isMobileView; }
     get showExploreView() { return this.deps.showExploreView; }
 
@@ -424,26 +425,29 @@ class SettingsUI {
                         // 1. Stop presence tracking
                         this.channelManager.stopPresenceTracking();
 
-                        // 2. Leave all channels
+                        // 2. Destroy DM manager (unsubscribes inbox)
+                        this.dmManager?.destroy();
+
+                        // 3. Leave all channels
                         await this.channelManager.leaveAllChannels();
 
-                        // 3. Destroy Streamr client
+                        // 4. Destroy Streamr client
                         await this.streamrController.disconnect();
 
-                        // 4. Clear seed files
+                        // 5. Clear seed files
                         await this.mediaController.clearSeedFilesForOwner(currentAddress);
 
-                        // 5. Reset media controller
+                        // 6. Reset media controller
                         this.mediaController.reset();
 
-                        // 6. Delete encrypted storage
+                        // 7. Delete encrypted storage
                         const storageKey = `pombo_secure_${currentAddress.toLowerCase()}`;
                         localStorage.removeItem(storageKey);
 
-                        // 7. Lock secure storage
+                        // 8. Lock secure storage
                         this.secureStorage.lock();
 
-                        // 8. Delete wallet keystore
+                        // 9. Delete wallet keystore
                         this.authManager.deleteWallet(currentAddress);
                         
                         this.showNotification('Account deleted successfully', 'success');
@@ -565,6 +569,20 @@ class SettingsUI {
                 }
             }
 
+            // Import sent DM messages
+            let dmImported = 0;
+            if (data.sentMessages) {
+                if (!this.secureStorage.cache.sentMessages) {
+                    this.secureStorage.cache.sentMessages = {};
+                }
+                for (const [streamId, msgs] of Object.entries(data.sentMessages)) {
+                    if (!this.secureStorage.cache.sentMessages[streamId]) {
+                        this.secureStorage.cache.sentMessages[streamId] = msgs;
+                        dmImported++;
+                    }
+                }
+            }
+
             // Import username (only if not set)
             if (data.username && !this.secureStorage.cache.username) {
                 this.secureStorage.cache.username = data.username;
@@ -574,7 +592,8 @@ class SettingsUI {
             await this.secureStorage.saveToStorage();
 
             this.showNotification(
-                `Imported: ${channelsImported} channels, ${contactsImported} contacts`,
+                `Imported: ${channelsImported} channels, ${contactsImported} contacts` +
+                (dmImported > 0 ? `, ${dmImported} DM histories` : ''),
                 'success'
             );
 
@@ -648,6 +667,8 @@ class SettingsUI {
         this.elements.notificationsStatus = document.getElementById('notifications-status');
         this.elements.pushNotificationsEnabled = document.getElementById('push-notifications-enabled');
         this.elements.pushNotificationsStatus = document.getElementById('push-notifications-status');
+        this.elements.dmPushEnabled = document.getElementById('dm-push-enabled');
+        this.elements.dmPushSection = document.getElementById('dm-push-section');
         this.elements.settingsUsername = document.getElementById('settings-username');
         this.elements.settingsAddress = document.getElementById('settings-address');
         this.elements.copyOwnAddressBtn = document.getElementById('copy-own-address-btn');
@@ -688,6 +709,11 @@ class SettingsUI {
         // Push notifications toggle
         if (this.elements.pushNotificationsEnabled) {
             this.elements.pushNotificationsEnabled.addEventListener('change', (e) => this.handlePushNotificationsToggle(e));
+        }
+
+        // DM push notifications toggle
+        if (this.elements.dmPushEnabled) {
+            this.elements.dmPushEnabled.addEventListener('change', (e) => this.handleDMPushToggle(e));
         }
 
         // Push learn more modal
@@ -983,6 +1009,7 @@ class SettingsUI {
 
         const tabLabels = {
             'profile': 'Account',
+            'wallet': 'Wallet',
             'notifications': 'Notifications',
             'api': 'API',
             'linkpreviews': 'Content',
@@ -1434,18 +1461,87 @@ class SettingsUI {
     }
 
     /**
+     * Handle DM push notifications toggle
+     */
+    async handleDMPushToggle(e) {
+        const enable = e.target.checked;
+        const address = this.authManager?.getAddress();
+        
+        if (!address) {
+            e.target.checked = false;
+            return;
+        }
+
+        // Storage key for this preference
+        const storageKey = `pombo_dm_push_${address.toLowerCase()}`;
+
+        if (enable) {
+            // Ensure push notifications are enabled first
+            if (!this.relayManager?.enabled) {
+                e.target.checked = false;
+                this.showNotification('Enable Push Notifications first', 'warning');
+                return;
+            }
+
+            // Ensure DM inbox exists
+            if (!this.dmManager?.inboxReady) {
+                e.target.checked = false;
+                this.showNotification('Create your DM inbox first (send or receive a DM)', 'warning');
+                return;
+            }
+
+            try {
+                await this.dmManager.subscribeInboxPush(true); // force = true for explicit toggle
+                localStorage.setItem(storageKey, 'true');
+                this.showNotification('DM notifications enabled!', 'success');
+            } catch (error) {
+                e.target.checked = false;
+                this.showNotification('Failed to enable DM notifications: ' + error.message, 'error');
+            }
+        } else {
+            // Just save preference - relay will not send notifications without re-registration
+            localStorage.removeItem(storageKey);
+            this.showNotification('DM notifications disabled', 'info');
+        }
+    }
+
+    /**
      * Update push notifications status text
      */
     updatePushNotificationsStatus() {
         if (!this.elements.pushNotificationsStatus) return;
         
-        if (this.relayManager?.enabled) {
+        const pushEnabled = this.relayManager?.enabled;
+        
+        if (pushEnabled) {
             const channelCount = this.relayManager.subscribedChannels.size + this.relayManager.subscribedNativeChannels.size;
             this.elements.pushNotificationsStatus.textContent = `Enabled - ${channelCount} channel(s) with notifications enabled`;
             this.elements.pushNotificationsStatus.className = 'text-xs text-green-500';
         } else {
             this.elements.pushNotificationsStatus.textContent = 'Disabled';
             this.elements.pushNotificationsStatus.className = 'text-xs text-white/40';
+        }
+
+        // Show/hide DM push section based on push being enabled
+        if (this.elements.dmPushSection) {
+            if (pushEnabled) {
+                this.elements.dmPushSection.classList.remove('hidden');
+                
+                // Update DM toggle state based on saved preference
+                if (this.elements.dmPushEnabled) {
+                    const address = this.authManager?.getAddress();
+                    if (address) {
+                        const storageKey = `pombo_dm_push_${address.toLowerCase()}`;
+                        const dmPushEnabled = localStorage.getItem(storageKey) === 'true';
+                        this.elements.dmPushEnabled.checked = dmPushEnabled;
+                    }
+                }
+            } else {
+                this.elements.dmPushSection.classList.add('hidden');
+                if (this.elements.dmPushEnabled) {
+                    this.elements.dmPushEnabled.checked = false;
+                }
+            }
         }
     }
 

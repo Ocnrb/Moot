@@ -113,8 +113,12 @@ class ChannelViewUI {
         // Handle read-only UI
         await this.deps.updateReadOnlyUI(channel);
         
-        // Show channel buttons
-        this.elements.inviteUsersBtn?.classList.remove('hidden');
+        // Show channel buttons (hide invite for DM channels)
+        if (channel.type === 'dm') {
+            this.elements.inviteUsersBtn?.classList.add('hidden');
+        } else {
+            this.elements.inviteUsersBtn?.classList.remove('hidden');
+        }
         this.elements.channelMenuBtn?.classList.remove('hidden');
         this.elements.closeChannelBtn?.classList.remove('hidden');
         this.elements.closeChannelBtnDesktop?.classList.remove('hidden');

@@ -3,6 +3,8 @@
  * Handles DM inbox creation button and new-DM modal
  */
 
+import { GasEstimator } from './GasEstimator.js';
+
 class DMModalsUI {
     constructor() {
         this.deps = {};
@@ -154,6 +156,28 @@ class DMModalsUI {
     }
 
     /**
+     * Update gas cost estimate in the modal
+     */
+    updateGasEstimate() {
+        const costEl = document.getElementById('dm-inbox-cost');
+        if (!costEl) return;
+
+        // Show loading state
+        costEl.textContent = '...';
+
+        GasEstimator.estimateCosts()
+            .then(estimates => {
+                costEl.textContent = estimates.formatted.dmInbox;
+                costEl.dataset.tooltip = `Gas: ${estimates.formatted.gasPrice}`;
+            })
+            .catch(error => {
+                this.Logger?.warn('Failed to estimate DM inbox gas cost:', error);
+                costEl.textContent = '~0.03 POL';
+                costEl.dataset.tooltip = 'Gas: ~30 gwei';
+            });
+    }
+
+    /**
      * Show Create Inbox Modal
      */
     showCreateInboxModal() {
@@ -166,6 +190,9 @@ class DMModalsUI {
         const slider = document.getElementById('dm-storage-days-input');
         if (slider) slider.value = '180';
         this.updateStorageDaysDisplay(180);
+        
+        // Update gas estimate
+        this.updateGasEstimate();
         
         this.modalManager?.show('dm-inbox-setup-modal');
     }

@@ -107,20 +107,25 @@ export const GasEstimator = {
     async estimateCosts() {
         const gasPrice = await this.getGasPrice();
         
-        // Public/Password channels: createStream + setPublicPermissions + addStorageNode
-        const publicCost = gasPrice * (this.GAS_UNITS.createStream + this.GAS_UNITS.setPublicPermissions + this.GAS_UNITS.addStorageNode);
-        // Native adds batch setPermissions for members (larger than public permissions)
-        const nativeCost = gasPrice * (this.GAS_UNITS.createStream + this.GAS_UNITS.setPermissionsBatch + this.GAS_UNITS.addStorageNode);
+        // All channels create 2 streams (message + ephemeral) + set permissions on both + storage on message stream
+        // Public/Password: 2× createStream + 2× setPublicPermissions + 1× addStorageNode
+        const publicCost = gasPrice * (2 * this.GAS_UNITS.createStream + 2 * this.GAS_UNITS.setPublicPermissions + this.GAS_UNITS.addStorageNode);
+        // Native: 2× createStream + 2× setPermissionsBatch + 1× addStorageNode
+        const nativeCost = gasPrice * (2 * this.GAS_UNITS.createStream + 2 * this.GAS_UNITS.setPermissionsBatch + this.GAS_UNITS.addStorageNode);
+        // DM Inbox: same as public (2 streams + 2 public permissions + 1 storage node)
+        const dmInboxCost = publicCost;
         
         return {
             public: publicCost,
             password: publicCost,
             native: nativeCost,
+            dmInbox: dmInboxCost,
             gasPrice: gasPrice,
             formatted: {
                 public: this.formatPOL(publicCost),
                 password: this.formatPOL(publicCost),
                 native: this.formatPOL(nativeCost),
+                dmInbox: this.formatPOL(dmInboxCost),
                 gasPrice: this.formatGwei(gasPrice)
             }
         };

@@ -164,8 +164,8 @@ describe('GasEstimator', () => {
         it('should calculate public channel cost', async () => {
             const costs = await GasEstimator.estimateCosts();
             
-            // Public = createStream + setPublicPermissions + addStorageNode
-            const expectedGas = 420000 + 80000 + 165000; // 665000
+            // Public = 2× createStream + 2× setPublicPermissions + addStorageNode
+            const expectedGas = 2 * 420000 + 2 * 80000 + 165000; // 1165000
             const expectedCost = 30 * 1e9 * expectedGas;
             
             expect(costs.public).toBe(expectedCost);
@@ -174,8 +174,8 @@ describe('GasEstimator', () => {
         it('should calculate native channel cost', async () => {
             const costs = await GasEstimator.estimateCosts();
             
-            // Native = createStream + setPermissionsBatch + addStorageNode
-            const expectedGas = 420000 + 210000 + 165000; // 795000
+            // Native = 2× createStream + 2× setPermissionsBatch + addStorageNode
+            const expectedGas = 2 * 420000 + 2 * 210000 + 165000; // 1425000
             const expectedCost = 30 * 1e9 * expectedGas;
             
             expect(costs.native).toBe(expectedCost);
@@ -186,12 +186,18 @@ describe('GasEstimator', () => {
             expect(costs.password).toBe(costs.public);
         });
 
+        it('should have dmInbox cost equal to public cost', async () => {
+            const costs = await GasEstimator.estimateCosts();
+            expect(costs.dmInbox).toBe(costs.public);
+        });
+
         it('should return formatted values', async () => {
             const costs = await GasEstimator.estimateCosts();
             
             expect(costs.formatted.public).toContain('POL');
             expect(costs.formatted.password).toContain('POL');
             expect(costs.formatted.native).toContain('POL');
+            expect(costs.formatted.dmInbox).toContain('POL');
             expect(costs.formatted.gasPrice).toContain('gwei');
         });
 

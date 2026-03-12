@@ -50,7 +50,14 @@ class ExploreUI {
                             <input
                                 type="text"
                                 id="explore-search-input"
+                                name="pombo_explore_filter"
                                 placeholder="Search channels..."
+                                autocomplete="nope"
+                                data-lpignore="true"
+                                data-1p-ignore="true"
+                                data-form-type="other"
+                                readonly
+                                onfocus="this.removeAttribute('readonly');"
                                 class="w-full bg-white/5 border border-white/10 text-white pl-10 pr-4 py-2.5 rounded-xl text-sm focus:outline-none focus:border-white/30 transition placeholder:text-white/30"
                             />
                         </div>

@@ -173,7 +173,8 @@ class App {
             const password = await this.showSecureInput(
                 'Unlock Account',
                 'Enter password to unlock account:',
-                'password'
+                'password',
+                { walletAddress: selectedAddress }
             );
             if (!password) return;
 
@@ -384,7 +385,7 @@ class App {
                         <input type="text" id="wallet-username" name="username" 
                             class="hidden" 
                             autocomplete="username" 
-                            value="${singleWallet ? wallet.address : wallets[0].address}" 
+                            value="${(singleWallet ? wallet.address : wallets[0].address).toLowerCase()}" 
                             tabindex="-1" aria-hidden="true">
                         <div class="relative">
                             <input type="password" id="wallet-password" name="password"
@@ -445,8 +446,8 @@ class App {
                     item.classList.add('selected', 'border-white/[0.12]');
                     selectedAddress = item.dataset.address;
                     selectedName = item.dataset.name;
-                    // Update hidden username field for password manager
-                    if (usernameInput) usernameInput.value = selectedAddress;
+                    // Update hidden username field for password manager (lowercase for consistency)
+                    if (usernameInput) usernameInput.value = selectedAddress.toLowerCase();
                     passwordInput.focus();
                 });
             });
@@ -721,9 +722,11 @@ class App {
      * @param {string} title - Modal title
      * @param {string} label - Input label
      * @param {string} inputType - Input type ('text' or 'password')
+     * @param {Object} options - Optional settings
+     * @param {string} options.walletAddress - Wallet address for password manager support
      * @returns {Promise<string|null>} - User input or null if cancelled
      */
-    async showSecureInput(title, label, inputType = 'password') {
+    async showSecureInput(title, label, inputType = 'password', options = {}) {
         return new Promise((resolve) => {
             const modal = createModalFromTemplate('modal-secure-input', { title, label });
             
@@ -731,9 +734,28 @@ class App {
             const confirmBtn = $(modal, '[data-confirm]');
             const cancelBtn = $(modal, '[data-cancel]');
             const toggleBtn = $(modal, '[data-toggle-visibility]');
+            const modalContent = $(modal, '[data-modal-content]');
 
             // Set input type
             input.type = inputType;
+            
+            // If walletAddress provided, enable password manager support
+            if (options.walletAddress && inputType === 'password') {
+                // Add hidden username field for password manager
+                const usernameInput = document.createElement('input');
+                usernameInput.type = 'text';
+                usernameInput.name = 'username';
+                usernameInput.autocomplete = 'username';
+                usernameInput.value = options.walletAddress.toLowerCase();
+                usernameInput.className = 'hidden';
+                usernameInput.tabIndex = -1;
+                usernameInput.setAttribute('aria-hidden', 'true');
+                input.parentNode.insertBefore(usernameInput, input);
+                
+                // Enable browser password manager
+                input.name = 'password';
+                input.autocomplete = 'current-password';
+            }
             
             // Hide toggle button if not password type
             if (inputType !== 'password' && toggleBtn) {
@@ -931,7 +953,7 @@ class App {
                             <input type="text" id="new-account-username" name="username" 
                                 class="hidden" 
                                 autocomplete="username" 
-                                value="${address}" 
+                                value="${address.toLowerCase()}" 
                                 tabindex="-1" aria-hidden="true">
                             <div class="p-6">
                                 <div class="relative">
@@ -1339,7 +1361,7 @@ class App {
                 try {
                     const wallet = new ethers.Wallet(normalizePrivateKey(privateKeyInput.value));
                     const importUsernameInput = modal.querySelector('#import-wallet-username');
-                    if (importUsernameInput) importUsernameInput.value = wallet.address;
+                    if (importUsernameInput) importUsernameInput.value = wallet.address.toLowerCase();
                 } catch (e) { /* ignore */ }
                 confirmPasswordInput.focus();
             });
@@ -1611,7 +1633,8 @@ class App {
             const password = await this.showSecureInput(
                 'Unlock Account',
                 'Enter your account password:',
-                'password'
+                'password',
+                { walletAddress: targetAddress || savedWallets[0]?.address }
             );
             if (!password) return;
 

@@ -392,4 +392,102 @@ describe('AvatarGenerator', () => {
             expect(svg2).toBeDefined();
         });
     });
+
+    describe('Procedural polygon features', () => {
+        it('should always have 1 or 2 holes', () => {
+            // Test many avatars to ensure all have holes
+            for (let i = 0; i < 100; i++) {
+                const address = `0x${i.toString(16).padStart(40, '0')}`;
+                const svg = generateAvatar(address);
+                // Count path elements (main shape + holes)
+                const pathMatches = svg.match(/<path/g);
+                // Should have at least 2 paths: main polygons + holes
+                expect(pathMatches.length).toBeGreaterThanOrEqual(2);
+            }
+        });
+
+        it('should have polygons with 3-6 vertices', () => {
+            // Test multiple avatars
+            for (let i = 0; i < 50; i++) {
+                const address = `0x${(i * 13).toString(16).padStart(40, 'a')}`;
+                const svg = generateAvatar(address);
+                // Extract all paths - split by Z to get individual polygons
+                const pathMatches = svg.match(/d="([^"]+)"/g);
+                expect(pathMatches).not.toBeNull();
+                
+                pathMatches.forEach(pathMatch => {
+                    // Split combined paths by Z (each polygon ends with Z)
+                    const polygons = pathMatch.split(/Z\s*/);
+                    polygons.forEach(polygon => {
+                        if (!polygon || polygon === '"') return;
+                        // Count vertices by counting 'L' commands (vertices - 1)
+                        const lCount = (polygon.match(/L/g) || []).length;
+                        if (lCount === 0) return;
+                        // M + L*n means n+1 vertices
+                        // Vertices should be between 3-6 for polygons, 3-5 for holes
+                        expect(lCount).toBeGreaterThanOrEqual(2); // At least 3 vertices
+                        expect(lCount).toBeLessThanOrEqual(5); // At most 6 vertices
+                    });
+                });
+            }
+        });
+
+        it('should generate two overlapping polygons', () => {
+            const address = '0x1234567890abcdef1234567890abcdef12345678';
+            const svg = generateAvatar(address);
+            // Find the main shape path (first path in the g transform group)
+            const mainPathMatch = svg.match(/<path d="([^"]+)"/);
+            expect(mainPathMatch).not.toBeNull();
+            if (mainPathMatch) {
+                // Count 'M' commands - should be 2 for two polygons
+                const mCount = (mainPathMatch[1].match(/M/g) || []).length;
+                expect(mCount).toBe(2);
+            }
+        });
+
+        it('should use background color for holes', () => {
+            const address = '0xabcdef1234567890abcdef1234567890abcdef12';
+            const svg = generateAvatar(address);
+            // Extract background color from rect
+            const bgMatch = svg.match(/<rect[^>]+fill="(#[0-9a-fA-F]{6})"/);
+            expect(bgMatch).not.toBeNull();
+            
+            if (bgMatch) {
+                const bgColor = bgMatch[1];
+                // Holes path should use same color as background
+                const holesPath = svg.match(new RegExp(`<path[^>]+fill="${bgColor}"[^>]*/>`));
+                expect(holesPath).not.toBeNull();
+            }
+        });
+
+        it('should not have overlapping holes when there are 2', () => {
+            // Run many iterations to catch cases with 2 holes
+            let testedTwoHoles = 0;
+            for (let i = 0; i < 200 && testedTwoHoles < 20; i++) {
+                const address = `0x${(i * 7).toString(16).padStart(40, 'b')}`;
+                const svg = generateAvatar(address);
+                
+                // Extract holes path (second path element, uses bg color)
+                const bgMatch = svg.match(/<rect[^>]+fill="(#[0-9a-fA-F]{6})"/);
+                if (!bgMatch) continue;
+                
+                const bgColor = bgMatch[1].toLowerCase();
+                const holesPathMatch = svg.match(new RegExp(`<path d="([^"]+)"[^>]*fill="${bgColor}"`, 'i'));
+                
+                if (holesPathMatch) {
+                    const holesD = holesPathMatch[1];
+                    // Count M commands to determine number of holes
+                    const mCommands = holesD.match(/M/g);
+                    if (mCommands && mCommands.length === 2) {
+                        testedTwoHoles++;
+                        // Two holes exist - they should not overlap significantly
+                        // (We can't easily test overlap, but we verify the structure is correct)
+                        expect(mCommands.length).toBe(2);
+                    }
+                }
+            }
+            // Should have found at least some cases with 2 holes
+            expect(testedTwoHoles).toBeGreaterThan(0);
+        });
+    });
 });

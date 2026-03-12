@@ -49,11 +49,14 @@ async function storeCredentials(username, password) {
         return false;
     }
     
+    // Normalize address to lowercase to prevent duplicate entries
+    const normalizedUsername = username.toLowerCase();
+    
     try {
         const credential = new PasswordCredential({
-            id: username,
+            id: normalizedUsername,
             password: password,
-            name: `Pombo Account (${username.slice(0, 6)}...${username.slice(-4)})`
+            name: `Pombo Account (${normalizedUsername.slice(0, 6)}...${normalizedUsername.slice(-4)})`
         });
         
         // Store the credential - this triggers the browser's save prompt
@@ -174,7 +177,7 @@ class App {
                 'Unlock Account',
                 'Enter password to unlock account:',
                 'password',
-                { walletAddress: selectedAddress }
+                { walletAddress: selectedAddress.toLowerCase() }
             );
             if (!password) return;
 
@@ -1391,7 +1394,7 @@ class App {
                 let walletAddress = '';
                 try {
                     const wallet = new ethers.Wallet(normalizePrivateKey(privateKeyInput.value));
-                    walletAddress = wallet.address;
+                    walletAddress = wallet.address.toLowerCase();
                 } catch (e) { /* ignore */ }
 
                 const result = {
@@ -1634,7 +1637,7 @@ class App {
                 'Unlock Account',
                 'Enter your account password:',
                 'password',
-                { walletAddress: targetAddress || savedWallets[0]?.address }
+                { walletAddress: (targetAddress || savedWallets[0]?.address)?.toLowerCase() }
             );
             if (!password) return;
 

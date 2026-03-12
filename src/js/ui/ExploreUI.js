@@ -48,16 +48,14 @@ class ExploreUI {
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
                             </svg>
                             <input
-                                type="text"
+                                type="search"
                                 id="explore-search-input"
                                 name="pombo_explore_filter"
                                 placeholder="Search channels..."
-                                autocomplete="nope"
+                                autocomplete="off"
                                 data-lpignore="true"
                                 data-1p-ignore="true"
                                 data-form-type="other"
-                                readonly
-                                onfocus="this.removeAttribute('readonly');"
                                 class="w-full bg-white/5 border border-white/10 text-white pl-10 pr-4 py-2.5 rounded-xl text-sm focus:outline-none focus:border-white/30 transition placeholder:text-white/30"
                             />
                         </div>

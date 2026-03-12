@@ -311,9 +311,10 @@ class JoinChannelUI {
                 <div class="bg-[#111113] rounded-2xl p-5 w-[340px] max-w-full mx-4 border border-white/[0.06]">
                     <h3 class="text-[15px] font-medium mb-2 text-white">${safeTitle}</h3>
                     <p class="text-[12px] text-white/50 mb-4">${safeMessage}</p>
-                    <input type="password" id="browse-password-input" placeholder="Password" 
+                    <input type="text" id="browse-password-input" placeholder="Encryption key" 
                         class="w-full bg-white/[0.05] border border-white/[0.08] text-white px-3 py-2.5 rounded-xl text-[13px] focus:outline-none focus:border-white/[0.15] transition mb-4"
-                        autocomplete="off">
+                        autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other" spellcheck="false"
+                        style="-webkit-text-security: disc; text-security: disc;">
                     <div class="flex gap-2">
                         <button id="cancel-pw-btn" class="flex-1 bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.08] text-white/50 text-[13px] font-medium py-2.5 rounded-xl transition">
                             Cancel

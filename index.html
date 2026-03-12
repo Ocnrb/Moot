@@ -120,16 +120,14 @@
                     <div class="relative w-[42%] flex-shrink-0">
                         <span id="quick-join-hash" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm font-medium text-white/25 hidden">#</span>
                         <input
-                            type="text"
+                            type="search"
                             id="quick-join-input"
                             name="pombo_channel_id_search"
                             placeholder="Join with #ID..."
-                            autocomplete="nope"
+                            autocomplete="off"
                             data-lpignore="true"
                             data-1p-ignore="true"
                             data-form-type="other"
-                            readonly
-                            onfocus="this.removeAttribute('readonly');"
                             style="text-overflow: ellipsis;"
                             class="w-full bg-white/[0.04] border border-white/[0.07] text-white px-3 py-2 rounded-xl text-sm placeholder-white/25 focus:outline-none focus:border-white/20 focus:bg-white/[0.06] transition-all duration-200 overflow-hidden quick-join-field"
                         />
@@ -513,16 +511,18 @@
 
                         <!-- Password field (shown only for Password tab) -->
                         <div id="password-field-section" class="hidden">
-                            <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Password</label>
+                            <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Encryption Key</label>
                             <input
-                                type="password"
+                                type="text"
                                 id="channel-password-input"
                                 name="channel-encryption-key"
-                                placeholder="Enter a secure password"
+                                placeholder="Enter an encryption key"
                                 autocomplete="off"
                                 data-lpignore="true"
                                 data-1p-ignore="true"
                                 data-form-type="other"
+                                spellcheck="false"
+                                style="-webkit-text-security: disc; text-security: disc;"
                                 class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-white/30 transition placeholder:text-white/20"
                             />
                         </div>
@@ -1072,16 +1072,18 @@
                 </div>
 
                 <div id="join-password-field" class="hidden">
-                    <label class="block text-sm text-white/30 mb-1.5 uppercase tracking-wide">Password</label>
+                    <label class="block text-sm text-white/30 mb-1.5 uppercase tracking-wide">Encryption Key</label>
                     <input
-                        type="password"
+                        type="text"
                         id="join-password-input"
                         name="channel-decryption-key"
-                        placeholder="password..."
+                        placeholder="encryption key..."
                         autocomplete="off"
                         data-lpignore="true"
                         data-1p-ignore="true"
                         data-form-type="other"
+                        spellcheck="false"
+                        style="-webkit-text-security: disc; text-security: disc;"
                         class="w-full bg-white/[0.05] border border-white/[0.08] text-white px-3 py-2 rounded-xl text-sm focus:outline-none focus:border-white/[0.15] transition"
                     />
                 </div>
@@ -1807,7 +1809,12 @@
                                 <input
                                     type="password"
                                     id="settings-graph-api-key"
+                                    name="graph-api-token"
                                     placeholder="Optional - uses default if empty"
+                                    autocomplete="one-time-code"
+                                    data-lpignore="true"
+                                    data-1p-ignore="true"
+                                    data-form-type="other"
                                     class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-white/30 transition placeholder:text-white/20"
                                 />
                                 <p class="text-xs text-white/30 mt-2">
@@ -1863,7 +1870,12 @@
                                     <input
                                         type="password"
                                         id="export-key-password"
+                                        name="export-verification"
                                         placeholder="Enter password to unlock"
+                                        autocomplete="one-time-code"
+                                        data-lpignore="true"
+                                        data-1p-ignore="true"
+                                        data-form-type="other"
                                         class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20 transition placeholder:text-white/20"
                                     />
                                     <button id="unlock-private-key-btn" class="w-full bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 px-4 py-2.5 rounded-xl text-sm transition">
@@ -1909,7 +1921,12 @@
                                     <input
                                         type="password"
                                         id="delete-account-password"
+                                        name="delete-verification"
                                         placeholder="Enter password to confirm"
+                                        autocomplete="one-time-code"
+                                        data-lpignore="true"
+                                        data-1p-ignore="true"
+                                        data-form-type="other"
                                         class="w-full bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20 transition placeholder:text-white/20"
                                     />
                                     <button id="verify-delete-account-btn" class="w-full bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 px-4 py-2.5 rounded-xl text-sm transition">

@@ -393,59 +393,33 @@ describe('AvatarGenerator', () => {
         });
     });
 
-    describe('Procedural polygon features', () => {
-        it('should always have 1 or 2 holes', () => {
-            // Test many avatars to ensure all have holes
-            for (let i = 0; i < 100; i++) {
-                const address = `0x${i.toString(16).padStart(40, '0')}`;
-                const svg = generateAvatar(address);
-                // Count path elements (main shape + holes)
-                const pathMatches = svg.match(/<path/g);
-                // Should have at least 2 paths: main polygons + holes
-                expect(pathMatches.length).toBeGreaterThanOrEqual(2);
-            }
-        });
-
-        it('should have polygons with 3-6 vertices', () => {
-            // Test multiple avatars
-            for (let i = 0; i < 50; i++) {
-                const address = `0x${(i * 13).toString(16).padStart(40, 'a')}`;
-                const svg = generateAvatar(address);
-                // Extract all paths - split by Z to get individual polygons
-                const pathMatches = svg.match(/d="([^"]+)"/g);
-                expect(pathMatches).not.toBeNull();
-                
-                pathMatches.forEach(pathMatch => {
-                    // Split combined paths by Z (each polygon ends with Z)
-                    const polygons = pathMatch.split(/Z\s*/);
-                    polygons.forEach(polygon => {
-                        if (!polygon || polygon === '"') return;
-                        // Count vertices by counting 'L' commands (vertices - 1)
-                        const lCount = (polygon.match(/L/g) || []).length;
-                        if (lCount === 0) return;
-                        // M + L*n means n+1 vertices
-                        // Vertices should be between 3-6 for polygons, 3-5 for holes
-                        expect(lCount).toBeGreaterThanOrEqual(2); // At least 3 vertices
-                        expect(lCount).toBeLessThanOrEqual(5); // At most 6 vertices
-                    });
-                });
-            }
-        });
-
-        it('should generate two overlapping polygons', () => {
+    describe('Organic blob features', () => {
+        it('should generate two overlapping blob shapes', () => {
             const address = '0x1234567890abcdef1234567890abcdef12345678';
             const svg = generateAvatar(address);
-            // Find the main shape path (first path in the g transform group)
+            // Find the main shape path
             const mainPathMatch = svg.match(/<path d="([^"]+)"/);
             expect(mainPathMatch).not.toBeNull();
             if (mainPathMatch) {
-                // Count 'M' commands - should be 2 for two polygons
+                // Count 'M' commands - should be 2 for two blobs
                 const mCount = (mainPathMatch[1].match(/M/g) || []).length;
                 expect(mCount).toBe(2);
             }
         });
 
-        it('should use background color for holes', () => {
+        it('should use Catmull-Rom curves (C commands)', () => {
+            const address = '0x1234567890abcdef1234567890abcdef12345678';
+            const svg = generateAvatar(address);
+            const mainPathMatch = svg.match(/<path d="([^"]+)"/);
+            expect(mainPathMatch).not.toBeNull();
+            if (mainPathMatch) {
+                // Should contain C commands for smooth curves
+                const cCount = (mainPathMatch[1].match(/C/g) || []).length;
+                expect(cCount).toBeGreaterThan(10); // Multiple curve segments
+            }
+        });
+
+        it('should have frame element with background color', () => {
             const address = '0xabcdef1234567890abcdef1234567890abcdef12';
             const svg = generateAvatar(address);
             // Extract background color from rect
@@ -454,40 +428,120 @@ describe('AvatarGenerator', () => {
             
             if (bgMatch) {
                 const bgColor = bgMatch[1];
-                // Holes path should use same color as background
-                const holesPath = svg.match(new RegExp(`<path[^>]+fill="${bgColor}"[^>]*/>`));
-                expect(holesPath).not.toBeNull();
+                // Frame path should use same color as background with fill-rule
+                const framePath = svg.match(new RegExp(`<path[^>]+fill="${bgColor}"[^>]*fill-rule="evenodd"`));
+                expect(framePath).not.toBeNull();
             }
         });
 
-        it('should not have overlapping holes when there are 2', () => {
-            // Run many iterations to catch cases with 2 holes
-            let testedTwoHoles = 0;
-            for (let i = 0; i < 200 && testedTwoHoles < 20; i++) {
-                const address = `0x${(i * 7).toString(16).padStart(40, 'b')}`;
+        it('should generate smooth organic shapes', () => {
+            // Test multiple avatars for shape characteristics
+            for (let i = 0; i < 20; i++) {
+                const address = `0x${(i * 13).toString(16).padStart(40, 'a')}`;
                 const svg = generateAvatar(address);
+                const mainPathMatch = svg.match(/<path d="([^"]+)"/);
+                expect(mainPathMatch).not.toBeNull();
                 
-                // Extract holes path (second path element, uses bg color)
-                const bgMatch = svg.match(/<rect[^>]+fill="(#[0-9a-fA-F]{6})"/);
-                if (!bgMatch) continue;
-                
-                const bgColor = bgMatch[1].toLowerCase();
-                const holesPathMatch = svg.match(new RegExp(`<path d="([^"]+)"[^>]*fill="${bgColor}"`, 'i'));
-                
-                if (holesPathMatch) {
-                    const holesD = holesPathMatch[1];
-                    // Count M commands to determine number of holes
-                    const mCommands = holesD.match(/M/g);
-                    if (mCommands && mCommands.length === 2) {
-                        testedTwoHoles++;
-                        // Two holes exist - they should not overlap significantly
-                        // (We can't easily test overlap, but we verify the structure is correct)
-                        expect(mCommands.length).toBe(2);
-                    }
+                if (mainPathMatch) {
+                    const path = mainPathMatch[1];
+                    // Should start with M command
+                    expect(path.startsWith('M')).toBe(true);
+                    // Should have C commands for curves (not L for straight lines in main blob)
+                    expect(path).toContain('C');
                 }
             }
-            // Should have found at least some cases with 2 holes
-            expect(testedTwoHoles).toBeGreaterThan(0);
+        });
+
+        it('should vary blob characteristics across addresses', () => {
+            const blobSignatures = new Set();
+            for (let i = 0; i < 50; i++) {
+                const address = `0x${(i * 7).toString(16).padStart(40, 'c')}`;
+                const svg = generateAvatar(address);
+                const mainPathMatch = svg.match(/<path d="([^"]+)"/);
+                if (mainPathMatch) {
+                    // Use first 100 chars of path as signature
+                    blobSignatures.add(mainPathMatch[1].substring(0, 100));
+                }
+            }
+            // Should have many different blob shapes
+            expect(blobSignatures.size).toBeGreaterThan(30);
+        });
+    });
+
+    describe('Face layer features', () => {
+        it('should include face elements (eyes and mouth)', () => {
+            const address = '0x1234567890abcdef1234567890abcdef12345678';
+            const svg = generateAvatar(address);
+            // Face elements can be circles, paths, lines, or ellipses
+            const faceElements = svg.match(/<(circle|ellipse|line|path)[^>]+opacity/g);
+            expect(faceElements).not.toBeNull();
+            expect(faceElements.length).toBeGreaterThanOrEqual(2); // At least 2 eyes
+        });
+
+        it('should generate different face features for different addresses', () => {
+            const faceSignatures = new Set();
+            for (let i = 0; i < 100; i++) {
+                const address = `0x${(i * 11).toString(16).padStart(40, 'd')}`;
+                const svg = generateAvatar(address);
+                // Extract face elements section (everything after the rotated blob group closes)
+                const faceMatch = svg.match(/<\/g>\s*(<[^<]*opacity[^>]*>.*?)<path[^>]*fill-rule="evenodd"/s);
+                if (faceMatch) {
+                    faceSignatures.add(faceMatch[1].substring(0, 200));
+                }
+            }
+            // Should have variety in face features
+            expect(faceSignatures.size).toBeGreaterThan(20);
+        });
+
+        it('should use background color for face features', () => {
+            const address = '0xabcdef1234567890abcdef1234567890abcdef12';
+            const svg = generateAvatar(address);
+            // Extract background color
+            const bgMatch = svg.match(/<rect[^>]+fill="(#[0-9a-fA-F]{6})"/);
+            expect(bgMatch).not.toBeNull();
+            
+            if (bgMatch) {
+                const bgColor = bgMatch[1];
+                // Face elements should use background color (FACE.color = 'bg')
+                const faceColorMatch = svg.match(new RegExp(`(circle|ellipse|line|path)[^>]+fill="${bgColor}"`));
+                expect(faceColorMatch).not.toBeNull();
+            }
+        });
+
+        it('should position eyes symmetrically', () => {
+            const address = '0x1234567890abcdef1234567890abcdef12345678';
+            const svg = generateAvatar(address, 100); // Larger size for precision
+            // Extract circle/ellipse cx positions (eyes)
+            const eyeMatches = svg.matchAll(/<(circle|ellipse)[^>]+cx="([^"]+)"/g);
+            const cxPositions = [];
+            for (const match of eyeMatches) {
+                cxPositions.push(parseFloat(match[2]));
+            }
+            
+            if (cxPositions.length >= 2) {
+                // Eyes should be roughly symmetric around center (50 for size 100)
+                const leftEyes = cxPositions.filter(cx => cx < 50);
+                const rightEyes = cxPositions.filter(cx => cx > 50);
+                expect(leftEyes.length).toBeGreaterThan(0);
+                expect(rightEyes.length).toBeGreaterThan(0);
+            }
+        });
+
+        it('should apply tilt expression when generated', () => {
+            // Run many iterations to find tilted faces
+            let foundTiltedFace = false;
+            for (let i = 0; i < 200 && !foundTiltedFace; i++) {
+                const address = `0x${(i * 17).toString(16).padStart(40, 'e')}`;
+                const svg = generateAvatar(address);
+                // Tilted faces have an extra g element with rotation
+                const tiltMatch = svg.match(/<g transform="rotate\([^0]/);
+                if (tiltMatch) {
+                    foundTiltedFace = true;
+                    expect(tiltMatch).not.toBeNull();
+                }
+            }
+            // Should find at least one tilted face in 200 attempts
+            expect(foundTiltedFace).toBe(true);
         });
     });
 });

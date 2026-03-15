@@ -1165,7 +1165,7 @@ body {
         padding-left: 0.5rem;
         padding-right: 0.75rem;
         height: 3.5rem;
-        background-color: #09090b !important;
+        background-color: #000000 !important;
         backdrop-filter: none;
     }
     
@@ -1206,6 +1206,12 @@ body {
         border-right: none;
         transform: translateX(0);
         transition: transform 0.3s ease;
+        background-color: #000000 !important;
+    }
+
+    /* Border override for mobile - more visible */
+    .border-white\/\[0\.01\] {
+        border-color: rgb(255 255 255 / 0.08) !important;
     }
     
     /* Hide sidebar when chat is open */
@@ -1219,7 +1225,7 @@ body {
         inset: 0;
         z-index: 20;
         transform: translateX(100%);
-        background-color: #09090b;
+        background-color: #000000;
     }
     
     /* Show chat when active */
@@ -1229,27 +1235,27 @@ body {
     }
 
     /* ----- UNIFIED DARK BACKGROUND ON MOBILE ----- */
-    /* Match all backgrounds to sidebar tone (#09090b) for consistency */
+    /* Match all backgrounds to true black for OLED screens */
     .messages-area {
-        background-color: #09090b !important;
+        background-color: #000000 !important;
     }
 
     #chat-header {
-        background-color: #09090b !important;
+        background-color: #000000 !important;
     }
 
     #message-input-container {
-        background-color: #09090b !important;
+        background-color: #000000 !important;
     }
 
     /* Chat main area */
     #chat-area main {
-        background-color: #09090b !important;
+        background-color: #000000 !important;
     }
 
     /* Explore view */
     .explore-view {
-        background-color: #09090b !important;
+        background-color: #000000 !important;
     }
 
     /* Modal containers on mobile */
@@ -1259,25 +1265,25 @@ body {
     #contacts-modal > div,
     #channel-types-modal > div,
     #storage-info-modal > div {
-        background-color: #09090b !important;
+        background-color: #000000 !important;
     }
 
     /* Modal header bars (contacts header hidden on mobile, channel-settings visible) */
     #new-channel-modal > div > .flex.border-b,
     #channel-settings-modal > div > .flex.border-b {
-        background-color: #09090b !important;
+        background-color: #000000 !important;
     }
 
     /* Modal tab strips / sidebars — bg set in horizontal tabs rule below */
 
     /* Modal footers and sidebars with #0a0a0a background */
     .bg-\[\#0a0a0a\] {
-        background-color: #09090b !important;
+        background-color: #000000 !important;
     }
 
     /* Inline bg-[#111113] modal panels */
     .bg-\[\#111113\] {
-        background-color: #09090b !important;
+        background-color: #000000 !important;
     }
     
     /* ----- HIDE MAIN HEADER WHEN CHAT IS ACTIVE ----- */
@@ -1695,7 +1701,7 @@ body {
         padding: 0 !important;
         flex-shrink: 0;
         min-height: auto;
-        background: #09090b !important;
+        background: #000000 !important;
     }
 
     /* Hide "Type" label on mobile modals */

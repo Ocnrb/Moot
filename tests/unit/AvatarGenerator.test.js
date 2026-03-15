@@ -48,17 +48,19 @@ describe('AvatarGenerator', () => {
             expect(svg1).toBe(svg2);
         });
 
-        it('should use default size of 32', () => {
+        it('should use default size of 32 in viewBox', () => {
             const svg = generateAvatar('0x1234567890abcdef1234567890abcdef12345678');
-            expect(svg).toContain('width="32"');
-            expect(svg).toContain('height="32"');
+            // SVG uses 100% dimensions for responsive scaling, viewBox defines internal coordinates
+            expect(svg).toContain('width="100%"');
+            expect(svg).toContain('height="100%"');
             expect(svg).toContain('viewBox="0 0 32 32"');
         });
 
-        it('should respect custom size', () => {
+        it('should respect custom size in viewBox', () => {
             const svg = generateAvatar('0x1234567890abcdef1234567890abcdef12345678', 64);
-            expect(svg).toContain('width="64"');
-            expect(svg).toContain('height="64"');
+            // SVG uses 100% dimensions for responsive scaling, viewBox defines internal coordinates
+            expect(svg).toContain('width="100%"');
+            expect(svg).toContain('height="100%"');
             expect(svg).toContain('viewBox="0 0 64 64"');
         });
 

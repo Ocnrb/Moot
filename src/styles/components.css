@@ -1281,10 +1281,7 @@ body {
         background-color: #000000 !important;
     }
 
-    /* Inline bg-[#111113] modal panels */
-    .bg-\[\#111113\] {
-        background-color: #000000 !important;
-    }
+    /* Note: .bg-[#111113] NOT overridden - account modals (Unlock, Create, Import, etc.) keep #111113 */
     
     /* ----- HIDE MAIN HEADER WHEN CHAT IS ACTIVE ----- */
     /* Use explicit combinatorial rule so settings-open always wins */

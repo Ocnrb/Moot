@@ -234,6 +234,15 @@ body {
     .mobile-close-btn {
         display: none !important;
     }
+    
+    /* Modal close buttons: show X on desktop, hide back arrow */
+    .modal-close-btn .icon-back {
+        display: none !important;
+    }
+    
+    .modal-close-btn .icon-close {
+        display: block !important;
+    }
 }
 
 /* Tighter spacing within groups - using margin-top system instead */
@@ -984,6 +993,69 @@ body {
     }
 }
 
+/* ----- Toast Mobile Swipe Support ----- */
+@media (max-width: 767px) {
+    .toast {
+        touch-action: pan-x;
+        cursor: grab;
+    }
+    
+    .toast.toast-swiping {
+        transition: none !important;
+        cursor: grabbing;
+    }
+    
+    .toast:not(.toast-swiping) {
+        transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), 
+                    opacity 0.25s ease;
+    }
+    
+    /* Minimized state - shows only right edge */
+    .toast.toast-minimized {
+        transform: translateX(calc(100% - 12px)) !important;
+        opacity: 0.7;
+        border-left: 3px solid currentColor;
+    }
+    
+    .toast.toast-minimized.success {
+        border-left-color: #4ade80;
+    }
+    
+    .toast.toast-minimized.error {
+        border-left-color: #f87171;
+    }
+    
+    .toast.toast-minimized.loading {
+        border-left-color: #ff5c00;
+    }
+    
+    .toast.toast-minimized.invite {
+        border-left-color: #22d3ee;
+    }
+    
+    .toast.toast-minimized.info {
+        border-left-color: #60a5fa;
+    }
+    
+    .toast.toast-minimized.warning {
+        border-left-color: #fbbf24;
+    }
+    
+    /* Hide content when minimized */
+    .toast.toast-minimized .toast-content,
+    .toast.toast-minimized .toast-icon,
+    .toast.toast-minimized .toast-close,
+    .toast.toast-minimized .toast-progress {
+        opacity: 0;
+        pointer-events: none;
+    }
+    
+    /* Show close button always on mobile */
+    .toast .toast-close {
+        opacity: 0.5;
+    }
+}
+
 /* ----- Loading Spinner Overlay ----- */
 .loading-overlay {
     position: fixed;
@@ -1144,6 +1216,15 @@ body {
    Sidebar = initial view, Chat = push navigation
    =========================================== */
 @media (max-width: 767px) {
+    /* Modal close buttons: show back arrow on mobile, hide X */
+    .modal-close-btn .icon-back {
+        display: block !important;
+    }
+    
+    .modal-close-btn .icon-close {
+        display: none !important;
+    }
+    
     /* Re-enable mobile pill elements (override desktop hiding) */
     #mobile-pill-nav:not(.hidden),
     #sidebar-connect-float:not(.hidden) {
@@ -1495,6 +1576,7 @@ body {
     #channel-list .channel-item {
         padding-top: 1rem;
         padding-bottom: 1rem;
+        border-color: rgba(255, 255, 255, 0.05);
     }
 
     /* Bottom padding so list doesn't hide behind pill */

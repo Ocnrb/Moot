@@ -50,6 +50,9 @@ class ContactsUI {
         if (this.elements.closeContactsBtn) {
             this.elements.closeContactsBtn.addEventListener('click', () => this.hide());
         }
+        
+        // Register onHide callback for back button and programmatic hide
+        modalManager.registerOnHide('contacts-modal', () => this._cleanupOnHide());
 
         // Context menu listeners
         if (this.elements.contextMenu) {
@@ -73,14 +76,14 @@ class ContactsUI {
         this.renderList();
         // Add contacts-open class for mobile
         if (window.innerWidth < 768) {
-            // Close settings modal if open (using proper hide to run cleanup)
-            const settingsModal = document.getElementById('settings-modal');
-            if (settingsModal && !settingsModal.classList.contains('hidden')) {
+            // Close settings modal if open (always use modalManager to keep stack in sync)
+            if (modalManager.isVisible('settings-modal')) {
                 if (this.deps?.settingsUI?.hide) {
                     this.deps.settingsUI.hide();
                 } else {
+                    // Fallback: use modalManager to ensure stack stays in sync
+                    modalManager.hide('settings-modal');
                     document.body.classList.remove('settings-open');
-                    settingsModal.classList.add('hidden');
                 }
             }
             document.body.classList.add('contacts-open');
@@ -97,6 +100,13 @@ class ContactsUI {
      */
     hide() {
         modalManager.hide('contacts-modal');
+    }
+
+    /**
+     * Cleanup when contacts modal is hidden (called by modalManager callback)
+     * @private
+     */
+    _cleanupOnHide() {
         // Remove contacts-open class for mobile
         document.body.classList.remove('contacts-open');
         // Reset pill nav to chats tab

@@ -268,7 +268,7 @@
                 <!-- Close button (mobile: left side) -->
                 <button id="close-channel-btn" class="hidden p-2 hover:bg-white/10 rounded-xl transition text-white/30 hover:text-white mobile-close-btn" title="Close channel">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 19.5L8.25 12l7.5-7.5"/>
                     </svg>
                 </button>
                 <!-- Left: Channel name -->
@@ -419,12 +419,15 @@
         <div class="bg-[#111113] rounded-2xl w-[640px] max-w-[95vw] shadow-2xl border border-white/[0.06] overflow-hidden flex flex-col max-h-[95vh] md:max-h-[90vh]">
             <!-- Header -->
             <div class="flex items-center justify-between px-6 py-4 border-b border-white/5 flex-shrink-0">
-                <h3 class="text-lg font-medium text-white/90">Create Channel</h3>
-                <button id="cancel-channel-btn" class="text-white/40 hover:text-white/80 transition p-1">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <button id="cancel-channel-btn" class="modal-close-btn text-white/40 hover:text-white/80 transition p-1 -ml-1 md:order-2 md:ml-0 md:-mr-1">
+                    <svg class="w-5 h-5 icon-back" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 19.5L8.25 12l7.5-7.5"/>
+                    </svg>
+                    <svg class="w-5 h-5 icon-close hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
                     </svg>
                 </button>
+                <h3 class="text-lg font-medium text-white/90 md:order-1">Create Channel</h3>
             </div>
             
             <div class="flex flex-1 min-h-0 overflow-hidden">
@@ -1237,12 +1240,15 @@
         <div class="bg-[#111113] rounded-2xl w-[640px] max-w-[95vw] mx-4 shadow-2xl border border-white/[0.06] overflow-hidden">
             <!-- Header -->
             <div class="flex items-center justify-between px-6 py-4 border-b border-white/5">
-                <h3 class="text-lg font-medium text-white/90">Channel Details</h3>
-                <button id="close-channel-settings-btn" class="text-white/40 hover:text-white/80 transition p-1">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <button id="close-channel-settings-btn" class="modal-close-btn text-white/40 hover:text-white/80 transition p-1 -ml-1 md:order-2 md:ml-0 md:-mr-1">
+                    <svg class="w-5 h-5 icon-back" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 19.5L8.25 12l7.5-7.5"/>
+                    </svg>
+                    <svg class="w-5 h-5 icon-close hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
                     </svg>
                 </button>
+                <h3 class="text-lg font-medium text-white/90 md:order-1">Channel Details</h3>
             </div>
 
             <div class="flex min-h-[420px]">
@@ -1604,12 +1610,15 @@
         <div class="bg-[#111113] rounded-2xl w-[640px] max-w-[95vw] mx-4 shadow-2xl border border-white/[0.06] overflow-hidden">
             <!-- Header -->
             <div class="flex items-center justify-between px-6 py-4 border-b border-white/5">
-                <h3 class="text-lg font-medium text-white/90">Settings</h3>
-                <button id="close-settings-btn" class="text-white/40 hover:text-white/80 transition p-1">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <button id="close-settings-btn" class="modal-close-btn text-white/40 hover:text-white/80 transition p-1 -ml-1 md:order-2 md:ml-0 md:-mr-1">
+                    <svg class="w-5 h-5 icon-back" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 19.5L8.25 12l7.5-7.5"/>
+                    </svg>
+                    <svg class="w-5 h-5 icon-close hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
                     </svg>
                 </button>
+                <h3 class="text-lg font-medium text-white/90 md:order-1">Settings</h3>
             </div>
             
             <div class="flex min-h-[420px]">

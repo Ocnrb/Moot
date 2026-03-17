@@ -1219,6 +1219,8 @@ class ChannelManager {
                             nickname: identityManager.getUsername?.() || null,
                             lastActive: Date.now()
                         }, aesKey);
+                        // Set Pombo key for publishing to peer's ephemeral stream
+                        await streamrController.setDMPublishKey(ephemeralStreamId);
                         await streamrController.publishControl(ephemeralStreamId, encrypted, null);
                     } catch (e) {
                         Logger.warn('Failed to publish DM presence:', e.message);
@@ -1925,6 +1927,8 @@ class ChannelManager {
                     if (peerPubKey) {
                         const aesKey = await dmCrypto.getSharedKey(privateKey, channel.peerAddress, peerPubKey);
                         const encrypted = await dmCrypto.encrypt({ type: 'typing', timestamp: Date.now() }, aesKey);
+                        // Set Pombo key for publishing to peer's ephemeral stream
+                        await streamrController.setDMPublishKey(ephemeralStreamId);
                         await streamrController.publishControl(ephemeralStreamId, encrypted, null);
                     }
                 }
@@ -2028,6 +2032,8 @@ class ChannelManager {
                     if (peerPubKey) {
                         const aesKey = await dmCrypto.getSharedKey(privateKey, channel.peerAddress, peerPubKey);
                         const encrypted = await dmCrypto.encrypt(reaction, aesKey);
+                        // Set Pombo key for publishing to peer's inbox
+                        await streamrController.setDMPublishKey(streamId);
                         await streamrController.publishReaction(streamId, encrypted, null);
                         
                         // Persist locally — we won't receive our own reaction back from peer's inbox

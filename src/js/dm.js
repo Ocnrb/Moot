@@ -4,7 +4,9 @@
  * 
  * Architecture:
  * - Each user has a deterministic inbox: {address}/Pombo-DM-1 (stored) + {address}/Pombo-DM-2 (ephemeral)
- * - Anyone can PUBLISH and SUBSCRIBE to an inbox (E2E encrypted at app layer via ECDH + AES-256-GCM)
+ * - Permissions: public PUBLISH, owner-only SUBSCRIBE (protects social graph)
+ * - Streamr-layer encryption uses pre-agreed "Pombo key" (allows history fetch when publisher offline)
+ * - Real E2E security: app-layer ECDH + AES-256-GCM encryption per conversation
  * - To DM Bob: Alice publishes to Bob's inbox. Bob reads from his own inbox.
  * - The senderId (Streamr publisherId) identifies who sent each message.
  * - Conversations are keyed by peerAddress and stored locally.
@@ -160,6 +162,12 @@ class DMManager {
         try {
             Logger.info('DM: Subscribing to inbox', this.inboxMessageStreamId);
 
+            // Add decrypt keys for all known conversation peers
+            // This allows us to decrypt messages from senders who used the Pombo key
+            for (const peerAddress of this.conversations.keys()) {
+                await streamrController.addDMDecryptKey(peerAddress);
+            }
+
             // Subscribe to message stream (DM-1 partition 0) with history
             this.inboxSubscription = await streamrController.subscribeWithHistory(
                 this.inboxMessageStreamId,
@@ -208,6 +216,11 @@ class DMManager {
         }
 
         try {
+            // Add decrypt keys for known peers (for ephemeral control messages)
+            for (const peerAddress of this.conversations.keys()) {
+                await streamrController.addDMDecryptKey(peerAddress);
+            }
+
             this.inboxEphemeralSubscription = await streamrController.subscribeWithHistory(
                 this.inboxEphemeralStreamId,
                 0,  // partition 0 = control
@@ -561,6 +574,9 @@ class DMManager {
             const aesKey = await dmCrypto.getSharedKey(privateKey, peerAddress, peerPubKey);
             const { pending, _dmSent, verified, ...cleanMessage } = message;
             const payload = await dmCrypto.encrypt(cleanMessage, aesKey);
+
+            // Set Pombo key for publishing (peer can decrypt if they have the key)
+            await streamrController.setDMPublishKey(peerInboxStreamId);
 
             // Publish encrypted payload to peer's inbox (message stream, partition 0, no password)
             await streamrController.publishMessage(peerInboxStreamId, payload, null);

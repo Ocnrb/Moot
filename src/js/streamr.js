@@ -122,6 +122,9 @@ class StreamrController {
         this.subscriptions = new Map(); // streamId -> { partition -> subscription }
         this.channels = new Map(); // streamId -> channel config
         this.address = null;
+        
+        // DM decrypt key recovery tracking
+        this._dmKeyAddedForPublisher = new Set();  // Publishers we've added Pombo key for
     }
 
     /**
@@ -345,21 +348,26 @@ class StreamrController {
             const permStartTime = Date.now();
             
             if (type === 'public' || type === 'password') {
-                // For read-only channels, grant only subscribe permissions to public
-                const grantFn = readOnly 
+                // For read-only channels:
+                // - Message stream (-1): public subscribe only (read-only)
+                // - Ephemeral stream (-2): public subscribe AND publish (for presence/online members)
+                const messageGrantFn = readOnly 
                     ? (stream) => this.grantPublicReadOnlyPermissions(stream)
                     : (stream) => this.grantPublicPermissions(stream);
                 
+                // Ephemeral stream always gets full public permissions (presence data)
+                const ephemeralGrantFn = (stream) => this.grantPublicPermissions(stream);
+                
                 // Sequential to avoid nonce conflicts
                 try {
-                    await grantFn(messageStream);
+                    await messageGrantFn(messageStream);
                     Logger.info('✓ Message stream: public permissions set');
                 } catch (e) {
                     Logger.error('✗ Message stream permissions failed:', e.message);
                 }
                 
                 try {
-                    await grantFn(ephemeralStream);
+                    await ephemeralGrantFn(ephemeralStream);
                     Logger.info('✓ Ephemeral stream: public permissions set');
                 } catch (e) {
                     Logger.error('✗ Ephemeral stream permissions failed:', e.message);
@@ -425,14 +433,17 @@ class StreamrController {
                     Logger.info('Configuring permissions on existing stream(s)...');
                     
                     // Use correct permission function based on readOnly flag
-                    const grantFn = readOnly 
+                    // Message stream: read-only if readOnly flag set
+                    // Ephemeral stream: always full permissions (presence/online members)
+                    const messageGrantFn = readOnly 
                         ? (stream) => this.grantPublicReadOnlyPermissions(stream)
                         : (stream) => this.grantPublicPermissions(stream);
+                    const ephemeralGrantFn = (stream) => this.grantPublicPermissions(stream);
                     
                     if (type === 'public' || type === 'password') {
-                        await grantFn(existingMessageStream).catch(e => Logger.warn('Message perm error:', e.message));
+                        await messageGrantFn(existingMessageStream).catch(e => Logger.warn('Message perm error:', e.message));
                         if (existingEphemeralStream) {
-                            await grantFn(existingEphemeralStream).catch(e => Logger.warn('Ephemeral perm error:', e.message));
+                            await ephemeralGrantFn(existingEphemeralStream).catch(e => Logger.warn('Ephemeral perm error:', e.message));
                         }
                     } else if (type === 'native') {
                         await this.setStreamPermissions(messageStreamId, { public: false, members }).catch(e => Logger.warn('Perm error:', e.message));
@@ -462,7 +473,7 @@ class StreamrController {
                         });
                         
                         if (type === 'public' || type === 'password') {
-                            await grantFn(newEphemeralStream).catch(e => Logger.warn('Ephemeral perm error:', e.message));
+                            await ephemeralGrantFn(newEphemeralStream).catch(e => Logger.warn('Ephemeral perm error:', e.message));
                         } else if (type === 'native') {
                             await this.setStreamPermissions(ephemeralStreamId, { public: false, members }).catch(e => Logger.warn('Perm error:', e.message));
                         }
@@ -592,6 +603,209 @@ class StreamrController {
         }, { maxRetries: retries });
     }
 
+    /**
+     * Grant many-to-one permissions 
+     * Used for DM inboxes: anyone can write, only owner can read
+     * @param {Object} stream - Stream object (or streamId string)
+     */
+    async grantManyToOnePermissions(stream, retries = 7) {
+        const streamId = typeof stream === 'string' ? stream : stream.id;
+
+        await executeWithRetry('grantManyToOnePermissions', async () => {
+            await this.client.setPermissions({
+                streamId: streamId,
+                assignments: [{
+                    public: true,
+                    permissions: ['publish']  // Only PUBLISH, not SUBSCRIBE
+                }]
+            });
+            Logger.debug('Many-to-one permissions granted (public publish, owner-only subscribe)');
+        }, { maxRetries: retries });
+    }
+
+    /**
+     * Create Pombo DM encryption key object
+     * @private
+     * @returns {Object|null} EncryptionKey instance or null
+     */
+    _createPomboKey() {
+        if (!window.EncryptionKey) {
+            return null;
+        }
+        
+        let keyData;
+        if (typeof Buffer !== 'undefined') {
+            keyData = Buffer.from(CONFIG.dm.encryptionKeyHex, 'hex');
+        } else if (window.ethers?.getBytes) {
+            const bytes = window.ethers.getBytes('0x' + CONFIG.dm.encryptionKeyHex);
+            keyData = Object.assign(bytes, { type: 'Buffer' });
+        } else {
+            return null;
+        }
+        
+        return new window.EncryptionKey(CONFIG.dm.encryptionKeyId, keyData);
+    }
+
+    /**
+     * Set DM encryption key for PUBLISHING to a peer's inbox
+     * This makes our messages use the pre-agreed Pombo key
+     * @param {string} streamId - Target DM stream ID (peer's inbox)
+     */
+    async setDMPublishKey(streamId) {
+        if (!this.client) return;
+        
+        // Only apply to DM streams
+        if (!streamId.toLowerCase().includes('/pombo-dm-')) {
+            return;
+        }
+        
+        try {
+            const key = this._createPomboKey();
+            if (!key) {
+                Logger.debug('EncryptionKey not available, skipping DM publish key');
+                return;
+            }
+            
+            // Publisher side: set which key to use when publishing
+            if (typeof this.client.updateEncryptionKey === 'function') {
+                await this.client.updateEncryptionKey({
+                    streamId: streamId,
+                    key: key,
+                    distributionMethod: 'rekey'
+                });
+                Logger.debug('DM publish key set for', streamId);
+            }
+        } catch (e) {
+            // Non-fatal: may fail if already set
+            Logger.debug('DM publish key setup skipped:', e.message);
+        }
+    }
+
+    /**
+     * Add DM encryption key for RECEIVING from a specific peer
+     * This lets us decrypt messages from that peer
+     * @param {string} peerAddress - Peer's Ethereum address
+     */
+    async addDMDecryptKey(peerAddress) {
+        if (!this.client) return;
+        
+        try {
+            const key = this._createPomboKey();
+            if (!key) {
+                Logger.debug('EncryptionKey not available, skipping DM decrypt key');
+                return;
+            }
+            
+            // Normalize to lowercase address
+            const normalizedPeer = peerAddress.toLowerCase();
+            
+            // Subscriber side: add decryption key for this publisher
+            if (typeof this.client.addEncryptionKey === 'function') {
+                await this.client.addEncryptionKey(key, normalizedPeer);
+                Logger.debug('DM decrypt key added for peer', normalizedPeer);
+            }
+        } catch (e) {
+            // Non-fatal: may fail if already set
+            Logger.debug('DM decrypt key setup skipped:', e.message);
+        }
+    }
+
+    /**
+     * Handle a DECRYPT_ERROR by adding the Pombo key for the publisher and refetching
+     * @param {Error} error - The decrypt error with messageId containing publisherId
+     * @param {string} streamId - The stream where the error occurred
+     * @param {Function} handler - Message handler to receive refetched message
+     * @returns {Promise<boolean>} - True if recovery was attempted
+     */
+    async handleDMDecryptError(error, streamId, handler) {
+        // Only for DM streams
+        if (!streamId?.toLowerCase().includes('/pombo-dm-')) {
+            return false;
+        }
+        
+        // Extract messageId from error (SDK includes it in DECRYPT_ERROR)
+        let messageId = error.messageId;
+        
+        // Parse messageId if it's a string
+        if (typeof messageId === 'string') {
+            try {
+                messageId = JSON.parse(messageId);
+            } catch (e) {
+                // Try to extract from error message
+                const match = error.message?.match(/messageId=(\{[^}]+\})/);
+                if (match) {
+                    try {
+                        messageId = JSON.parse(match[1]);
+                    } catch (e2) {
+                        return false;
+                    }
+                }
+            }
+        }
+        
+        if (!messageId?.publisherId) {
+            Logger.debug('DM decrypt: no publisherId in error');
+            return false;
+        }
+        
+        const publisherId = messageId.publisherId.toLowerCase();
+        const timestamp = messageId.timestamp;
+        
+        // Skip if we've already tried adding key for this publisher
+        if (this._dmKeyAddedForPublisher.has(publisherId)) {
+            Logger.debug('DM decrypt: already tried key for', publisherId);
+            return false;
+        }
+        
+        Logger.info('DM decrypt recovery: adding key for new publisher', publisherId);
+        this._dmKeyAddedForPublisher.add(publisherId);
+        
+        // Add the Pombo key for this publisher
+        await this.addDMDecryptKey(publisherId);
+        
+        // Schedule refetch of recent messages from this publisher
+        // Use a small delay to let the key propagate
+        setTimeout(async () => {
+            try {
+                // Refetch recent messages around this timestamp
+                const rangeStart = timestamp - 60000; // 1 minute before
+                const rangeEnd = timestamp + 60000;   // 1 minute after
+                
+                Logger.debug('DM decrypt recovery: refetching messages', {
+                    streamId,
+                    publisherId,
+                    from: new Date(rangeStart).toISOString(),
+                    to: new Date(rangeEnd).toISOString()
+                });
+                
+                const resend = await this.client.resend(streamId, {
+                    from: { timestamp: rangeStart, publisherId },
+                    to: { timestamp: rangeEnd }
+                });
+                
+                let recovered = 0;
+                for await (const message of resend) {
+                    if (message.getPublisherId?.()?.toLowerCase() === publisherId) {
+                        const content = message.content || message;
+                        if (content && typeof content === 'object') {
+                            content.senderId = publisherId;
+                            content._recovered = true;
+                        }
+                        handler(content);
+                        recovered++;
+                    }
+                }
+                
+                if (recovered > 0) {
+                    Logger.info(`DM decrypt recovery: recovered ${recovered} messages from ${publisherId}`);
+                }
+            } catch (e) {
+                Logger.debug('DM decrypt recovery failed:', e.message);
+            }
+        }, 500);
+        
+        return true;
+    }
 
 
     /**
@@ -725,17 +939,18 @@ class StreamrController {
             STREAM_CONFIG.EPHEMERAL_STREAM.PARTITIONS
         );
 
-        // Step 3: Set public subscribe+publish permissions (E2E encrypted at app layer)
+        // Step 3: Set many-to-one permissions (public PUBLISH, owner-only SUBSCRIBE)
+        // Protects social graph: only inbox owner can see who writes to them
         try {
-            await this.grantPublicPermissions(messageStream);
-            Logger.info('✓ DM message stream: public subscribe+publish permissions set');
+            await this.grantManyToOnePermissions(messageStream);
+            Logger.info('✓ DM message stream: many-to-one permissions set (public publish, owner subscribe)');
         } catch (e) {
             Logger.error('✗ DM message stream permissions failed:', e.message);
         }
 
         try {
-            await this.grantPublicPermissions(ephemeralStream);
-            Logger.info('✓ DM ephemeral stream: public subscribe+publish permissions set');
+            await this.grantManyToOnePermissions(ephemeralStream);
+            Logger.info('✓ DM ephemeral stream: many-to-one permissions set');
         } catch (e) {
             Logger.error('✗ DM ephemeral stream permissions failed:', e.message);
         }
@@ -1464,6 +1679,9 @@ class StreamrController {
         }
         
         this.address = null;
+        
+        // Clear DM key tracking
+        this._dmKeyAddedForPublisher.clear();
     }
 
     /**
@@ -1644,11 +1862,31 @@ class StreamrController {
                 { last: count, partition: partition }
             );
             
-            // Consume the async iterator
-            for await (const message of resend) {
-                messages.push(message.content);
+            // Manual iteration to catch decrypt errors per-message
+            const iterator = resend[Symbol.asyncIterator]();
+            let iteratorDone = false;
+            let decryptErrors = 0;
+            
+            while (!iteratorDone) {
+                try {
+                    const result = await iterator.next();
+                    iteratorDone = result.done;
+                    if (!iteratorDone) {
+                        messages.push(result.value.content);
+                    }
+                } catch (iterError) {
+                    if (iterError.code === 'DECRYPT_ERROR' || iterError.message?.includes('encryption key')) {
+                        decryptErrors++;
+                        continue;
+                    }
+                    Logger.warn('fetchHistory iteration error:', iterError.message);
+                    continue;
+                }
             }
             
+            if (decryptErrors > 0) {
+                Logger.debug(`fetchHistory: skipped ${decryptErrors} messages (decrypt error)`);
+            }
             Logger.debug(`Fetched ${messages.length} messages from partition ${partition}`);
             return messages;
         } catch (error) {
@@ -1706,7 +1944,27 @@ class StreamrController {
             // Collect all messages in range, then take the last N
             const allMessages = [];
             
-            for await (const message of resend) {
+            // Manual iteration to catch decrypt errors per-message
+            const iterator = resend[Symbol.asyncIterator]();
+            let iteratorDone = false;
+            let decryptErrors = 0;
+            
+            while (!iteratorDone) {
+                let message;
+                try {
+                    const result = await iterator.next();
+                    iteratorDone = result.done;
+                    if (iteratorDone) break;
+                    message = result.value;
+                } catch (iterError) {
+                    if (iterError.code === 'DECRYPT_ERROR' || iterError.message?.includes('encryption key')) {
+                        decryptErrors++;
+                        continue;
+                    }
+                    Logger.warn('fetchOlderHistory iteration error:', iterError.message);
+                    continue;
+                }
+                
                 try {
                     let content = message.content || message;
                     
@@ -1733,6 +1991,10 @@ class StreamrController {
                 } catch (e) {
                     Logger.warn('Error processing historical message:', e.message);
                 }
+            }
+            
+            if (decryptErrors > 0) {
+                Logger.debug(`fetchOlderHistory: skipped ${decryptErrors} messages (decrypt error)`);
             }
             
             // Take the last N messages (most recent before the timestamp)
@@ -1796,13 +2058,28 @@ class StreamrController {
             }
         };
         
+        // Error handler for SDK-level errors (e.g., decrypt failures for old GroupKeys)
+        const errorHandler = async (error) => {
+            // Decrypt errors for missing GroupKeys
+            if (error.code === 'DECRYPT_ERROR' || error.message?.includes('encryption key')) {
+                // Try DM decrypt recovery (add key and refetch)
+                const recovered = await this.handleDMDecryptError(error, streamId, handler);
+                if (!recovered) {
+                    Logger.debug('SDK decrypt error (likely old GroupKey):', error.message?.substring(0, 100));
+                }
+            } else {
+                Logger.warn('Subscription error:', error.message || error);
+            }
+        };
+
         // First, subscribe for real-time messages (this always works)
         const subscription = await this.client.subscribe(
             {
                 streamId: streamId,
                 partition: partition
             },
-            messageHandler
+            messageHandler,
+            errorHandler
         );
         
         Logger.debug(`Subscribed to`, streamId, 'partition', partition);
@@ -1876,7 +2153,35 @@ class StreamrController {
                 return isTextMessage(msg) || isReaction(msg) || isImageMessage(msg) || isVideoMessage(msg) || isEncryptedEnvelope(msg);
             };
             
-            for await (const message of resend) {
+            // Use manual iteration to catch decryption errors per-message
+            // (for-await-of would throw on first decrypt error, aborting the loop)
+            const iterator = resend[Symbol.asyncIterator]();
+            let iteratorDone = false;
+            let decryptErrors = 0;
+            
+            while (!iteratorDone) {
+                let message;
+                try {
+                    const result = await iterator.next();
+                    iteratorDone = result.done;
+                    if (iteratorDone) break;
+                    message = result.value;
+                } catch (iterError) {
+                    // SDK decrypt error for missing GroupKey - try recovery for DM streams
+                    if (iterError.code === 'DECRYPT_ERROR' || iterError.message?.includes('encryption key')) {
+                        decryptErrors++;
+                        // Try DM decrypt recovery (add key and refetch)
+                        await this.handleDMDecryptError(iterError, streamId, handler);
+                        if (decryptErrors <= 3) {
+                            Logger.debug('History decrypt error (likely old GroupKey):', iterError.message?.substring(0, 80));
+                        }
+                        continue; // Try next message
+                    }
+                    // Other iterator errors - log and try to continue
+                    Logger.warn('History iteration error:', iterError.message);
+                    continue;
+                }
+                
                 rawCount++;
                 try {
                     let content = message.content || message;
@@ -1929,6 +2234,10 @@ class StreamrController {
                 } catch (e) {
                     Logger.warn('Error processing historical message:', e.message);
                 }
+            }
+            
+            if (decryptErrors > 0) {
+                Logger.info(`History: skipped ${decryptErrors} messages (old GroupKey encryption)`);
             }
             
             if (msgCount > 0) {

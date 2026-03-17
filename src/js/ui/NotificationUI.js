@@ -18,6 +18,120 @@ const TOAST_ICONS = {
 class NotificationUI {
     constructor() {
         this.currentLoadingToast = null;
+        this.isMobile = window.innerWidth < 768;
+        
+        // Update mobile detection on resize
+        window.addEventListener('resize', () => {
+            this.isMobile = window.innerWidth < 768;
+        });
+    }
+
+    /**
+     * Check if toast type is persistent (cannot be fully dismissed by swipe)
+     * @param {HTMLElement} toast - Toast element
+     * @returns {boolean}
+     */
+    _isPersistent(toast) {
+        return toast.classList.contains('loading') || 
+               toast.classList.contains('error') ||
+               toast.classList.contains('invite');
+    }
+
+    /**
+     * Setup swipe handlers for mobile toast dismissal
+     * @param {HTMLElement} toast - Toast element to add handlers to
+     */
+    _setupSwipeHandlers(toast) {
+        if (!this.isMobile) return;
+
+        let startX = 0;
+        let currentX = 0;
+        let isDragging = false;
+        const DISMISS_THRESHOLD = 0.5; // 50% of width to dismiss
+        const MINIMIZE_THRESHOLD = 0.3; // 30% to minimize persistent
+
+        const handleTouchStart = (e) => {
+            // If minimized, tap to restore
+            if (toast.classList.contains('toast-minimized')) {
+                this.restoreToast(toast);
+                e.preventDefault();
+                return;
+            }
+            
+            startX = e.touches[0].clientX;
+            currentX = startX;
+            isDragging = true;
+            toast.classList.add('toast-swiping');
+        };
+
+        const handleTouchMove = (e) => {
+            if (!isDragging) return;
+            
+            currentX = e.touches[0].clientX;
+            const deltaX = currentX - startX;
+            
+            // Only allow swiping right (positive delta)
+            if (deltaX > 0) {
+                toast.style.transform = `translateX(${deltaX}px)`;
+                // Reduce opacity as user swipes
+                const opacity = Math.max(0.3, 1 - (deltaX / toast.offsetWidth) * 0.7);
+                toast.style.opacity = opacity;
+            }
+        };
+
+        const handleTouchEnd = () => {
+            if (!isDragging) return;
+            isDragging = false;
+            toast.classList.remove('toast-swiping');
+            
+            const deltaX = currentX - startX;
+            const swipePercent = deltaX / toast.offsetWidth;
+            const isPersistent = this._isPersistent(toast);
+            
+            if (isPersistent) {
+                // Persistent toasts: minimize instead of dismiss
+                if (swipePercent > MINIMIZE_THRESHOLD) {
+                    toast.classList.add('toast-minimized');
+                    toast.style.transform = '';
+                    toast.style.opacity = '';
+                    // Clear auto-dismiss timeout when minimized
+                    if (toast._dismissTimeout) {
+                        clearTimeout(toast._dismissTimeout);
+                        toast._dismissTimeout = null;
+                    }
+                    // Pause progress bar
+                    const progressBar = toast.querySelector('.toast-progress');
+                    if (progressBar) {
+                        progressBar.style.animationPlayState = 'paused';
+                    }
+                } else {
+                    // Snap back
+                    toast.style.transform = '';
+                    toast.style.opacity = '';
+                }
+            } else {
+                // Non-persistent: dismiss if threshold reached
+                if (swipePercent > DISMISS_THRESHOLD) {
+                    toast.style.transform = 'translateX(100%)';
+                    toast.style.opacity = '0';
+                    // Clear timeout and remove
+                    if (toast._dismissTimeout) {
+                        clearTimeout(toast._dismissTimeout);
+                        toast._dismissTimeout = null;
+                    }
+                    setTimeout(() => toast.remove(), 200);
+                } else {
+                    // Snap back
+                    toast.style.transform = '';
+                    toast.style.opacity = '';
+                }
+            }
+        };
+
+        toast.addEventListener('touchstart', handleTouchStart, { passive: false });
+        toast.addEventListener('touchmove', handleTouchMove, { passive: true });
+        toast.addEventListener('touchend', handleTouchEnd);
+        toast.addEventListener('touchcancel', handleTouchEnd);
     }
 
     /**
@@ -74,19 +188,37 @@ class NotificationUI {
         // Close button handler
         const closeBtn = toast.querySelector('.toast-close');
         closeBtn?.addEventListener('click', () => {
-            toast.classList.add('toast-exit');
-            setTimeout(() => toast.remove(), 250);
+            this._dismissToast(toast);
         });
         
         container.appendChild(toast);
+        
+        // Setup mobile swipe handlers
+        this._setupSwipeHandlers(toast);
 
-        // Auto remove after duration
-        setTimeout(() => {
+        // Auto remove after duration - store timeout ID on element
+        toast._dismissTimeout = setTimeout(() => {
             if (toast.parentElement) {
-                toast.classList.add('toast-exit');
-                setTimeout(() => toast.remove(), 250);
+                this._dismissToast(toast);
             }
         }, duration);
+    }
+
+    /**
+     * Dismiss a toast with exit animation
+     * @param {HTMLElement} toast - Toast to dismiss
+     */
+    _dismissToast(toast) {
+        if (!toast || !toast.parentElement) return;
+        
+        // Clear any pending timeout
+        if (toast._dismissTimeout) {
+            clearTimeout(toast._dismissTimeout);
+            toast._dismissTimeout = null;
+        }
+        
+        toast.classList.add('toast-exit');
+        setTimeout(() => toast.remove(), 250);
     }
 
     /**
@@ -120,6 +252,10 @@ class NotificationUI {
         
         container.appendChild(toast);
         this.currentLoadingToast = toast;
+        
+        // Setup mobile swipe handlers
+        this._setupSwipeHandlers(toast);
+        
         return toast;
     }
 
@@ -130,10 +266,34 @@ class NotificationUI {
     hideLoadingToast(toast = null) {
         const target = toast || this.currentLoadingToast;
         if (target && target.parentElement) {
+            // Restore if minimized before exit animation
+            if (target.classList.contains('toast-minimized')) {
+                target.classList.remove('toast-minimized');
+                target.style.transform = '';
+                target.style.opacity = '';
+            }
             target.classList.add('toast-exit');
             setTimeout(() => target.remove(), 250);
         }
         this.currentLoadingToast = null;
+    }
+
+    /**
+     * Restore a minimized toast to full visibility
+     * Note: Timer is not restarted - toast stays until manually dismissed
+     * @param {HTMLElement} toast - Toast element to restore
+     */
+    restoreToast(toast) {
+        if (toast && toast.classList.contains('toast-minimized')) {
+            toast.classList.remove('toast-minimized');
+            toast.style.transform = '';
+            toast.style.opacity = '';
+            // Resume progress bar animation (visual only, timer was cleared)
+            const progressBar = toast.querySelector('.toast-progress');
+            if (progressBar) {
+                progressBar.style.animationPlayState = 'running';
+            }
+        }
     }
 
     /**

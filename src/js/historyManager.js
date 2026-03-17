@@ -176,6 +176,13 @@ class HistoryManager {
     _handlePopState(event) {
         Logger.debug('Popstate event:', event.state);
         
+        // If this is a modal state, ModalManager handles it (via capture phase listener)
+        // We should not navigate in this case
+        if (event.state && event.state.modal) {
+            Logger.debug('Popstate for modal, skipping navigation');
+            return;
+        }
+        
         // Get state from event or parse URL
         const state = event.state || this.parseUrl();
         

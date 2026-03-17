@@ -1,6 +1,7 @@
 /**
  * Modal Manager
  * Handles showing/hiding modals and common modal operations
+ * Integrates with browser history for back button support on mobile
  */
 
 class ModalManager {
@@ -8,6 +9,68 @@ class ModalManager {
         // Pending data storage for modals that need confirmation
         this.pendingData = {};
         this.deps = {};
+        
+        // Stack of open modals (for history integration)
+        this.modalStack = [];
+        
+        // Callbacks to invoke when a modal is hidden
+        this.onHideCallbacks = new Map();
+        
+        // Modals that should integrate with browser history (back button closes them)
+        // These are "navigation" modals that take over the screen, especially on mobile
+        this.historyModals = new Set([
+            'new-channel-modal',
+            'settings-modal',
+            'channel-settings-modal',
+            'contacts-modal',
+            'join-channel-modal',
+            'join-closed-channel-modal',
+            'invite-users-modal',
+            'dm-inbox-setup-modal',
+            'new-dm-modal'
+        ]);
+        
+        // Flag to prevent recursive popstate handling
+        this._handlingPopState = false;
+        
+        // Initialize popstate listener (capture phase to intercept before historyManager)
+        this._initHistoryListener();
+    }
+
+    /**
+     * Initialize browser history listener for back button support
+     * Uses capture phase to intercept before other listeners
+     * @private
+     */
+    _initHistoryListener() {
+        window.addEventListener('popstate', (event) => {
+            // Check if this is a modal state we pushed
+            if (event.state && event.state.modal) {
+                // This is handled - modal was closed via back button
+                // The modal should already be closed by our other handler
+                return;
+            }
+            
+            // Check if we have modals open that need to be closed first
+            if (this._handlingPopState) return;
+            
+            const topModal = this.modalStack[this.modalStack.length - 1];
+            if (topModal && this.historyModals.has(topModal)) {
+                this._handlingPopState = true;
+                
+                // Close the top modal without touching history (popstate already happened)
+                this._hideWithoutHistory(topModal);
+                
+                // Push the state back to prevent actual navigation
+                // This keeps the user on the current view
+                window.history.pushState(event.state, '');
+                
+                this._handlingPopState = false;
+                
+                // Stop propagation to prevent historyManager from navigating
+                event.stopImmediatePropagation();
+            }
+        }, true); // Use capture phase
     }
 
     /**
@@ -21,7 +84,7 @@ class ModalManager {
     /**
      * Show a modal by ID
      * @param {string} modalId - Modal element ID
-     * @param {Object} options - Optional config { focusElement, clearInputs }
+     * @param {Object} options - Optional config { focusElement, clearInputs, skipHistory }
      */
     show(modalId, options = {}) {
         const modal = document.getElementById(modalId);
@@ -45,6 +108,25 @@ class ModalManager {
             const focusEl = modal.querySelector(options.focusElement);
             focusEl?.focus();
         }
+        
+        // Add to stack and push history state for supported modals
+        if (this.historyModals.has(modalId) && !options.skipHistory) {
+            // Only add to stack if not already there
+            if (!this.modalStack.includes(modalId)) {
+                this.modalStack.push(modalId);
+                // Push a history state so back button can close the modal
+                window.history.pushState({ modal: modalId }, '');
+            }
+        }
+    }
+
+    /**
+     * Register a callback to be invoked when a modal is hidden
+     * @param {string} modalId - Modal element ID
+     * @param {Function} callback - Callback to invoke on hide
+     */
+    registerOnHide(modalId, callback) {
+        this.onHideCallbacks.set(modalId, callback);
     }
 
     /**
@@ -53,9 +135,60 @@ class ModalManager {
      */
     hide(modalId) {
         const modal = document.getElementById(modalId);
+        if (!modal) return;
+        
+        const wasVisible = !modal.classList.contains('hidden');
+        modal.classList.add('hidden');
+        
+        // Invoke onHide callback if registered
+        if (wasVisible) {
+            this.onHideCallbacks.get(modalId)?.();
+        }
+        
+        // Remove from stack and go back in history if this modal was tracking history
+        if (wasVisible && this.historyModals.has(modalId)) {
+            const stackIndex = this.modalStack.indexOf(modalId);
+            if (stackIndex !== -1) {
+                this.modalStack.splice(stackIndex, 1);
+                // Go back to remove the history entry we added (only if not handling popstate)
+                if (!this._handlingPopState) {
+                    window.history.back();
+                }
+            }
+        }
+    }
+    
+    /**
+     * Hide modal without touching browser history (used during popstate)
+     * @param {string} modalId - Modal element ID
+     * @private
+     */
+    _hideWithoutHistory(modalId) {
+        const modal = document.getElementById(modalId);
+        const wasVisible = modal && !modal.classList.contains('hidden');
+        
         if (modal) {
             modal.classList.add('hidden');
         }
+        
+        // Invoke onHide callback if registered
+        if (wasVisible) {
+            this.onHideCallbacks.get(modalId)?.();
+        }
+        
+        // Remove from stack
+        const stackIndex = this.modalStack.indexOf(modalId);
+        if (stackIndex !== -1) {
+            this.modalStack.splice(stackIndex, 1);
+        }
+    }
+    
+    /**
+     * Check if any history-tracked modal is currently open
+     * @returns {boolean}
+     */
+    hasOpenHistoryModal() {
+        return this.modalStack.length > 0;
     }
 
     /**

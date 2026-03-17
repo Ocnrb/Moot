@@ -113,6 +113,11 @@ export const CONFIG = {
         maxSentMessages: 200,
         // Inbox history to load on login
         inboxHistoryCount: 100,
+        // Pre-agreed encryption key for Streamr native layer (all Pombo DMs use this)
+        // Real E2E security comes from ECDH app-layer encryption, not this key
+        // This allows history/resend without key-exchange (publisher offline)
+        encryptionKeyId: 'pombo-dm-v1',
+        encryptionKeyHex: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2'
     },
 
     // Application Metadata

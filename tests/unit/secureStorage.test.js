@@ -1153,4 +1153,135 @@ describe('secureStorage', () => {
             expect(sentMessages).toEqual({});
         });
     });
+
+    // ==================== Cross-Device Sync ====================
+    describe('Cross-Device Sync', () => {
+        describe('exportForSync()', () => {
+            it('should throw when storage not unlocked', () => {
+                secureStorage.isUnlocked = false;
+                secureStorage.cache = null;
+                
+                expect(() => secureStorage.exportForSync()).toThrow('Storage not unlocked');
+            });
+
+            it('should return all syncable fields', () => {
+                secureStorage.initAsGuest('0xsync123');
+                secureStorage.cache.channels = [{ messageStreamId: 'ch1', name: 'Test' }];
+                secureStorage.cache.trustedContacts = { '0xabc': { level: 2 } };
+                secureStorage.cache.ensCache = { '0xdef': 'test.eth' };
+                secureStorage.cache.username = 'testuser';
+                secureStorage.cache.graphApiKey = 'api123';
+                secureStorage.cache.sentMessages = { 'stream1': [{ id: 'msg1' }] };
+                
+                const result = secureStorage.exportForSync();
+                
+                expect(result.channels).toHaveLength(1);
+                expect(result.trustedContacts['0xabc']).toBeDefined();
+                expect(result.ensCache['0xdef']).toBe('test.eth');
+                expect(result.username).toBe('testuser');
+                expect(result.graphApiKey).toBe('api123');
+                expect(result.sentMessages.stream1).toHaveLength(1);
+            });
+
+            it('should return empty values when cache is empty', () => {
+                secureStorage.initAsGuest('0xempty');
+                
+                const result = secureStorage.exportForSync();
+                
+                expect(result.channels).toEqual([]);
+                expect(result.trustedContacts).toEqual({});
+                expect(result.ensCache).toEqual({});
+                expect(result.username).toBe(null);
+                expect(result.graphApiKey).toBe(null);
+                expect(result.sentMessages).toEqual({});
+            });
+
+            it('should not include non-syncable fields', () => {
+                secureStorage.initAsGuest('0xfiltered');
+                secureStorage.cache.sessionData = { secret: 'data' };
+                secureStorage.cache.channelLastAccess = { 'ch1': 12345 };
+                
+                const result = secureStorage.exportForSync();
+                
+                expect(result.sessionData).toBeUndefined();
+                expect(result.channelLastAccess).toBeUndefined();
+            });
+        });
+
+        describe('importFromSync()', () => {
+            it('should throw when storage not unlocked', async () => {
+                secureStorage.isUnlocked = false;
+                secureStorage.cache = null;
+                
+                await expect(secureStorage.importFromSync({})).rejects.toThrow('Storage not unlocked');
+            });
+
+            it('should import all syncable fields', async () => {
+                secureStorage.initAsGuest('0ximport');
+                
+                const data = {
+                    channels: [{ messageStreamId: 'newCh' }],
+                    trustedContacts: { '0xnew': { level: 3 } },
+                    ensCache: { '0xens': 'new.eth' },
+                    username: 'newuser',
+                    graphApiKey: 'newapi',
+                    sentMessages: { 'newStream': [{ id: 'new1' }] }
+                };
+                
+                await secureStorage.importFromSync(data);
+                
+                expect(secureStorage.cache.channels).toEqual(data.channels);
+                expect(secureStorage.cache.trustedContacts).toEqual(data.trustedContacts);
+                expect(secureStorage.cache.ensCache).toEqual(data.ensCache);
+                expect(secureStorage.cache.username).toBe('newuser');
+                expect(secureStorage.cache.graphApiKey).toBe('newapi');
+                expect(secureStorage.cache.sentMessages).toEqual(data.sentMessages);
+            });
+
+            it('should return true when channels are updated', async () => {
+                secureStorage.initAsGuest('0xchannels');
+                
+                const result = await secureStorage.importFromSync({
+                    channels: [{ messageStreamId: 'ch1' }]
+                });
+                
+                expect(result).toBe(true);
+            });
+
+            it('should return false when channels are not updated', async () => {
+                secureStorage.initAsGuest('0xnochannels');
+                
+                const result = await secureStorage.importFromSync({
+                    username: 'test'
+                });
+                
+                expect(result).toBe(false);
+            });
+
+            it('should only update provided fields', async () => {
+                secureStorage.initAsGuest('0xpartial');
+                secureStorage.cache.username = 'original';
+                secureStorage.cache.graphApiKey = 'originalKey';
+                
+                await secureStorage.importFromSync({
+                    username: 'updated'
+                });
+                
+                expect(secureStorage.cache.username).toBe('updated');
+                expect(secureStorage.cache.graphApiKey).toBe('originalKey');
+            });
+
+            it('should not overwrite with undefined values', async () => {
+                secureStorage.initAsGuest('0xundef');
+                secureStorage.cache.username = 'keep';
+                
+                await secureStorage.importFromSync({
+                    username: undefined
+                });
+                
+                // undefined should not trigger update
+                expect(secureStorage.cache.username).toBe('keep');
+            });
+        });
+    });
 });

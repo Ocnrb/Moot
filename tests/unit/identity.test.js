@@ -198,6 +198,26 @@ describe('IdentityManager', () => {
                 await identityManager.setUsername('Dave');
                 expect(saveSpy).toHaveBeenCalled();
             });
+            
+            it('should truncate username to 18 characters', async () => {
+                await identityManager.setUsername('A'.repeat(25));
+                expect(identityManager.username).toBe('A'.repeat(18));
+            });
+            
+            it('should keep username at exactly 18 characters', async () => {
+                await identityManager.setUsername('A'.repeat(18));
+                expect(identityManager.username).toBe('A'.repeat(18));
+            });
+            
+            it('should not truncate username under 18 characters', async () => {
+                await identityManager.setUsername('ShortName');
+                expect(identityManager.username).toBe('ShortName');
+            });
+            
+            it('should trim then truncate', async () => {
+                await identityManager.setUsername('  ' + 'A'.repeat(25) + '  ');
+                expect(identityManager.username).toBe('A'.repeat(18));
+            });
         });
 
         describe('loadUsername()', () => {

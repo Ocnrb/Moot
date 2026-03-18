@@ -608,6 +608,31 @@ describe('ModalManager', () => {
                 
                 expect(window.history.back).not.toHaveBeenCalled();
             });
+            
+            it('should not call history.back with skipHistory option', () => {
+                createModal('settings-modal', false); // visible
+                modalManager.modalStack = ['settings-modal'];
+                
+                modalManager.hide('settings-modal', { skipHistory: true });
+                
+                expect(window.history.back).not.toHaveBeenCalled();
+                // Modal should still be hidden and removed from stack
+                const modal = document.getElementById('settings-modal');
+                expect(modal.classList.contains('hidden')).toBe(true);
+                expect(modalManager.modalStack).not.toContain('settings-modal');
+            });
+            
+            it('should still invoke onHide callback with skipHistory option', () => {
+                createModal('contacts-modal', false);
+                modalManager.modalStack = ['contacts-modal'];
+                const callback = vi.fn();
+                modalManager.registerOnHide('contacts-modal', callback);
+                
+                modalManager.hide('contacts-modal', { skipHistory: true });
+                
+                expect(callback).toHaveBeenCalledTimes(1);
+                expect(window.history.back).not.toHaveBeenCalled();
+            });
         });
 
         describe('_hideWithoutHistory()', () => {

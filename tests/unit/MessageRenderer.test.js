@@ -310,6 +310,32 @@ describe('MessageRenderer', () => {
             const result = messageRenderer.renderReplyPreview(replyTo);
             expect(result).not.toContain('<script>');
         });
+        
+        it('should truncate long sender name to 18 chars with ellipsis', () => {
+            const replyTo = {
+                id: 'reply-123',
+                sender: '0x123',
+                senderName: 'AVeryLongDisplayNameThatExceeds',
+                text: 'Hello'
+            };
+            
+            const result = messageRenderer.renderReplyPreview(replyTo);
+            expect(result).toContain('AVeryLongDisplayNa...');
+            expect(result).not.toContain('AVeryLongDisplayNameThatExceeds');
+        });
+        
+        it('should not truncate sender name at exactly 18 chars', () => {
+            const replyTo = {
+                id: 'reply-123',
+                sender: '0x123',
+                senderName: 'ExactlyEighteenCh',
+                text: 'Hello'
+            };
+            
+            const result = messageRenderer.renderReplyPreview(replyTo);
+            expect(result).toContain('ExactlyEighteenCh');
+            expect(result).not.toContain('ExactlyEighteenCh...');
+        });
     });
 
     describe('renderMessageContent()', () => {
@@ -481,6 +507,38 @@ describe('MessageRenderer', () => {
             expect(result).toContain('other-message');
             expect(result).toContain('Hi there');
             expect(result).toContain('Bob');
+        });
+        
+        it('should truncate long display name to 18 chars with ellipsis', () => {
+            const msg = {
+                id: 'msg-trunc',
+                sender: '0xDEF',
+                text: 'Hello',
+                type: 'text'
+            };
+            
+            const result = messageRenderer.buildMessageHTML(
+                msg, false, '13:00', { html: '' }, 'AVeryLongDisplayNameThatExceeds'
+            );
+            
+            expect(result).toContain('AVeryLongDisplayNa...');
+            expect(result).not.toContain('AVeryLongDisplayNameThatExceeds');
+        });
+        
+        it('should not truncate display name at exactly 18 chars', () => {
+            const msg = {
+                id: 'msg-exact',
+                sender: '0xDEF',
+                text: 'Hello',
+                type: 'text'
+            };
+            
+            const result = messageRenderer.buildMessageHTML(
+                msg, false, '13:00', { html: '' }, 'ExactlyEighteenCh'
+            );
+            
+            expect(result).toContain('ExactlyEighteenCh');
+            expect(result).not.toContain('ExactlyEighteenCh...');
         });
         
         it('should include reply and react buttons', () => {

@@ -421,4 +421,48 @@ describe('ReactionManager', () => {
             expect(reactionManager.getReactions('msg2')).toEqual({ '❤️': ['0x2'] });
         });
     });
+
+    describe('hideReactionPicker()', () => {
+        it('should hide the reaction picker element', () => {
+            const picker = document.createElement('div');
+            picker.id = 'reaction-picker';
+            picker.style.display = 'block';
+            document.body.appendChild(picker);
+
+            reactionManager.hideReactionPicker();
+
+            expect(picker.style.display).toBe('none');
+        });
+
+        it('should restore overflow on messages area', () => {
+            const picker = document.createElement('div');
+            picker.id = 'reaction-picker';
+            document.body.appendChild(picker);
+
+            const messagesArea = document.createElement('div');
+            messagesArea.id = 'messages-area';
+            messagesArea.style.overflow = 'hidden';
+            document.body.appendChild(messagesArea);
+
+            reactionManager.hideReactionPicker();
+
+            expect(messagesArea.style.overflow).toBe('');
+        });
+
+        it('should clear pending hide timeout', () => {
+            reactionManager.reactionPickerTimeout = setTimeout(() => {}, 10000);
+            const picker = document.createElement('div');
+            picker.id = 'reaction-picker';
+            document.body.appendChild(picker);
+
+            reactionManager.hideReactionPicker();
+
+            expect(reactionManager.reactionPickerTimeout).toBeNull();
+        });
+
+        it('should handle missing picker element gracefully', () => {
+            // No picker in DOM - should not throw
+            reactionManager.hideReactionPicker();
+        });
+    });
 });

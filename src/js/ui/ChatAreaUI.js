@@ -99,7 +99,9 @@ class ChatAreaUI {
             if (channelManager.switchGeneration !== generationAtStart) return;
             
             if (result.loaded > 0) {
-                this.renderMessages(channel.messages);
+                this.renderMessages(channel.messages, () => {
+                    this._attachMessageListeners();
+                });
                 
                 const newScrollHeight = this.messagesArea.scrollHeight;
                 const heightDiff = newScrollHeight - previousScrollHeight;
@@ -132,8 +134,7 @@ class ChatAreaUI {
             
             if (result.loaded > 0) {
                 this.renderMessages(previewChannel.messages, () => {
-                    reactionManager.init();
-                    mediaHandler.attachLightboxListeners();
+                    this._attachMessageListeners();
                 });
                 
                 const newScrollHeight = this.messagesArea.scrollHeight;
@@ -160,6 +161,27 @@ class ChatAreaUI {
      */
     hideLoadingMoreIndicator() {
         notificationUI.hideLoadingMoreIndicator();
+    }
+
+    /**
+     * Attach reaction/reply/download listeners to message buttons.
+     * Used as callback after renderMessages completes.
+     * @private
+     */
+    _attachMessageListeners() {
+        const { mediaController } = this.deps;
+        const channel = this.deps.channelManager?.getCurrentChannel() || previewModeUI.getPreviewChannel();
+        
+        reactionManager.attachReactionListeners(
+            (msgId) => this.startReply(msgId),
+            async (fileId) => {
+                if (channel && mediaController) {
+                    await mediaHandler.handleFileDownload(fileId, channel, mediaController);
+                }
+            },
+            (msgId) => this.scrollToMessage(msgId)
+        );
+        mediaHandler.attachLightboxListeners();
     }
 
     /**

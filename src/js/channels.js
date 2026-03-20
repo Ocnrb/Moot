@@ -553,7 +553,9 @@ class ChannelManager {
                 historyLoaded: previewMessages.length > 0,  // Mark as loaded if we have messages
                 hasMoreHistory: true,
                 loadingHistory: false,
-                oldestTimestamp: previewMessages.length > 0 ? previewMessages[0]?.timestamp : null
+                oldestTimestamp: previewMessages.length > 0 
+                    ? previewMessages[0]?.timestamp 
+                    : (previewInfo.oldestTimestamp || null)
             };
 
             // Add to channels map
@@ -1856,12 +1858,7 @@ class ChannelManager {
             return { loaded: 0, hasMore: false };
         }
         
-        // Need a reference point (oldest message timestamp)
-        if (!channel.oldestTimestamp && channel.messages.length === 0) {
-            Logger.debug('No messages yet, cannot load more history');
-            return { loaded: 0, hasMore: true };
-        }
-        
+        // Use oldest message timestamp, or Date.now() if history was only reactions
         const beforeTimestamp = channel.oldestTimestamp || Date.now();
         
         channel.loadingHistory = true;
@@ -1893,16 +1890,37 @@ class ChannelManager {
                 return { loaded: 0, hasMore: channel.hasMoreHistory };
             }
             
+            // Separate reactions from content messages
+            let addedCount = 0;
+            
             if (result.messages.length > 0) {
-                // Filter out duplicates first
-                const newMessages = result.messages.filter(msg => 
-                    !channel.messages.some(m => m.id === msg.id)
-                );
+                const contentMessages = [];
                 
-                if (newMessages.length > 0) {
+                for (const msg of result.messages) {
+                    // Route reactions to storeReaction (NOT channel.messages)
+                    if (msg?.type === 'reaction') {
+                        const reactionUser = msg.senderId || msg.user;
+                        if (reactionUser && msg.messageId && msg.emoji) {
+                            this.storeReaction(channel, msg.messageId, msg.emoji, reactionUser, msg.action || 'add');
+                        }
+                        // Track oldest timestamp from reactions too (for pagination progress)
+                        if (msg.timestamp && (!channel.oldestTimestamp || msg.timestamp < channel.oldestTimestamp)) {
+                            channel.oldestTimestamp = msg.timestamp;
+                        }
+                        continue;
+                    }
+                    
+                    // Skip non-content or incomplete messages
+                    if (!msg?.id || !msg?.sender || !msg?.timestamp) continue;
+                    // Deduplicate
+                    if (channel.messages.some(m => m.id === msg.id)) continue;
+                    
+                    contentMessages.push(msg);
+                }
+                
+                if (contentMessages.length > 0) {
                     // OPTIMIZATION: Verify all messages in parallel using worker pool
-                    // This is much faster than sequential verification
-                    const verificationPromises = newMessages.map(async (msg) => {
+                    const verificationPromises = contentMessages.map(async (msg) => {
                         try {
                             if (!msg.channelId) msg.channelId = messageStreamId;
                             const verification = await identityManager.verifyMessage(msg, messageStreamId, {
@@ -1928,6 +1946,7 @@ class ChannelManager {
                     // Add all verified messages to channel
                     for (const msg of verifiedMessages) {
                         channel.messages.push(msg);
+                        addedCount++;
                         
                         // Update oldest timestamp
                         if (!channel.oldestTimestamp || msg.timestamp < channel.oldestTimestamp) {
@@ -1945,13 +1964,13 @@ class ChannelManager {
             
             this.notifyHandlers('history_loaded', { 
                 streamId: messageStreamId, 
-                loaded: result.messages.length, 
+                loaded: addedCount, 
                 hasMore: result.hasMore 
             });
             
-            Logger.info(`Loaded ${result.messages.length} older messages, hasMore: ${result.hasMore}`);
+            Logger.info(`Loaded ${addedCount} older messages (${result.messages.length} total fetched), hasMore: ${result.hasMore}`);
             
-            return { loaded: result.messages.length, hasMore: result.hasMore };
+            return { loaded: addedCount, hasMore: result.hasMore };
         } catch (error) {
             Logger.error('Failed to load more history:', error);
             channel.loadingHistory = false;
@@ -2123,14 +2142,26 @@ class ChannelManager {
     /**
      * Leave a channel (unsubscribe from both streams)
      * @param {string} messageStreamId - Message Stream ID (channel key)
+     * @param {Object} [options] - Leave options
+     * @param {boolean} [options.block] - If true, block the peer (DM only). All future messages ignored.
      */
-    async leaveChannel(messageStreamId) {
+    async leaveChannel(messageStreamId, options = {}) {
         try {
             const channel = this.channels.get(messageStreamId);
             const ephemeralStreamId = channel?.ephemeralStreamId || deriveEphemeralId(messageStreamId);
             
             // DM-specific cleanup: clear local sent data and cached keys
             if (channel?.type === 'dm' && channel.peerAddress) {
+                if (options.block) {
+                    // Leave and Block: permanently ignore all messages from this peer
+                    await secureStorage.addBlockedPeer(channel.peerAddress);
+                    Logger.info('DM: Blocked peer', channel.peerAddress);
+                } else {
+                    // Soft leave: mark timestamp so older messages are ignored,
+                    // but new messages after this point will resurface the conversation
+                    await secureStorage.setDMLeftAt(channel.peerAddress, Date.now());
+                    Logger.info('DM: Soft-left conversation with', channel.peerAddress);
+                }
                 await secureStorage.clearSentMessages(messageStreamId);
                 await secureStorage.clearSentReactions(messageStreamId);
                 dmCrypto.peerPublicKeys.delete(channel.peerAddress);

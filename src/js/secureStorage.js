@@ -117,6 +117,8 @@ class SecureStorage {
             channelLastAccess: {},
             channelOrder: [],
             lastOpenedChannel: null,
+            blockedPeers: [],
+            dmLeftAt: {},
             version: 2
         };
         
@@ -197,6 +199,8 @@ class SecureStorage {
                 channelLastAccess: {}, // streamId -> timestamp
                 channelOrder: [], // Array of streamIds in user-defined order
                 lastOpenedChannel: null, // streamId of last opened channel (for session restore)
+                blockedPeers: [],
+                dmLeftAt: {},
                 version: 2
             };
             Logger.info('📦 Initialized empty secure storage');
@@ -220,6 +224,8 @@ class SecureStorage {
                 channelLastAccess: {},
                 channelOrder: [],
                 lastOpenedChannel: null,
+                blockedPeers: [],
+                dmLeftAt: {},
                 version: 2
             };
         }
@@ -634,6 +640,110 @@ class SecureStorage {
         await this.saveToStorage();
     }
 
+    // ==================== Blocked Peers (DM) ====================
+
+    /**
+     * Get list of blocked peer addresses
+     * @returns {string[]} - Array of lowercase addresses
+     */
+    getBlockedPeers() {
+        if (!this.isUnlocked) return [];
+        return this.cache.blockedPeers || [];
+    }
+
+    /**
+     * Check if a peer is blocked
+     * @param {string} address - Peer address
+     * @returns {boolean}
+     */
+    isBlocked(address) {
+        if (!this.isUnlocked) return false;
+        const normalized = address.toLowerCase();
+        return (this.cache.blockedPeers || []).includes(normalized);
+    }
+
+    /**
+     * Block a peer (all DM messages from this peer will be ignored)
+     * @param {string} address - Peer address
+     */
+    async addBlockedPeer(address) {
+        if (!this.isUnlocked) return;
+        const normalized = address.toLowerCase();
+        if (!this.cache.blockedPeers) {
+            this.cache.blockedPeers = [];
+        }
+        if (!this.cache.blockedPeers.includes(normalized)) {
+            this.cache.blockedPeers.push(normalized);
+            await this.saveToStorage();
+        }
+    }
+
+    /**
+     * Unblock a peer
+     * @param {string} address - Peer address
+     */
+    async removeBlockedPeer(address) {
+        if (!this.isUnlocked) return;
+        const normalized = address.toLowerCase();
+        if (!this.cache.blockedPeers) return;
+        const idx = this.cache.blockedPeers.indexOf(normalized);
+        if (idx >= 0) {
+            this.cache.blockedPeers.splice(idx, 1);
+            await this.saveToStorage();
+        }
+    }
+
+    // ==================== DM Left At (Soft Leave) ====================
+
+    /**
+     * Get the leftAt timestamp for a DM peer (soft leave).
+     * Messages with timestamp <= leftAt are ignored; newer messages resurface the conversation.
+     * @param {string} address - Peer address
+     * @returns {number|null} - Timestamp or null if not left
+     */
+    getDMLeftAt(address) {
+        if (!this.isUnlocked) return null;
+        const normalized = address.toLowerCase();
+        return this.cache.dmLeftAt?.[normalized] ?? null;
+    }
+
+    /**
+     * Get all dmLeftAt entries
+     * @returns {Object} - { peerAddress: timestamp }
+     */
+    getAllDMLeftAt() {
+        if (!this.isUnlocked) return {};
+        return this.cache.dmLeftAt || {};
+    }
+
+    /**
+     * Set leftAt timestamp for a DM peer (soft leave)
+     * @param {string} address - Peer address
+     * @param {number} timestamp - Leave timestamp
+     */
+    async setDMLeftAt(address, timestamp) {
+        if (!this.isUnlocked) return;
+        const normalized = address.toLowerCase();
+        if (!this.cache.dmLeftAt) {
+            this.cache.dmLeftAt = {};
+        }
+        this.cache.dmLeftAt[normalized] = timestamp;
+        await this.saveToStorage();
+    }
+
+    /**
+     * Clear leftAt for a DM peer (conversation resurfaced by new message)
+     * @param {string} address - Peer address
+     */
+    async clearDMLeftAt(address) {
+        if (!this.isUnlocked) return;
+        const normalized = address.toLowerCase();
+        if (this.cache.dmLeftAt?.[normalized]) {
+            delete this.cache.dmLeftAt[normalized];
+            await this.saveToStorage();
+        }
+    }
+
     // ==================== Last Opened Channel ====================
 
     /**
@@ -718,7 +828,10 @@ class SecureStorage {
 
         return {
             sentMessages: this.cache.sentMessages || {},
+            sentReactions: this.cache.sentReactions || {},
             channels: this.cache.channels || [],
+            blockedPeers: this.cache.blockedPeers || [],
+            dmLeftAt: this.cache.dmLeftAt || {},
             trustedContacts: this.cache.trustedContacts || {},
             ensCache: this.cache.ensCache || {},
             username: this.cache.username || null,
@@ -740,10 +853,13 @@ class SecureStorage {
         let channelsUpdated = false;
 
         if (data.sentMessages !== undefined) this.cache.sentMessages = data.sentMessages;
+        if (data.sentReactions !== undefined) this.cache.sentReactions = data.sentReactions;
         if (data.channels !== undefined) {
             this.cache.channels = data.channels;
             channelsUpdated = true;
         }
+        if (data.blockedPeers !== undefined) this.cache.blockedPeers = data.blockedPeers;
+        if (data.dmLeftAt !== undefined) this.cache.dmLeftAt = data.dmLeftAt;
         if (data.trustedContacts !== undefined) this.cache.trustedContacts = data.trustedContacts;
         if (data.ensCache !== undefined) this.cache.ensCache = data.ensCache;
         if (data.username !== undefined) this.cache.username = data.username;

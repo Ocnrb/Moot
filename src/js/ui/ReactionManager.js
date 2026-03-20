@@ -176,7 +176,7 @@ class ReactionManager {
      * @param {string} msgId - Message ID
      */
     updateReactionUI(msgId) {
-        const container = document.querySelector(`[data-reactions-for="${msgId}"]`);
+        const container = document.querySelector(`[data-reactions-for="${CSS.escape(msgId)}"]`);
         if (!container) return;
         
         const reactions = this.messageReactions?.get(msgId);

@@ -179,18 +179,18 @@ class MediaHandler {
         }
         
         // Show progress overlay
-        const progressOverlay = document.querySelector(`[data-progress-overlay="${fileId}"]`);
+        const progressOverlay = document.querySelector(`[data-progress-overlay="${CSS.escape(fileId)}"]`);
         if (progressOverlay) {
             progressOverlay.classList.remove('hidden');
         }
         
-        const progressText = document.querySelector(`[data-progress-text="${fileId}"]`);
+        const progressText = document.querySelector(`[data-progress-text="${CSS.escape(fileId)}"]`);
         if (progressText) {
             progressText.textContent = 'Starting...';
         }
         
         // Update download button to show loading state
-        const downloadBtn = document.querySelector(`.download-file-btn[data-file-id="${fileId}"]`);
+        const downloadBtn = document.querySelector(`.download-file-btn[data-file-id="${CSS.escape(fileId)}"]`);
         if (downloadBtn) {
             const playIcon = downloadBtn.querySelector('.download-play-icon');
             const loadingIcon = downloadBtn.querySelector('.download-loading-icon');
@@ -216,12 +216,12 @@ class MediaHandler {
      * @param {string} fileId - File ID
      */
     resetDownloadUI(fileId) {
-        const progressOverlay = document.querySelector(`[data-progress-overlay="${fileId}"]`);
+        const progressOverlay = document.querySelector(`[data-progress-overlay="${CSS.escape(fileId)}"]`);
         if (progressOverlay) {
             progressOverlay.classList.add('hidden');
         }
         
-        const downloadBtn = document.querySelector(`.download-file-btn[data-file-id="${fileId}"]`);
+        const downloadBtn = document.querySelector(`.download-file-btn[data-file-id="${CSS.escape(fileId)}"]`);
         if (downloadBtn) {
             const playIcon = downloadBtn.querySelector('.download-play-icon');
             const loadingIcon = downloadBtn.querySelector('.download-loading-icon');

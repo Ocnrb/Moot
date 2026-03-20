@@ -282,7 +282,9 @@ class SyncManager {
 
     /**
      * Merge two states together.
-     * Strategy: Union with deduplication, incoming values preferred for scalars.
+     * Strategy: channels, blockedPeers and dmLeftAt use latest-wins (incoming replaces base);
+     * sentMessages/sentReactions merge per-key with dedup;
+     * trustedContacts/ensCache use union with incoming precedence.
      * @param {Object} base - Base state (local or accumulated)
      * @param {Object} incoming - Incoming state to merge
      * @returns {Object} - Merged state
@@ -296,11 +298,26 @@ class SyncManager {
             incoming.sentMessages || {}
         );
 
-        // Channels: merge by streamId (union)
-        merged.channels = this.mergeChannels(
-            base.channels || [],
-            incoming.channels || []
+        // Sent Reactions: incoming wins per messageId, local-only preserved
+        merged.sentReactions = this.mergeSentReactions(
+            base.sentReactions || {},
+            incoming.sentReactions || {}
         );
+
+        // Channels: latest state wins (incoming replaces base)
+        merged.channels = incoming.channels !== undefined
+            ? incoming.channels
+            : (base.channels || []);
+
+        // Blocked Peers: latest state wins (incoming replaces base)
+        merged.blockedPeers = incoming.blockedPeers !== undefined
+            ? incoming.blockedPeers
+            : (base.blockedPeers || []);
+
+        // DM Left At: latest state wins (incoming replaces base)
+        merged.dmLeftAt = incoming.dmLeftAt !== undefined
+            ? incoming.dmLeftAt
+            : (base.dmLeftAt || {});
 
         // Trusted Contacts: union, incoming values take precedence
         merged.trustedContacts = {
@@ -357,39 +374,56 @@ class SyncManager {
     }
 
     /**
-     * Merge channels from two states.
-     * Union by streamId, prefers remote metadata on conflict.
-     * @param {Array} local - Local channels array
-     * @param {Array} remote - Remote channels array
-     * @returns {Array} - Merged channels
+     * Merge sent reactions from two states.
+     * Per messageId: incoming (newer) state wins over base (handles removals correctly).
+     * Entries only in base (local-only, not yet synced) are preserved.
+     * @param {Object} local - Local sentReactions { streamId: { messageId: { emoji: [users] } } }
+     * @param {Object} remote - Remote sentReactions (from newer sync payloads)
+     * @returns {Object} - Merged sentReactions
      */
-    mergeChannels(local, remote) {
-        const byStreamId = new Map();
+    mergeSentReactions(local, remote) {
+        const result = {};
 
-        // Add local channels
-        for (const ch of local) {
-            const id = ch.messageStreamId || ch.streamId;
-            byStreamId.set(id, ch);
-        }
+        // Collect all streamIds from both
+        const allStreamIds = new Set([...Object.keys(local), ...Object.keys(remote)]);
 
-        // Merge remote channels (remote takes precedence)
-        for (const ch of remote) {
-            const id = ch.messageStreamId || ch.streamId;
-            if (!byStreamId.has(id)) {
-                byStreamId.set(id, ch);
-            } else {
-                // Merge: keep local but update with remote fields
-                const existing = byStreamId.get(id);
-                byStreamId.set(id, { ...existing, ...ch });
+        for (const streamId of allStreamIds) {
+            const localStream = local[streamId] || {};
+            const remoteStream = remote[streamId] || {};
+            result[streamId] = {};
+
+            const allMessageIds = new Set([...Object.keys(localStream), ...Object.keys(remoteStream)]);
+
+            for (const messageId of allMessageIds) {
+                const inLocal = messageId in localStream;
+                const inRemote = messageId in remoteStream;
+
+                if (inRemote) {
+                    // Remote state wins (handles both additions and removals)
+                    const remoteReactions = remoteStream[messageId];
+                    if (Object.keys(remoteReactions).length > 0) {
+                        result[streamId][messageId] = remoteReactions;
+                    }
+                    // If remote has empty reactions for this message, it was fully removed — skip it
+                } else {
+                    // Only in local (new, not yet synced) — preserve
+                    result[streamId][messageId] = localStream[messageId];
+                }
+            }
+
+            // Clean up empty streamId entries
+            if (Object.keys(result[streamId]).length === 0) {
+                delete result[streamId];
             }
         }
 
-        return Array.from(byStreamId.values());
+        return result;
     }
 
     /**
-     * Smart sync: pull first, then push if we have local changes.
-     * Always pushes after pull to ensure remote has latest merged state.
+     * Smart sync: push first (snapshot local state), then pull (accept latest remote).
+     * Push-first ensures our state is on the storage node before we pull,
+     * so leaving a channel is respected (our push without the channel is the latest).
      * @returns {Promise<{pulled: boolean, pushed: boolean, noInbox: boolean}>}
      */
     async smartSync() {
@@ -409,13 +443,13 @@ class SyncManager {
         const result = { pulled: false, pushed: false, noInbox: false };
 
         try {
-            // Pull first - merges remote into local
-            const pullResult = await this.pullSync();
-            result.pulled = pullResult !== null;
-
-            // Always push to ensure remote has our merged state
+            // Push first — snapshot current state to storage node
             await this.pushSync();
             result.pushed = true;
+
+            // Pull — accept latest remote state (our push is the latest or near-latest)
+            const pullResult = await this.pullSync();
+            result.pulled = pullResult !== null;
 
             Logger.info('Sync: Smart sync completed', result);
             this.notifyHandlers('sync_complete', result);
@@ -513,12 +547,12 @@ class SyncManager {
     }
 
     /**
-     * Full sync: pull then push.
-     * Pull first to get remote changes, then push local state.
+     * Full sync: push then pull.
+     * Push first to snapshot local state, then pull and merge remote changes.
      */
     async fullSync() {
-        await this.pullSync();
         await this.pushSync();
+        await this.pullSync();
     }
 
     /**

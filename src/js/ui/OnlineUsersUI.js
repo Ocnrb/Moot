@@ -49,12 +49,12 @@ class OnlineUsersUI {
                     // Defense-in-depth: sanitize + escape user-provided nickname
                     const displayName = nickname 
                         ? escapeHtml(sanitizeText(nickname)) 
-                        : shortAddress;
+                        : escapeHtml(shortAddress);
                     
                     // Subtitle: address if has nickname, or "(you)" if it's me
                     let subtitle = '';
                     if (nickname) {
-                        subtitle = isMe ? `${shortAddress} (you)` : shortAddress;
+                        subtitle = isMe ? `${escapeHtml(shortAddress)} (you)` : escapeHtml(shortAddress);
                     } else if (isMe) {
                         subtitle = '(you)';
                     }

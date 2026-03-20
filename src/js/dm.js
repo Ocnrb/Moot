@@ -300,6 +300,12 @@ class DMManager {
         const myAddress = authManager.getAddress()?.toLowerCase();
         if (senderAddress === myAddress) return;
 
+        // Block check: ignore control messages from blocked peers
+        if (secureStorage.isBlocked(senderAddress)) return;
+
+        // Soft-leave check: ignore control messages from peers we left
+        if (secureStorage.getDMLeftAt(senderAddress)) return;
+
         // Find the conversation for this sender
         const channelStreamId = this.conversations.get(senderAddress);
         if (!channelStreamId) return;
@@ -337,9 +343,28 @@ class DMManager {
         // Ignore our own messages (echoed back from inbox)
         if (senderAddress === myAddress) return;
 
+        // Block check: permanently blocked peers are always ignored
+        if (secureStorage.isBlocked(senderAddress)) {
+            Logger.debug('DM: Ignoring message from blocked peer', senderAddress);
+            return;
+        }
+
         // E2E decrypt if needed
         data = await this.decryptDMEnvelope(data, senderAddress);
         if (!data) return;
+
+        // Soft-leave check: ignore messages older than the leave timestamp
+        const leftAt = secureStorage.getDMLeftAt(senderAddress);
+        if (leftAt) {
+            const messageTs = data.timestamp || 0;
+            if (messageTs <= leftAt) {
+                // Old message from before we left — ignore
+                return;
+            }
+            // New message after we left — conversation resurfaces
+            await secureStorage.clearDMLeftAt(senderAddress);
+            Logger.info('DM: Conversation resurfaced from', senderAddress, '(new message after leave)');
+        }
 
         // Clean sender-side flags
         delete data.pending;

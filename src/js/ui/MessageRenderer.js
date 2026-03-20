@@ -212,6 +212,8 @@ class MessageRenderer {
         
         const videoUrl = this.deps.getFileUrl?.(metadata.fileId);
         const isSeeding = this.deps.isSeeding?.(metadata.fileId);
+        const isDownloading = this.deps.isDownloading?.(metadata.fileId);
+        const downloadProgress = isDownloading ? this.deps.getDownloadProgress?.(metadata.fileId) : null;
         
         const safeFileId = escapeAttr(metadata.fileId);
         // Defense-in-depth: sanitize network-provided metadata
@@ -282,7 +284,17 @@ class MessageRenderer {
             }
         }
         
-        // Video not available yet - show preview panel
+        // Video not available yet - show preview panel (with downloading state if active)
+        const dlActive = isDownloading && downloadProgress;
+        const dlPercent = dlActive ? downloadProgress.percent : 0;
+        const dlReceivedMB = dlActive && downloadProgress.total > 0 ? ((downloadProgress.received / downloadProgress.total) * downloadProgress.fileSize / (1024 * 1024)).toFixed(1) : '0.0';
+        const dlTotalMB = dlActive ? (downloadProgress.fileSize / (1024 * 1024)).toFixed(1) : '0.0';
+        const overlayClass = dlActive ? '' : 'hidden';
+        const playIconClass = dlActive ? 'hidden' : '';
+        const loadingIconClass = dlActive ? '' : 'hidden';
+        const btnDisabled = dlActive ? 'disabled' : '';
+        const btnCursorClass = dlActive ? 'cursor-not-allowed' : '';
+
         return `
             <div data-file-id="${safeFileId}" class="video-container">
                 <div class="relative rounded-xl overflow-hidden bg-white/[0.05] cursor-pointer group"
@@ -292,25 +304,25 @@ class MessageRenderer {
                             <path d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z"/>
                         </svg>
                     </div>
-                    <button class="download-file-btn absolute inset-0 flex items-center justify-center bg-black/30 hover:bg-black/40 transition-all" 
-                            data-file-id="${safeFileId}">
+                    <button class="download-file-btn absolute inset-0 flex items-center justify-center bg-black/30 hover:bg-black/40 transition-all ${btnCursorClass}" 
+                            data-file-id="${safeFileId}" ${btnDisabled}>
                         <div class="play-btn-container transform group-hover:scale-105 transition-transform">
                             <div class="w-12 h-12 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center border border-white/30">
-                                <svg class="w-5 h-5 text-white ml-0.5 download-play-icon" fill="currentColor" viewBox="0 0 24 24">
+                                <svg class="w-5 h-5 text-white ml-0.5 download-play-icon ${playIconClass}" fill="currentColor" viewBox="0 0 24 24">
                                     <path d="M8 5v14l11-7z"/>
                                 </svg>
-                                <div class="download-loading-icon hidden">
+                                <div class="download-loading-icon ${loadingIconClass}">
                                     <div class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                                 </div>
                             </div>
                         </div>
                     </button>
-                    <div data-progress-overlay="${safeFileId}" class="hidden absolute inset-0 bg-black/70 flex flex-col items-center justify-center">
-                        <div class="text-white text-sm font-medium" data-progress-percent="${safeFileId}">0%</div>
+                    <div data-progress-overlay="${safeFileId}" class="${overlayClass} absolute inset-0 bg-black/70 flex flex-col items-center justify-center">
+                        <div class="text-white text-sm font-medium" data-progress-percent="${safeFileId}">${dlPercent}%</div>
                         <div class="w-2/3 bg-white/10 rounded-full h-1.5 mt-1.5">
-                            <div data-progress-fill="${safeFileId}" class="bg-blue-500 h-1.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+                            <div data-progress-fill="${safeFileId}" class="bg-blue-500 h-1.5 rounded-full transition-all duration-300" style="width: ${dlPercent}%"></div>
                         </div>
-                        <div class="text-[10px] text-white/30 mt-1" data-progress-text="${safeFileId}">Starting...</div>
+                        <div class="text-[10px] text-white/30 mt-1" data-progress-text="${safeFileId}">${dlActive ? `${dlReceivedMB} / ${dlTotalMB} MB` : 'Starting...'}</div>
                     </div>
                     <div class="absolute top-1.5 left-1.5 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1">
                         <svg class="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">

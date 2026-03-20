@@ -149,7 +149,7 @@ class ContactsUI {
                         <div class="flex-shrink-0" style="width:32px;height:32px;border-radius:6px;overflow:hidden;">${avatarSvg}</div>
                         <div class="flex-1 min-w-0">
                             <span class="text-[13px] font-medium text-white truncate block">${escapeHtml(sanitizeText(contact.nickname))}</span>
-                            <div class="text-[10px] text-white/30 font-mono truncate mt-0.5">${contact.address}</div>
+                            <div class="text-[10px] text-white/30 font-mono truncate mt-0.5">${escapeHtml(contact.address)}</div>
                         </div>
                     </div>
                     <button 
@@ -253,6 +253,15 @@ class ContactsUI {
             sender: senderAddress
         };
 
+        // Show/hide "Block User" based on whether we're in a DM channel
+        const blockBtn = document.getElementById('context-menu-block-btn');
+        const blockDivider = document.getElementById('context-menu-block-divider');
+        const { channelManager } = this.deps;
+        const currentChannel = channelManager?.getCurrentChannel?.();
+        const isDM = currentChannel?.type === 'dm' && senderAddress.toLowerCase() !== this.deps.identityManager?.getAddress?.()?.toLowerCase();
+        if (blockBtn) blockBtn.classList.toggle('hidden', !isDM);
+        if (blockDivider) blockDivider.classList.toggle('hidden', !isDM);
+
         // Position and show context menu
         this.showContextMenu(e.clientX, e.clientY);
     }
@@ -348,6 +357,53 @@ class ContactsUI {
             case 'remove-contact':
                 this.showRemoveModal(address);
                 break;
+                
+            case 'block-user':
+                this.handleBlockUser(address);
+                break;
+        }
+    }
+
+    /**
+     * Block a user from the context menu — finds the DM channel and leaves with block
+     * @param {string} address - Address of the user to block
+     */
+    async handleBlockUser(address) {
+        const { channelManager, showNotification, renderChannelList, selectChannel, showConnectedNoChannelState } = this.deps;
+        if (!channelManager) return;
+
+        // Find the DM channel for this peer
+        const channels = channelManager.getAllChannels();
+        const dmChannel = channels.find(
+            ch => ch.type === 'dm' && ch.peerAddress?.toLowerCase() === address.toLowerCase()
+        );
+
+        if (!dmChannel) {
+            showNotification('Could not find DM conversation', 'error');
+            return;
+        }
+
+        // Confirm before blocking
+        const short = address.slice(0, 6) + '…' + address.slice(-4);
+        if (!confirm(`Block ${short}? All messages from this user will be permanently ignored.`)) {
+            return;
+        }
+
+        try {
+            await channelManager.leaveChannel(dmChannel.messageStreamId || dmChannel.streamId, { block: true });
+            showNotification('User blocked', 'info');
+
+            // Refresh channel list and navigate away
+            const remaining = channelManager.getAllChannels();
+            if (remaining.length > 0) {
+                renderChannelList?.();
+                await selectChannel?.(remaining[0].streamId);
+            } else {
+                renderChannelList?.();
+                showConnectedNoChannelState?.();
+            }
+        } catch (err) {
+            showNotification('Failed to block user: ' + err.message, 'error');
         }
     }
 

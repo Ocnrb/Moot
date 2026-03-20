@@ -8,6 +8,7 @@ import { notificationUI } from './NotificationUI.js';
 import { messageRenderer } from './MessageRenderer.js';
 import { reactionManager } from './ReactionManager.js';
 import { mediaHandler } from './MediaHandler.js';
+import { previewModeUI } from './PreviewModeUI.js';
 import { analyzeMessageGroups, getGroupPositionClass, analyzeSpacing, getSpacingClass } from './MessageGrouper.js';
 import { escapeHtml, formatAddress } from './utils.js';
 
@@ -69,35 +70,78 @@ class ChatAreaUI {
         
         const { channelManager } = this.deps;
         const channel = channelManager?.getCurrentChannel();
-        if (!channel || !channel.hasMoreHistory) return;
+        const previewChannel = previewModeUI.getPreviewChannel();
         
+        // Must have either a regular channel or a preview channel with more history
+        if (channel && channel.hasMoreHistory) {
+            await this._loadMoreChannelHistory(channel, channelManager);
+        } else if (previewChannel && previewChannel.hasMoreHistory !== false) {
+            await this._loadMorePreviewHistory(previewChannel);
+        }
+    }
+
+    /**
+     * Load more history for a regular channel
+     * @private
+     */
+    async _loadMoreChannelHistory(channel, channelManager) {
         this.isLoadingMore = true;
         const generationAtStart = channelManager.switchGeneration;
         
-        // Show loading indicator at top
         this.showLoadingMoreIndicator();
         
-        // Save current scroll position
         const previousScrollHeight = this.messagesArea.scrollHeight;
         const previousScrollTop = this.messagesArea.scrollTop;
         
         try {
             const result = await channelManager.loadMoreHistory(channel.streamId);
             
-            // Discard results if user switched channels during load
             if (channelManager.switchGeneration !== generationAtStart) return;
             
             if (result.loaded > 0) {
-                // Re-render all messages
                 this.renderMessages(channel.messages);
                 
-                // Restore scroll position (keep viewing same content)
                 const newScrollHeight = this.messagesArea.scrollHeight;
                 const heightDiff = newScrollHeight - previousScrollHeight;
                 this.messagesArea.scrollTop = previousScrollTop + heightDiff;
             }
         } catch (error) {
             this.deps.Logger?.error('Failed to load more messages:', error);
+        } finally {
+            this.hideLoadingMoreIndicator();
+            this.isLoadingMore = false;
+        }
+    }
+
+    /**
+     * Load more history for a preview channel
+     * @private
+     */
+    async _loadMorePreviewHistory(previewChannel) {
+        this.isLoadingMore = true;
+        
+        this.showLoadingMoreIndicator();
+        
+        const previousScrollHeight = this.messagesArea.scrollHeight;
+        const previousScrollTop = this.messagesArea.scrollTop;
+        
+        try {
+            const result = await previewModeUI.loadMorePreviewHistory();
+            
+            if (!previewModeUI.isInPreviewMode()) return;
+            
+            if (result.loaded > 0) {
+                this.renderMessages(previewChannel.messages, () => {
+                    reactionManager.init();
+                    mediaHandler.attachLightboxListeners();
+                });
+                
+                const newScrollHeight = this.messagesArea.scrollHeight;
+                const heightDiff = newScrollHeight - previousScrollHeight;
+                this.messagesArea.scrollTop = previousScrollTop + heightDiff;
+            }
+        } catch (error) {
+            this.deps.Logger?.error('Failed to load more preview messages:', error);
         } finally {
             this.hideLoadingMoreIndicator();
             this.isLoadingMore = false;
@@ -137,6 +181,10 @@ class ChatAreaUI {
                     No messages yet. Start the conversation!
                 </div>
             `;
+            // Still trigger auto-load — initial history may have been all reactions
+            if (!this.isLoadingMore) {
+                requestAnimationFrame(() => this._autoLoadIfContentShort());
+            }
             return;
         }
 
@@ -195,6 +243,41 @@ class ChatAreaUI {
         if (onRenderComplete) {
             onRenderComplete();
         }
+        
+        // Auto-load more if content doesn't fill viewport (e.g. only 1 message visible)
+        if (!this.isLoadingMore) {
+            requestAnimationFrame(() => this._autoLoadIfContentShort());
+        }
+    }
+
+    /**
+     * Auto-load more history if content doesn't fill the viewport.
+     * Retries up to MAX_AUTO_LOAD_RETRIES times when fetched history is all reactions.
+     * @private
+     * @param {number} retriesLeft - Remaining retries (default: 5)
+     */
+    async _autoLoadIfContentShort(retriesLeft = 5) {
+        if (!this.messagesArea) return;
+        if (this.isLoadingMore) return;
+        if (this.messagesArea.scrollHeight > this.messagesArea.clientHeight) return;
+        if (retriesLeft <= 0) return;
+        
+        // Check if there's more history to load
+        const { channelManager } = this.deps;
+        const channel = channelManager?.getCurrentChannel();
+        const previewChannel = previewModeUI.getPreviewChannel();
+        const hasMore = (channel && channel.hasMoreHistory) || 
+                        (previewChannel && previewChannel.hasMoreHistory !== false);
+        if (!hasMore) return;
+        
+        // Content fits without scrolling - try to load more
+        await this.handleMessagesScroll();
+        
+        // After loading, if content still doesn't fill viewport, retry
+        // (handles case where fetched history was all reactions)
+        if (this.messagesArea.scrollHeight <= this.messagesArea.clientHeight) {
+            setTimeout(() => this._autoLoadIfContentShort(retriesLeft - 1), 300);
+        }
     }
 
     /**
@@ -202,7 +285,7 @@ class ChatAreaUI {
      * @param {string} msgId - Message ID to scroll to
      */
     scrollToMessage(msgId) {
-        const msgElement = document.querySelector(`[data-msg-id="${msgId}"]`);
+        const msgElement = document.querySelector(`[data-msg-id="${CSS.escape(msgId)}"]`);
         if (msgElement) {
             msgElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
             msgElement.classList.add('message-highlight');
@@ -334,7 +417,7 @@ class ChatAreaUI {
     updateUnreadCount(streamId) {
         const { channelManager, secureStorage } = this.deps;
         
-        const countEl = document.querySelector(`[data-channel-count="${streamId}"]`);
+        const countEl = document.querySelector(`[data-channel-count="${CSS.escape(streamId)}"]`);
         if (!countEl) return;
         
         const channel = channelManager?.getChannel(streamId);

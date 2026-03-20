@@ -495,6 +495,28 @@ class MediaController {
     }
 
     /**
+     * Check if a file download is in progress
+     * @param {string} fileId - File ID
+     * @returns {boolean}
+     */
+    isDownloading(fileId) {
+        return this.incomingFiles.has(fileId);
+    }
+
+    /**
+     * Get download progress for an active transfer
+     * @param {string} fileId - File ID
+     * @returns {{ percent: number, received: number, total: number, fileSize: number }|null}
+     */
+    getDownloadProgress(fileId) {
+        const transfer = this.incomingFiles.get(fileId);
+        if (!transfer) return null;
+        const { receivedCount, metadata } = transfer;
+        const percent = metadata.pieceCount > 0 ? Math.round(receivedCount / metadata.pieceCount * 100) : 0;
+        return { percent, received: receivedCount, total: metadata.pieceCount, fileSize: metadata.fileSize };
+    }
+
+    /**
      * Check if we are seeding a file
      * @param {string} fileId - File ID
      * @returns {boolean}

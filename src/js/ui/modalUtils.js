@@ -23,7 +23,7 @@ function loadTemplate(templateId) {
 
 /**
  * Bind data to elements with data-bind attributes
- * Supports: textContent, value, innerHTML (with data-bind-html)
+ * Supports: textContent, value, attribute binding (data-bind-attr)
  * 
  * @param {Element|DocumentFragment} container - Container with data-bind elements
  * @param {Object} data - Key-value pairs to bind
@@ -43,12 +43,6 @@ export function bindData(container, data) {
             } else {
                 el.textContent = value ?? '';
             }
-        });
-        
-        // Find elements with data-bind-html="key" (use with caution - XSS risk)
-        const htmlElements = container.querySelectorAll(`[data-bind-html="${key}"]`);
-        htmlElements.forEach(el => {
-            el.innerHTML = value ?? '';
         });
         
         // Find elements with data-bind-attr for attribute binding

@@ -114,6 +114,8 @@ class UIController {
             getCurrentChannel: () => this.getActiveChannel(),
             getFileUrl: (fileId) => mediaController.getFileUrl(fileId),
             isSeeding: (fileId) => mediaController.isSeeding(fileId),
+            isDownloading: (fileId) => mediaController.isDownloading(fileId),
+            getDownloadProgress: (fileId) => mediaController.getDownloadProgress(fileId),
             isVideoPlayable: (fileType) => mediaController.isVideoPlayable(fileType),
             getYouTubeEmbedsEnabled: () => secureStorage.getYouTubeEmbedsEnabled()
         });
@@ -174,9 +176,14 @@ class UIController {
             identityManager,
             Logger,
             settingsUI,
+            channelManager,
+            secureStorage,
             showNotification: (msg, type) => this.showNotification(msg, type),
             showLoading: (msg) => this.showLoading(msg),
-            hideLoading: () => this.hideLoading()
+            hideLoading: () => this.hideLoading(),
+            renderChannelList: () => this.renderChannelList(),
+            selectChannel: (streamId) => this.selectChannel(streamId),
+            showConnectedNoChannelState: () => this.showConnectedNoChannelState()
         });
 
         // ChannelListUI
@@ -581,7 +588,7 @@ class UIController {
             Logger.debug('Background activity update:', streamId, activity);
             
             // Update unread badge in sidebar
-            const countEl = document.querySelector(`[data-channel-count="${streamId}"]`);
+            const countEl = document.querySelector(`[data-channel-count="${CSS.escape(streamId)}"]`);
             if (countEl && activity.unreadCount > 0) {
                 countEl.textContent = activity.unreadCount >= 30 ? '+30' : activity.unreadCount;
                 countEl.classList.remove('hidden', 'text-white/30', 'bg-white/[0.04]');
@@ -1497,7 +1504,7 @@ class UIController {
     setupMediaHandlers() {
         // Image received - update image placeholders
         mediaController.onImageReceived((imageId, base64Data) => {
-            const placeholder = document.querySelector(`[data-image-id="${imageId}"]`);
+            const placeholder = document.querySelector(`[data-image-id="${CSS.escape(imageId)}"]`);
             if (placeholder) {
                 // CRITICAL: Verify channel context to prevent cross-channel image leakage
                 const placeholderChannelId = placeholder.getAttribute('data-channel-id');
@@ -1534,25 +1541,25 @@ class UIController {
         // File progress - update progress overlay and bar
         mediaController.onFileProgress((fileId, percent, received, total, fileSize) => {
             // Show new video panel progress overlay
-            const progressOverlay = document.querySelector(`[data-progress-overlay="${fileId}"]`);
+            const progressOverlay = document.querySelector(`[data-progress-overlay="${CSS.escape(fileId)}"]`);
             if (progressOverlay) {
                 progressOverlay.classList.remove('hidden');
             }
             
             // Update progress percentage text
-            const progressPercent = document.querySelector(`[data-progress-percent="${fileId}"]`);
+            const progressPercent = document.querySelector(`[data-progress-percent="${CSS.escape(fileId)}"]`);
             if (progressPercent) {
                 progressPercent.textContent = `${percent}%`;
             }
             
             // Update progress fill
-            const progressFill = document.querySelector(`[data-progress-fill="${fileId}"]`);
+            const progressFill = document.querySelector(`[data-progress-fill="${CSS.escape(fileId)}"]`);
             if (progressFill) {
                 progressFill.style.width = `${percent}%`;
             }
             
             // Update progress text with MB
-            const progressText = document.querySelector(`[data-progress-text="${fileId}"]`);
+            const progressText = document.querySelector(`[data-progress-text="${CSS.escape(fileId)}"]`);
             if (progressText) {
                 const receivedMB = ((received / total) * fileSize / (1024 * 1024)).toFixed(1);
                 const totalMB = (fileSize / (1024 * 1024)).toFixed(1);
@@ -1560,7 +1567,7 @@ class UIController {
             }
             
             // Update download button to show loading state
-            const downloadBtn = document.querySelector(`.download-file-btn[data-file-id="${fileId}"]`);
+            const downloadBtn = document.querySelector(`.download-file-btn[data-file-id="${CSS.escape(fileId)}"]`);
             if (downloadBtn) {
                 const playIcon = downloadBtn.querySelector('.download-play-icon');
                 const loadingIcon = downloadBtn.querySelector('.download-loading-icon');
@@ -1573,7 +1580,7 @@ class UIController {
         
         // File complete - show video player with seeding badge
         mediaController.onFileComplete((fileId, metadata, url, blob) => {
-            const container = document.querySelector(`[data-file-id="${fileId}"]`);
+            const container = document.querySelector(`[data-file-id="${CSS.escape(fileId)}"]`);
             if (container) {
                 const isSeeding = mediaController.isSeeding(fileId);
                 
@@ -1632,7 +1639,7 @@ class UIController {
                         
                         // Add error handler to video element
                         setTimeout(() => {
-                            const videoEl = document.querySelector(`.video-player-${fileId}`);
+                            const videoEl = document.querySelector(`.video-player-${CSS.escape(fileId)}`);
                             if (videoEl) {
                                 videoEl.addEventListener('error', (e) => {
                                     console.error('Video playback error:', e);
@@ -1698,7 +1705,7 @@ class UIController {
         
         // Seeder update
         mediaController.onSeederUpdate((fileId, count) => {
-            const seederEl = document.querySelector(`[data-seeder-count="${fileId}"]`);
+            const seederEl = document.querySelector(`[data-seeder-count="${CSS.escape(fileId)}"]`);
             if (seederEl) {
                 seederEl.textContent = `${count} seeder${count !== 1 ? 's' : ''}`;
             }

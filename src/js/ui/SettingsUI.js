@@ -1,4 +1,4 @@
-import { escapeHtml as _escapeHtml } from './utils.js';
+import { escapeHtml as _escapeHtml, escapeAttr as _escapeAttr } from './utils.js';
 import { GasEstimator } from './GasEstimator.js';
 import { CONFIG, getNetworkParams } from '../config.js';
 
@@ -11,7 +11,7 @@ class SettingsUI {
     constructor() {
         this.deps = {};
         this.elements = {};
-        this.settingsTabOrder = ['profile', 'wallet', 'notifications', 'api', 'linkpreviews', 'security', 'about'];
+        this.settingsTabOrder = ['profile', 'wallet', 'notifications', 'api', 'linkpreviews', 'privacy', 'security', 'about'];
         this.currentSettingsTabIndex = 0;
         this.isAnimating = false; // Prevent multiple simultaneous animations
     }
@@ -583,9 +583,47 @@ class SettingsUI {
                 }
             }
 
+            // Import sent DM reactions
+            if (data.sentReactions) {
+                if (!this.secureStorage.cache.sentReactions) {
+                    this.secureStorage.cache.sentReactions = {};
+                }
+                for (const [streamId, reactions] of Object.entries(data.sentReactions)) {
+                    if (!this.secureStorage.cache.sentReactions[streamId]) {
+                        this.secureStorage.cache.sentReactions[streamId] = reactions;
+                        dmImported++;
+                    }
+                }
+            }
+
             // Import username (only if not set)
             if (data.username && !this.secureStorage.cache.username) {
                 this.secureStorage.cache.username = data.username;
+            }
+
+            // Import blocked peers (union — never lose a block)
+            if (data.blockedPeers && data.blockedPeers.length > 0) {
+                if (!this.secureStorage.cache.blockedPeers) {
+                    this.secureStorage.cache.blockedPeers = [];
+                }
+                for (const addr of data.blockedPeers) {
+                    const normalized = addr.toLowerCase();
+                    if (!this.secureStorage.cache.blockedPeers.includes(normalized)) {
+                        this.secureStorage.cache.blockedPeers.push(normalized);
+                    }
+                }
+            }
+
+            // Import DM left-at timestamps (don't overwrite existing)
+            if (data.dmLeftAt) {
+                if (!this.secureStorage.cache.dmLeftAt) {
+                    this.secureStorage.cache.dmLeftAt = {};
+                }
+                for (const [peer, ts] of Object.entries(data.dmLeftAt)) {
+                    if (!this.secureStorage.cache.dmLeftAt[peer]) {
+                        this.secureStorage.cache.dmLeftAt[peer] = ts;
+                    }
+                }
             }
 
             // Save
@@ -1037,6 +1075,7 @@ class SettingsUI {
             'notifications': 'Notifications',
             'api': 'API',
             'linkpreviews': 'Content',
+            'privacy': 'Privacy',
             'security': 'Security',
             'about': 'About'
         };
@@ -1103,6 +1142,11 @@ class SettingsUI {
      * @param {number} direction - Direction of navigation (-1 = left, 1 = right, 0 = direct click)
      */
     selectSettingsTab(tabName, direction = 0) {
+        // Render blocked peers list when privacy tab is selected
+        if (tabName === 'privacy') {
+            this.renderBlockedPeersList();
+        }
+
         // Start animation lock
         if (direction !== 0) {
             this.isAnimating = true;
@@ -1179,6 +1223,44 @@ class SettingsUI {
             });
             this.isAnimating = false;
         }
+    }
+
+    /**
+     * Render the blocked peers list in the Privacy panel
+     */
+    renderBlockedPeersList() {
+        const container = document.getElementById('blocked-peers-list');
+        if (!container) return;
+
+        const blockedPeers = this.secureStorage.getBlockedPeers?.() || [];
+
+        if (blockedPeers.length === 0) {
+            container.innerHTML = '<p class="text-xs text-white/30 py-4 text-center">No blocked users</p>';
+            return;
+        }
+
+        container.innerHTML = blockedPeers.map(addr => {
+            const safe = _escapeAttr(addr);
+            const short = _escapeHtml(addr.slice(0, 6) + '...' + addr.slice(-4));
+            return `
+                <div class="flex items-center justify-between py-2 px-3 bg-white/[0.03] rounded-lg group">
+                    <span class="text-xs text-white/60 font-mono" title="${safe}">${short}</span>
+                    <button class="unblock-peer-btn text-xs text-emerald-400 hover:text-emerald-300 opacity-60 hover:opacity-100 transition px-2 py-1 rounded hover:bg-emerald-500/10" data-address="${safe}">
+                        Unblock
+                    </button>
+                </div>
+            `;
+        }).join('');
+
+        // Attach unblock listeners
+        container.querySelectorAll('.unblock-peer-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const address = btn.dataset.address;
+                await this.secureStorage.removeBlockedPeer(address);
+                this.showNotification('User unblocked', 'info');
+                this.renderBlockedPeersList();
+            });
+        });
     }
 
     /**

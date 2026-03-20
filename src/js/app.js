@@ -764,10 +764,50 @@ class App {
                     }
                 }
 
+                // Import sent DM reactions
+                if (data.sentReactions) {
+                    if (!secureStorage.cache.sentReactions) {
+                        secureStorage.cache.sentReactions = {};
+                    }
+                    for (const [streamId, reactions] of Object.entries(data.sentReactions)) {
+                        if (!secureStorage.cache.sentReactions[streamId]) {
+                            secureStorage.cache.sentReactions[streamId] = reactions;
+                            dataImported = true;
+                        }
+                    }
+                }
+
                 // Import username
                 if (data.username && !secureStorage.cache.username) {
                     secureStorage.cache.username = data.username;
                     dataImported = true;
+                }
+
+                // Import blocked peers (union — never lose a block)
+                if (data.blockedPeers && data.blockedPeers.length > 0) {
+                    if (!secureStorage.cache.blockedPeers) {
+                        secureStorage.cache.blockedPeers = [];
+                    }
+                    for (const addr of data.blockedPeers) {
+                        const normalized = addr.toLowerCase();
+                        if (!secureStorage.cache.blockedPeers.includes(normalized)) {
+                            secureStorage.cache.blockedPeers.push(normalized);
+                            dataImported = true;
+                        }
+                    }
+                }
+
+                // Import DM left-at timestamps (don't overwrite existing)
+                if (data.dmLeftAt) {
+                    if (!secureStorage.cache.dmLeftAt) {
+                        secureStorage.cache.dmLeftAt = {};
+                    }
+                    for (const [peer, ts] of Object.entries(data.dmLeftAt)) {
+                        if (!secureStorage.cache.dmLeftAt[peer]) {
+                            secureStorage.cache.dmLeftAt[peer] = ts;
+                            dataImported = true;
+                        }
+                    }
                 }
 
                 // Save to storage
@@ -931,7 +971,7 @@ class App {
                             <div>
                                 <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Address</label>
                                 <div class="bg-white/5 border border-white/10 rounded-xl px-4 py-3 font-mono text-sm text-white/60 break-all">
-                                    ${address}
+                                    ${escapeHtml(address)}
                                 </div>
                             </div>
                             
@@ -940,7 +980,7 @@ class App {
                                 <label class="block text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Private Key</label>
                                 <div class="bg-white/5 border border-white/10 rounded-xl px-4 py-3 relative">
                                     <div id="pk-hidden" class="font-mono text-sm text-white/30 select-none">••••••••••••••••••••••••••••••••••••</div>
-                                    <div id="pk-revealed" class="font-mono text-sm text-white/60 break-all hidden">${privateKey}</div>
+                                    <div id="pk-revealed" class="font-mono text-sm text-white/60 break-all hidden">${escapeHtml(privateKey)}</div>
                                     <button id="toggle-pk" class="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/80 transition">
                                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/>
@@ -1867,13 +1907,7 @@ class App {
                 // Only show message if it's from the current channel
                 if (data.streamId === currentStreamId) {
                     chatAreaUI.addMessage(data.message, data.streamId, () => {
-                        reactionManager.attachReactionListeners(
-                            (msgId) => {
-                                chatAreaUI.startReply(msgId);
-                            },
-                            (fileId) => uiController.handleFileDownload(fileId),
-                            (msgId) => chatAreaUI.scrollToMessage(msgId)
-                        );
+                        uiController.attachReactionListeners();
                         mediaHandler.attachLightboxListeners();
                     });
                 }
@@ -1955,13 +1989,7 @@ class App {
                     const channel = channelManager.getCurrentChannel();
                     if (channel) {
                         chatAreaUI.renderMessages(channel.messages, () => {
-                            reactionManager.attachReactionListeners(
-                                (msgId) => {
-                                    chatAreaUI.startReply(msgId);
-                                },
-                                (fileId) => uiController.handleFileDownload(fileId),
-                                (msgId) => chatAreaUI.scrollToMessage(msgId)
-                            );
+                            uiController.attachReactionListeners();
                             mediaHandler.attachLightboxListeners();
                         });
                         Logger.debug(`History batch loaded: ${data.loaded}/${data.total} messages`);

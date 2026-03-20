@@ -333,7 +333,7 @@ class ChannelListUI {
      * @param {number} count - New unread count
      */
     updateUnreadBadge(streamId, count) {
-        const badge = document.querySelector(`[data-channel-count="${streamId}"]`);
+        const badge = document.querySelector(`[data-channel-count="${CSS.escape(streamId)}"]`);
         if (!badge) return;
 
         if (count > 0) {

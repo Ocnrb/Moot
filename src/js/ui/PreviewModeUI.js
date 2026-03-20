@@ -86,7 +86,7 @@ class PreviewModeUI {
      * @private
      */
     async _enterPreviewCore(streamId, channelInfo, pushHistory) {
-        const { channelManager, subscriptionManager, graphAPI, notificationUI, historyManager, headerUI } = this.deps;
+        const { channelManager, subscriptionManager, graphAPI, notificationUI, historyManager, headerUI, reactionManager } = this.deps;
         const elements = this.ui.elements;
 
         try {
@@ -97,6 +97,9 @@ class PreviewModeUI {
 
             // Clear current channel selection (preview is not a "real" selection)
             channelManager.setCurrentChannel(null);
+
+            // Clear stale reactions from any previously viewed channel
+            reactionManager.loadFromChannelState({});
 
             notificationUI.showLoadingToast('Loading channel...', 'Connecting to stream');
 
@@ -329,7 +332,8 @@ class PreviewModeUI {
                 readOnly: readOnly,
                 createdBy: channelInfo?.createdBy,
                 messages: messages || [],
-                reactions: reactionManager.exportAsObject()
+                reactions: reactionManager.exportAsObject(),
+                oldestTimestamp: this.previewChannel.oldestTimestamp || null
             });
 
             // Clear preview state
@@ -366,7 +370,7 @@ class PreviewModeUI {
     async exitPreviewMode(navigateToExplore = true) {
         if (!this.previewChannel) return;
 
-        const { subscriptionManager } = this.deps;
+        const { subscriptionManager, reactionManager } = this.deps;
 
         try {
             const streamId = this.previewChannel.streamId;
@@ -376,6 +380,9 @@ class PreviewModeUI {
 
             // Clear preview state
             this.previewChannel = null;
+
+            // Clear stale reactions from the previewed channel
+            reactionManager.loadFromChannelState({});
 
             // Hide Join button
             this.ui.elements.joinChannelBtn?.classList.add('hidden');
@@ -408,10 +415,12 @@ class PreviewModeUI {
 
         // Handle reactions in preview mode
         if (message?.type === 'reaction') {
+            const reactionUser = message.user || message.senderId;
+            if (!reactionUser) return;
             reactionManager.handleIncomingReaction(
                 message.messageId,
                 message.emoji,
-                message.user,
+                reactionUser,
                 message.action || 'add'
             );
             return;
@@ -557,6 +566,89 @@ class PreviewModeUI {
         } catch (error) {
             Logger.error('Failed to send preview reaction:', error);
             this.ui.showNotification('Failed to send reaction', 'error');
+        }
+    }
+    /**
+     * Load older history for preview channel (scroll-to-top load-more)
+     * @returns {Promise<{loaded: number, hasMore: boolean}>}
+     */
+    async loadMorePreviewHistory() {
+        if (!this.previewChannel) return { loaded: 0, hasMore: false };
+        if (this.previewChannel.loadingHistory) return { loaded: 0, hasMore: true };
+
+        const { streamrController, identityManager, chatAreaUI, mediaHandler } = this.deps;
+        const channel = this.previewChannel;
+        const streamId = channel.streamId;
+
+        // Use oldest message timestamp, or Date.now() if only reactions loaded so far
+        const beforeTimestamp = channel.oldestTimestamp || Date.now();
+
+        channel.loadingHistory = true;
+
+        try {
+            const result = await streamrController.fetchOlderHistory(
+                streamId,
+                0, // partition 0 (messages)
+                beforeTimestamp,
+                30,
+                channel.password
+            );
+
+            if (!this.previewChannel) return { loaded: 0, hasMore: false };
+
+            // Separate reactions from content messages
+            let addedCount = 0;
+            const { reactionManager } = this.deps;
+
+            for (const msg of result.messages) {
+                if (msg?.type === 'reaction') {
+                    const reactionUser = msg.user || msg.senderId;
+                    if (reactionUser) {
+                        reactionManager.handleIncomingReaction(
+                            msg.messageId, msg.emoji, reactionUser, msg.action || 'add'
+                        );
+                    }
+                    // Track oldest timestamp from reactions too (for pagination progress)
+                    if (msg.timestamp && (!channel.oldestTimestamp || msg.timestamp < channel.oldestTimestamp)) {
+                        channel.oldestTimestamp = msg.timestamp;
+                    }
+                    continue;
+                }
+
+                if (!msg?.id || !msg?.sender || !msg?.timestamp) continue;
+                if (channel.messages.some(m => m.id === msg.id)) continue;
+
+                // Verify signature
+                try {
+                    if (!msg.channelId) msg.channelId = streamId;
+                    msg.verified = await identityManager.verifyMessage(msg, streamId, { skipTimestampCheck: true });
+                } catch (e) {
+                    msg.verified = { valid: false, error: e.message, trustLevel: -1 };
+                }
+
+                channel.messages.push(msg);
+                addedCount++;
+
+                if (!channel.oldestTimestamp || msg.timestamp < channel.oldestTimestamp) {
+                    channel.oldestTimestamp = msg.timestamp;
+                }
+            }
+
+            if (addedCount > 0) {
+                channel.messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+            }
+
+            channel.hasMoreHistory = result.hasMore;
+            Logger.debug(`Preview: Loaded ${addedCount} older messages, hasMore: ${result.hasMore}`);
+
+            return { loaded: addedCount, hasMore: result.hasMore };
+        } catch (error) {
+            Logger.error('Preview: Failed to load more history:', error);
+            return { loaded: 0, hasMore: true };
+        } finally {
+            if (this.previewChannel) {
+                this.previewChannel.loadingHistory = false;
+            }
         }
     }
 }

@@ -36,7 +36,7 @@
 </head>
 <body class="h-screen overflow-hidden">
     <!-- Global header spans full width -->
-    <header class="bg-[#09090b] border-b border-white/[0.01] h-14 flex items-center justify-between px-5 flex-shrink-0">
+    <header class="bg-[#09090b] border-b border-white/[0.01] h-14 flex items-center justify-between px-5 flex-shrink-0 relative z-10">
         <!-- Left side: Logo and brand -->
         <div class="flex items-center gap-3">
             <!-- Logo -->
@@ -44,7 +44,7 @@
             <!-- Status dot and Pombo name -->
             <div class="flex flex-col">
                 <div class="flex items-center gap-1.5" title="Streamr Network">
-                    <div id="network-dot" class="w-2.5 h-2.5 rounded-full bg-white/20 transition-colors"></div>
+                    <div id="network-dot" class="w-2.5 h-2.5 rounded-full bg-white/20 transition-all duration-500 network-dot"></div>
                     <span class="text-[17px] font-extrabold text-white tracking-tight leading-tight ml-1">Pombo</span>
                 </div>
             </div>
@@ -1663,6 +1663,10 @@
                             <span>Content</span>
                         </button>
                         <div class="my-2 mx-3 border-t border-white/5 hidden md:block"></div>
+                        <button data-settings-tab="privacy" class="settings-tab w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left transition-all text-white/60 hover:text-white/90 hover:bg-white/5">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+                            <span>Privacy</span>
+                        </button>
                         <button data-settings-tab="security" class="settings-tab w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left transition-all text-white/60 hover:text-white/90 hover:bg-white/5">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
                             <span>Security</span>
@@ -2011,6 +2015,22 @@
                         </div>
                     </div>
 
+                    <!-- Privacy Panel -->
+                    <div id="settings-panel-privacy" class="settings-panel hidden">
+                        <div class="space-y-6">
+                            <div>
+                                <h4 class="text-sm font-medium text-white/90 mb-1 flex items-center gap-2">
+                                    <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+                                    Blocked Users
+                                </h4>
+                                <p class="text-xs text-white/40 mb-4">Blocked users cannot send you DMs.</p>
+                                <div id="blocked-peers-list" class="space-y-2">
+                                    <p class="text-xs text-white/30 py-4 text-center">No blocked users</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- About Panel -->
                     <div id="settings-panel-about" class="settings-panel hidden">
                         <div class="space-y-6">
@@ -2150,6 +2170,11 @@
         <button class="context-menu-item w-full text-left px-4 py-2 hover:bg-white/[0.08] text-sm text-red-400 flex items-center gap-2" data-action="remove-contact">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M22 10.5h-6m-2.25-4.125a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zM4 19.235v-.11a6.375 6.375 0 0112.75 0v.109A12.318 12.318 0 0110.374 21c-2.331 0-4.512-.645-6.374-1.766z"/></svg>
             Remove from Contacts
+        </button>
+        <hr class="border-white/[0.06] my-1 hidden" id="context-menu-block-divider">
+        <button class="context-menu-item w-full text-left px-4 py-2 hover:bg-red-500/10 text-sm text-red-400 flex items-center gap-2 hidden" data-action="block-user" id="context-menu-block-btn">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+            Block User
         </button>
     </div>
 

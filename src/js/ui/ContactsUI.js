@@ -274,11 +274,8 @@ class ContactsUI {
             this.init();
         }
         
-        // Block scroll on messages area while menu is open
-        const messagesArea = document.getElementById('messages-area');
-        if (messagesArea) {
-            messagesArea.style.overflow = 'hidden';
-        }
+        // Block scroll on messages area while menu is open (using event listeners to avoid reflow)
+        this._blockScroll();
         
         if (this.elements.contextMenu) {
             // Temporarily show to measure dimensions
@@ -315,12 +312,26 @@ class ContactsUI {
      */
     hideContextMenu() {
         this.elements.contextMenu?.classList.add('hidden');
-        
-        // Re-enable scroll on messages area
+        this._unblockScroll();
+    }
+
+    /** Block scroll on messages area without changing overflow (avoids layout reflow) */
+    _blockScroll() {
         const messagesArea = document.getElementById('messages-area');
-        if (messagesArea) {
-            messagesArea.style.overflow = '';
-        }
+        if (!messagesArea || this._scrollBlocker) return;
+        const prevent = (e) => e.preventDefault();
+        messagesArea.addEventListener('wheel', prevent, { passive: false });
+        messagesArea.addEventListener('touchmove', prevent, { passive: false });
+        this._scrollBlocker = { el: messagesArea, handler: prevent };
+    }
+
+    /** Restore scroll on messages area */
+    _unblockScroll() {
+        if (!this._scrollBlocker) return;
+        const { el, handler } = this._scrollBlocker;
+        el.removeEventListener('wheel', handler);
+        el.removeEventListener('touchmove', handler);
+        this._scrollBlocker = null;
     }
 
     /**

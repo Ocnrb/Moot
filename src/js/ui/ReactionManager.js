@@ -217,11 +217,8 @@ class ReactionManager {
             this.reactionPickerTimeout = null;
         }
         
-        // Block scroll on messages area while picker is open
-        const messagesArea = document.getElementById('messages-area');
-        if (messagesArea) {
-            messagesArea.style.overflow = 'hidden';
-        }
+        // Block scroll on messages area without changing overflow (avoids layout reflow)
+        this._blockScroll();
         
         // Position near the button
         const rect = e.target.getBoundingClientRect();
@@ -415,16 +412,32 @@ class ReactionManager {
         }
         
         // Re-enable scroll on messages area
-        const messagesArea = document.getElementById('messages-area');
-        if (messagesArea) {
-            messagesArea.style.overflow = '';
-        }
+        this._unblockScroll();
         
         // Also clear any pending hide timeout
         if (this.reactionPickerTimeout) {
             clearTimeout(this.reactionPickerTimeout);
             this.reactionPickerTimeout = null;
         }
+    }
+
+    /** Block scroll on messages area without changing overflow (avoids layout reflow) */
+    _blockScroll() {
+        const messagesArea = document.getElementById('messages-area');
+        if (!messagesArea || this._scrollBlocker) return;
+        const prevent = (e) => e.preventDefault();
+        messagesArea.addEventListener('wheel', prevent, { passive: false });
+        messagesArea.addEventListener('touchmove', prevent, { passive: false });
+        this._scrollBlocker = { el: messagesArea, handler: prevent };
+    }
+
+    /** Restore scroll on messages area */
+    _unblockScroll() {
+        if (!this._scrollBlocker) return;
+        const { el, handler } = this._scrollBlocker;
+        el.removeEventListener('wheel', handler);
+        el.removeEventListener('touchmove', handler);
+        this._scrollBlocker = null;
     }
 }
 

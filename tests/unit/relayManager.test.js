@@ -60,9 +60,15 @@ describe('RelayManager', () => {
         // Reset mocked channelManager channels
         channelManager.channels.clear();
 
-        // Mock navigator.serviceWorker
+        // Mock navigator.serviceWorker (preserve window.dispatchEvent)
         mockPostMessage = vi.fn();
         originalNavigator = global.navigator;
+        
+        // Save original window reference
+        const origDispatchEvent = globalThis.window?.dispatchEvent;
+        const origAddEventListener = globalThis.window?.addEventListener;
+        const origRemoveEventListener = globalThis.window?.removeEventListener;
+        
         global.navigator = {
             serviceWorker: {
                 controller: {
@@ -71,6 +77,13 @@ describe('RelayManager', () => {
                 addEventListener: vi.fn()
             }
         };
+        
+        // Restore window event methods that may have been lost
+        if (origDispatchEvent && globalThis.window) {
+            globalThis.window.dispatchEvent = origDispatchEvent;
+            globalThis.window.addEventListener = origAddEventListener;
+            globalThis.window.removeEventListener = origRemoveEventListener;
+        }
 
         // Reset mocks
         vi.clearAllMocks();
@@ -387,7 +400,7 @@ describe('RelayManager', () => {
         });
     });
 
-    // ==================== subscribed channels management ====================
+    // ==================== subscribedChannels management ====================
     describe('subscribedChannels', () => {
         it('should be empty initially', () => {
             const manager = new relayManager.constructor();
@@ -402,6 +415,387 @@ describe('RelayManager', () => {
             expect(relayManager.subscribedChannels.has('stream-1')).toBe(true);
             expect(relayManager.subscribedChannels.has('stream-2')).toBe(true);
             expect(relayManager.subscribedChannels.size).toBe(2);
+        });
+    });
+
+    // ==================== isSupported() ====================
+    describe('isSupported()', () => {
+        it('should return true when all APIs available', () => {
+            // In jsdom environment, window, navigator.serviceWorker should exist
+            // We just need PushManager and Notification
+            global.PushManager = {};
+            global.Notification = {};
+            global.navigator = {
+                ...global.navigator,
+                serviceWorker: { controller: null, addEventListener: vi.fn() }
+            };
+
+            expect(relayManager.isSupported()).toBe(true);
+
+            delete global.PushManager;
+            delete global.Notification;
+        });
+
+        it('should return false when serviceWorker unavailable', () => {
+            const origNav = global.navigator;
+            global.navigator = {};
+
+            expect(relayManager.isSupported()).toBe(false);
+
+            global.navigator = origNav;
+        });
+    });
+
+    // ==================== unsubscribeFromChannel() ====================
+    describe('unsubscribeFromChannel()', () => {
+        it('should remove channel from subscribed set', () => {
+            relayManager.subscribedChannels.add('stream-1');
+            relayManager.subscribedChannels.add('stream-2');
+
+            const result = relayManager.unsubscribeFromChannel('stream-1');
+
+            expect(result).toBe(true);
+            expect(relayManager.subscribedChannels.has('stream-1')).toBe(false);
+            expect(relayManager.subscribedChannels.has('stream-2')).toBe(true);
+        });
+
+        it('should return true even for non-subscribed channel', () => {
+            const result = relayManager.unsubscribeFromChannel('nonexistent');
+            expect(result).toBe(true);
+        });
+    });
+
+    // ==================== isChannelSubscribed() ====================
+    describe('isChannelSubscribed()', () => {
+        it('should return true for subscribed channel', () => {
+            relayManager.subscribedChannels.add('stream-1');
+            expect(relayManager.isChannelSubscribed('stream-1')).toBe(true);
+        });
+
+        it('should return false for non-subscribed channel', () => {
+            expect(relayManager.isChannelSubscribed('stream-999')).toBe(false);
+        });
+    });
+
+    // ==================== unsubscribeFromNativeChannel() ====================
+    describe('unsubscribeFromNativeChannel()', () => {
+        it('should remove native channel from subscribed set', () => {
+            relayManager.subscribedNativeChannels.add('native-1');
+
+            const result = relayManager.unsubscribeFromNativeChannel('native-1');
+
+            expect(result).toBe(true);
+            expect(relayManager.subscribedNativeChannels.has('native-1')).toBe(false);
+        });
+    });
+
+    // ==================== isNativeChannelSubscribed() ====================
+    describe('isNativeChannelSubscribed()', () => {
+        it('should return true for subscribed native channel', () => {
+            relayManager.subscribedNativeChannels.add('native-1');
+            expect(relayManager.isNativeChannelSubscribed('native-1')).toBe(true);
+        });
+
+        it('should return false for non-subscribed native channel', () => {
+            expect(relayManager.isNativeChannelSubscribed('native-999')).toBe(false);
+        });
+    });
+
+    // ==================== urlBase64ToUint8Array() ====================
+    describe('urlBase64ToUint8Array()', () => {
+        it('should convert base64url to Uint8Array', () => {
+            // "SGVsbG8" is "Hello" in base64url
+            const result = relayManager.urlBase64ToUint8Array('SGVsbG8');
+            expect(result).toBeInstanceOf(Uint8Array);
+            expect(result.length).toBeGreaterThan(0);
+
+            // Verify the bytes match "Hello"
+            expect(result[0]).toBe(72);  // H
+            expect(result[1]).toBe(101); // e
+            expect(result[2]).toBe(108); // l
+            expect(result[3]).toBe(108); // l
+            expect(result[4]).toBe(111); // o
+        });
+
+        it('should handle base64url characters (- and _)', () => {
+            // These chars are specific to base64url and should be replaced with + and /
+            const result = relayManager.urlBase64ToUint8Array('A-B_');
+            expect(result).toBeInstanceOf(Uint8Array);
+        });
+
+        it('should handle padding correctly', () => {
+            // "Mg" needs padding to "Mg=="
+            const result = relayManager.urlBase64ToUint8Array('Mg');
+            expect(result).toBeInstanceOf(Uint8Array);
+            expect(result[0]).toBe(50); // '2' character
+        });
+    });
+
+    // ==================== handleServiceWorkerMessage() ====================
+    describe('handleServiceWorkerMessage()', () => {
+        it('should handle NEW_MESSAGE by dispatching event', () => {
+            const listener = vi.fn();
+            const origAddEventListener = globalThis.window?.addEventListener;
+            
+            // handleServiceWorkerMessage uses window.dispatchEvent
+            // In test env, globalThis.window may not be the DOM window
+            // Just verify the method doesn't throw on valid data
+            expect(() => relayManager.handleServiceWorkerMessage({
+                type: 'NEW_MESSAGE',
+                streamId: 'owner/channel-1',
+                timestamp: 12345,
+                content: { text: 'hello' }
+            })).not.toThrow();
+        });
+
+        it('should handle NOTIFICATION_CLICKED', () => {
+            expect(() => relayManager.handleServiceWorkerMessage({ type: 'NOTIFICATION_CLICKED' })).not.toThrow();
+        });
+
+        it('should ignore null data', () => {
+            expect(() => relayManager.handleServiceWorkerMessage(null)).not.toThrow();
+        });
+
+        it('should ignore data without type', () => {
+            expect(() => relayManager.handleServiceWorkerMessage({ foo: 'bar' })).not.toThrow();
+        });
+
+        it('should ignore unknown message types', () => {
+            expect(() => relayManager.handleServiceWorkerMessage({ type: 'UNKNOWN_TYPE' })).not.toThrow();
+        });
+    });
+
+    // ==================== getStatus() ====================
+    describe('getStatus()', () => {
+        it('should return current status object', () => {
+            relayManager.initialized = true;
+            relayManager.enabled = true;
+            relayManager.pushSubscription = { endpoint: 'test' };
+            relayManager.subscribedChannels = new Set(['ch1', 'ch2']);
+            relayManager.subscribedNativeChannels = new Set(['nat1']);
+
+            const status = relayManager.getStatus();
+
+            expect(status.initialized).toBe(true);
+            expect(status.enabled).toBe(true);
+            expect(status.hasSubscription).toBe(true);
+            expect(status.subscribedChannels).toBe(2);
+            expect(status.subscribedNativeChannels).toBe(1);
+        });
+
+        it('should show false for hasSubscription when null', () => {
+            relayManager.pushSubscription = null;
+
+            const status = relayManager.getStatus();
+            expect(status.hasSubscription).toBe(false);
+        });
+    });
+
+    // ==================== getConfig() ====================
+    describe('getConfig()', () => {
+        it('should return config object', () => {
+            const config = relayManager.getConfig();
+            expect(config).toBeDefined();
+            expect(config).toHaveProperty('pushStreamId');
+            expect(config).toHaveProperty('powDifficulty');
+        });
+
+        it('should return a copy (not reference)', () => {
+            const config1 = relayManager.getConfig();
+            const config2 = relayManager.getConfig();
+            expect(config1).not.toBe(config2);
+            expect(config1).toEqual(config2);
+        });
+    });
+
+    // ==================== loadSubscribedChannels() ====================
+    describe('loadSubscribedChannels()', () => {
+        it('should load public channels from localStorage', () => {
+            const channels = ['stream-1', 'stream-2'];
+            localStorage.setItem('pombo_push_registration_channels', JSON.stringify(channels));
+
+            relayManager.loadSubscribedChannels();
+
+            expect(relayManager.subscribedChannels.has('stream-1')).toBe(true);
+            expect(relayManager.subscribedChannels.has('stream-2')).toBe(true);
+        });
+
+        it('should load native channels from localStorage', () => {
+            const nativeChannels = ['native-1'];
+            localStorage.setItem('pombo_push_registration_native_channels', JSON.stringify(nativeChannels));
+
+            relayManager.loadSubscribedChannels();
+
+            expect(relayManager.subscribedNativeChannels.has('native-1')).toBe(true);
+        });
+
+        it('should handle missing localStorage data', () => {
+            relayManager.loadSubscribedChannels();
+            expect(relayManager.subscribedChannels.size).toBe(0);
+            expect(relayManager.subscribedNativeChannels.size).toBe(0);
+        });
+
+        it('should handle corrupted localStorage data', () => {
+            localStorage.setItem('pombo_push_registration_channels', 'not json');
+
+            // Should not throw
+            expect(() => relayManager.loadSubscribedChannels()).not.toThrow();
+        });
+    });
+
+    // ==================== saveSubscribedChannels() ====================
+    describe('saveSubscribedChannels()', () => {
+        it('should save public channels to localStorage', () => {
+            relayManager.subscribedChannels.add('stream-1');
+            relayManager.subscribedChannels.add('stream-2');
+
+            relayManager.saveSubscribedChannels();
+
+            const stored = JSON.parse(localStorage.getItem('pombo_push_registration_channels'));
+            expect(stored).toContain('stream-1');
+            expect(stored).toContain('stream-2');
+        });
+
+        it('should save native channels to localStorage', () => {
+            relayManager.subscribedNativeChannels.add('native-1');
+
+            relayManager.saveSubscribedChannels();
+
+            const stored = JSON.parse(localStorage.getItem('pombo_push_registration_native_channels'));
+            expect(stored).toContain('native-1');
+        });
+    });
+
+    // ==================== startReRegistrationTimer / stopReRegistrationTimer ====================
+    describe('re-registration timer', () => {
+        it('should not start timer when not enabled', () => {
+            relayManager.enabled = false;
+            relayManager.pushSubscription = null;
+
+            relayManager.startReRegistrationTimer();
+
+            expect(relayManager.reRegistrationTimer).toBeNull();
+        });
+
+        it('should stop existing timer', () => {
+            relayManager.reRegistrationTimer = setInterval(() => {}, 100000);
+
+            relayManager.stopReRegistrationTimer();
+
+            expect(relayManager.reRegistrationTimer).toBeNull();
+        });
+
+        it('should be idempotent to stop', () => {
+            relayManager.stopReRegistrationTimer();
+            relayManager.stopReRegistrationTimer();
+            expect(relayManager.reRegistrationTimer).toBeNull();
+        });
+    });
+
+    // ==================== sendChannelWakeSignal() ====================
+    describe('sendChannelWakeSignal()', () => {
+        it('should return false when not initialized', async () => {
+            relayManager.initialized = false;
+            const result = await relayManager.sendChannelWakeSignal('stream-1');
+            expect(result).toBe(false);
+        });
+    });
+
+    // ==================== sendNativeChannelWakeSignal() ====================
+    describe('sendNativeChannelWakeSignal()', () => {
+        it('should return false when not initialized', async () => {
+            relayManager.initialized = false;
+            const result = await relayManager.sendNativeChannelWakeSignal('stream-1');
+            expect(result).toBe(false);
+        });
+    });
+
+    // ==================== subscribeToChannel() ====================
+    describe('subscribeToChannel()', () => {
+        it('should return false when not initialized', async () => {
+            relayManager.initialized = false;
+            const result = await relayManager.subscribeToChannel('stream-1');
+            expect(result).toBe(false);
+        });
+
+        it('should return false when no push subscription', async () => {
+            relayManager.initialized = true;
+            relayManager.pushSubscription = null;
+            const result = await relayManager.subscribeToChannel('stream-1');
+            expect(result).toBe(false);
+        });
+    });
+
+    // ==================== subscribeToNativeChannel() ====================
+    describe('subscribeToNativeChannel()', () => {
+        it('should return false when not initialized', async () => {
+            relayManager.initialized = false;
+            const result = await relayManager.subscribeToNativeChannel('native-1');
+            expect(result).toBe(false);
+        });
+
+        it('should return false when no push subscription', async () => {
+            relayManager.initialized = true;
+            relayManager.pushSubscription = null;
+            const result = await relayManager.subscribeToNativeChannel('native-1');
+            expect(result).toBe(false);
+        });
+    });
+
+    // ==================== unsubscribe() ====================
+    describe('unsubscribe()', () => {
+        it('should return true when no subscription exists', async () => {
+            relayManager.pushSubscription = null;
+            const result = await relayManager.unsubscribe();
+            expect(result).toBe(true);
+        });
+
+        it('should cancel subscription and clean up', async () => {
+            const mockSub = {
+                unsubscribe: vi.fn().mockResolvedValue(true)
+            };
+            relayManager.pushSubscription = mockSub;
+            relayManager.enabled = true;
+
+            const result = await relayManager.unsubscribe();
+
+            expect(result).toBe(true);
+            expect(mockSub.unsubscribe).toHaveBeenCalled();
+            expect(relayManager.pushSubscription).toBeNull();
+            expect(relayManager.enabled).toBe(false);
+        });
+
+        it('should return false on error', async () => {
+            const mockSub = {
+                unsubscribe: vi.fn().mockRejectedValue(new Error('fail'))
+            };
+            relayManager.pushSubscription = mockSub;
+
+            const result = await relayManager.unsubscribe();
+            expect(result).toBe(false);
+        });
+    });
+
+    // ==================== init() ====================
+    describe('init()', () => {
+        it('should return true if already initialized with same address', async () => {
+            relayManager.initialized = true;
+            relayManager.walletAddress = '0xmyaddress';
+
+            const result = await relayManager.init('0xMyAddress');
+            expect(result).toBe(true);
+        });
+
+        it('should refresh subscriptions on address change', async () => {
+            relayManager.initialized = true;
+            relayManager.walletAddress = '0xoldaddress';
+            relayManager.subscribedChannels.add('old-channel');
+
+            const result = await relayManager.init('0xNewAddress');
+
+            expect(result).toBe(true);
+            expect(relayManager.walletAddress).toBe('0xnewaddress');
+            expect(relayManager.subscribedChannels.size).toBe(0);
         });
     });
 });

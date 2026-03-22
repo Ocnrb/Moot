@@ -1,0 +1,1615 @@
+/**
+ * Streamr Controller - Core Methods Tests
+ * Tests for publish, subscribe, permissions, storage, history, and stream management
+ * Target: raise streamr.js coverage from ~7% to ~50%+
+ */
+
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
+// Mock dependencies before importing
+vi.mock('../../src/js/auth.js', () => ({
+    authManager: {
+        getSigner: vi.fn()
+    }
+}));
+
+vi.mock('../../src/js/crypto.js', () => ({
+    cryptoManager: {
+        encryptJSON: vi.fn(async (data) => JSON.stringify(data)),
+        decryptJSON: vi.fn(async (str) => JSON.parse(str)),
+        generateRandomHex: vi.fn(() => 'abcd1234')
+    }
+}));
+
+vi.mock('../../src/js/utils/retry.js', () => ({
+    executeWithRetry: vi.fn(async (name, fn) => fn()),
+    executeWithRetryAndVerify: vi.fn(async (name, fn, checkFn) => fn())
+}));
+
+vi.mock('../../src/js/utils/rpcErrors.js', () => ({
+    isRpcError: vi.fn(() => false),
+    createPermissionResult: vi.fn((has, rpc, msg) => ({ hasPermission: has, rpcError: rpc, errorMessage: msg || null }))
+}));
+
+import { streamrController, STREAM_CONFIG, isMessageStream, isEphemeralStream } from '../../src/js/streamr.js';
+import { cryptoManager } from '../../src/js/crypto.js';
+import { isRpcError, createPermissionResult } from '../../src/js/utils/rpcErrors.js';
+import { executeWithRetry, executeWithRetryAndVerify } from '../../src/js/utils/retry.js';
+
+// ==================== Test helpers ====================
+function createMockClient(overrides = {}) {
+    return {
+        publish: vi.fn().mockResolvedValue(undefined),
+        subscribe: vi.fn().mockResolvedValue({ unsubscribe: vi.fn().mockResolvedValue(undefined) }),
+        getStream: vi.fn().mockResolvedValue(createMockStream()),
+        getAddress: vi.fn().mockResolvedValue('0xmyaddress'),
+        createStream: vi.fn().mockResolvedValue({ id: '0xowner/abcd1234-1' }),
+        deleteStream: vi.fn().mockResolvedValue(undefined),
+        setPermissions: vi.fn().mockResolvedValue(undefined),
+        destroy: vi.fn().mockResolvedValue(undefined),
+        unsubscribe: vi.fn().mockResolvedValue(undefined),
+        resend: vi.fn().mockResolvedValue(createMockAsyncIterator([])),
+        updateEncryptionKey: vi.fn().mockResolvedValue(undefined),
+        addEncryptionKey: vi.fn().mockResolvedValue(undefined),
+        ...overrides
+    };
+}
+
+function createMockStream(overrides = {}) {
+    return {
+        id: '0xowner/stream-1',
+        getDescription: vi.fn().mockResolvedValue(JSON.stringify({ pk: 'test-pk' })),
+        setDescription: vi.fn().mockResolvedValue(undefined),
+        getPermissions: vi.fn().mockReturnValue([]),
+        getStorageNodes: vi.fn().mockReturnValue([]),
+        getStorageDayCount: vi.fn().mockResolvedValue(180),
+        setStorageDayCount: vi.fn().mockResolvedValue(undefined),
+        addToStorageNode: vi.fn().mockResolvedValue(undefined),
+        hasPermission: vi.fn().mockResolvedValue(true),
+        ...overrides
+    };
+}
+
+function createMockAsyncIterator(messages) {
+    let index = 0;
+    return {
+        [Symbol.asyncIterator]() {
+            return {
+                next: async () => {
+                    if (index < messages.length) {
+                        return { done: false, value: messages[index++] };
+                    }
+                    return { done: true };
+                }
+            };
+        }
+    };
+}
+
+function createMockMessage(content, publisherId = '0xsender', timestamp = Date.now()) {
+    return {
+        content,
+        publisherId,
+        timestamp,
+        getPublisherId: vi.fn(() => publisherId),
+        getPartition: vi.fn(() => 0)
+    };
+}
+
+// ==================== Setup ====================
+describe('StreamrController Core', () => {
+    let mockClient;
+    let mockStream;
+
+    beforeEach(() => {
+        mockStream = createMockStream();
+        mockClient = createMockClient({ getStream: vi.fn().mockResolvedValue(mockStream) });
+        
+        streamrController.client = mockClient;
+        streamrController.address = '0xmyaddress';
+        streamrController.subscriptions = new Map();
+        streamrController.channels = new Map();
+        streamrController._dmKeyAddedForPublisher = new Set();
+        streamrController._dmPublishKeySet = new Set();
+
+        // Reset global mocks
+        window.StreamPermission = {
+            PUBLISH: 'PUBLISH',
+            SUBSCRIBE: 'SUBSCRIBE',
+            GRANT: 'GRANT',
+            EDIT: 'EDIT',
+            DELETE: 'DELETE'
+        };
+        window.EncryptionKey = null;
+        window.STREAMR_STORAGE_NODE_ADDRESS = null;
+    });
+
+    afterEach(() => {
+        streamrController.client = null;
+        streamrController.address = null;
+        streamrController.subscriptions.clear();
+        streamrController._dmKeyAddedForPublisher.clear();
+        streamrController._dmPublishKeySet.clear();
+        vi.restoreAllMocks();
+    });
+
+    // ==================== init() ====================
+    describe('init()', () => {
+        beforeEach(() => {
+            streamrController.client = null;
+            streamrController.address = null;
+        });
+
+        it('should throw if StreamrClient not on window', async () => {
+            delete window.StreamrClient;
+            await expect(streamrController.init({ privateKey: '0xabc' }))
+                .rejects.toThrow('StreamrClient not found');
+        });
+
+        it('should throw if signer has no privateKey', async () => {
+            window.StreamrClient = vi.fn(() => mockClient);
+            await expect(streamrController.init({}))
+                .rejects.toThrow('Signer must have a privateKey');
+        });
+
+        it('should create a StreamrClient with signer', async () => {
+            window.StreamrClient = function() { Object.assign(this, mockClient); };
+            const result = await streamrController.init({ privateKey: '0xabc' });
+            expect(result).toBe(true);
+            expect(streamrController.client).toBeDefined();
+        });
+
+        it('should set address from client.getAddress()', async () => {
+            window.StreamrClient = function() { Object.assign(this, mockClient); };
+            await streamrController.init({ privateKey: '0xabc' });
+            expect(streamrController.address).toBe('0xmyaddress');
+        });
+
+        it('should use STREAMR_STORAGE_NODE_ADDRESS if available', async () => {
+            window.StreamrClient = function() { Object.assign(this, mockClient); };
+            window.STREAMR_STORAGE_NODE_ADDRESS = '0xstorage';
+            await streamrController.init({ privateKey: '0xabc' });
+            expect(STREAM_CONFIG.NODE_ADDRESS).toBe('0xstorage');
+        });
+
+        it('should fall back to LOGSTORE_NODE if no STREAMR_STORAGE_NODE_ADDRESS', async () => {
+            window.StreamrClient = function() { Object.assign(this, mockClient); };
+            window.STREAMR_STORAGE_NODE_ADDRESS = null;
+            await streamrController.init({ privateKey: '0xabc' });
+            expect(STREAM_CONFIG.NODE_ADDRESS).toBe(STREAM_CONFIG.LOGSTORE_NODE);
+        });
+    });
+
+    // ==================== warmupNetwork() ====================
+    describe('warmupNetwork()', () => {
+        it('should do nothing if client is null', async () => {
+            streamrController.client = null;
+            await streamrController.warmupNetwork();
+            // No error thrown
+        });
+
+        it('should subscribe and unsubscribe to warm up', async () => {
+            const mockSub = { unsubscribe: vi.fn().mockResolvedValue(undefined) };
+            mockClient.subscribe.mockResolvedValue(mockSub);
+            await streamrController.warmupNetwork('test/stream-1');
+            expect(mockClient.subscribe).toHaveBeenCalledWith('test/stream-1', expect.any(Function));
+            expect(mockSub.unsubscribe).toHaveBeenCalled();
+        });
+
+        it('should use default push stream if no streamId provided', async () => {
+            const mockSub = { unsubscribe: vi.fn().mockResolvedValue(undefined) };
+            mockClient.subscribe.mockResolvedValue(mockSub);
+            await streamrController.warmupNetwork();
+            expect(mockClient.subscribe).toHaveBeenCalledWith(
+                expect.stringContaining('/push'),
+                expect.any(Function)
+            );
+        });
+
+        it('should not throw if subscribe fails', async () => {
+            mockClient.subscribe.mockRejectedValue(new Error('network'));
+            await expect(streamrController.warmupNetwork()).resolves.toBeUndefined();
+        });
+    });
+
+    // ==================== publish() ====================
+    describe('publish()', () => {
+        it('should throw if client is null', async () => {
+            streamrController.client = null;
+            await expect(streamrController.publish('stream-1', 0, { text: 'hi' }))
+                .rejects.toThrow('Streamr client not initialized');
+        });
+
+        it('should call client.publish with streamId and partition', async () => {
+            await streamrController.publish('stream-1', 0, { text: 'hi' });
+            expect(mockClient.publish).toHaveBeenCalledWith(
+                { streamId: 'stream-1', partition: 0 },
+                { text: 'hi' }
+            );
+        });
+
+        it('should encrypt data when password provided', async () => {
+            await streamrController.publish('stream-1', 0, { text: 'hi' }, 'pass123');
+            expect(cryptoManager.encryptJSON).toHaveBeenCalledWith({ text: 'hi' }, 'pass123');
+            expect(mockClient.publish).toHaveBeenCalled();
+        });
+
+        it('should not encrypt when no password', async () => {
+            await streamrController.publish('stream-1', 0, { text: 'hi' });
+            expect(cryptoManager.encryptJSON).not.toHaveBeenCalled();
+        });
+
+        it('should throw on publish failure', async () => {
+            mockClient.publish.mockRejectedValue(new Error('publish failed'));
+            await expect(streamrController.publish('stream-1', 0, {}))
+                .rejects.toThrow('publish failed');
+        });
+    });
+
+    // ==================== publishMessage() ====================
+    describe('publishMessage()', () => {
+        it('should strip verified, pending, _dmSent fields', async () => {
+            const message = {
+                id: '1', text: 'hello', sender: '0x1',
+                verified: true, pending: true, _dmSent: true
+            };
+            await streamrController.publishMessage('stream-1', message);
+            const publishedData = mockClient.publish.mock.calls[0][1];
+            expect(publishedData.id).toBe('1');
+            expect(publishedData.text).toBe('hello');
+            expect(publishedData).not.toHaveProperty('verified');
+            expect(publishedData).not.toHaveProperty('pending');
+            expect(publishedData).not.toHaveProperty('_dmSent');
+        });
+
+        it('should publish to MESSAGE_STREAM.MESSAGES partition', async () => {
+            await streamrController.publishMessage('stream-1', { id: '1' });
+            expect(mockClient.publish).toHaveBeenCalledWith(
+                { streamId: 'stream-1', partition: STREAM_CONFIG.MESSAGE_STREAM.MESSAGES },
+                expect.any(Object)
+            );
+        });
+
+        it('should pass password to publish()', async () => {
+            await streamrController.publishMessage('stream-1', { id: '1' }, 'pass');
+            expect(cryptoManager.encryptJSON).toHaveBeenCalled();
+        });
+    });
+
+    // ==================== publishControl() ====================
+    describe('publishControl()', () => {
+        it('should publish to EPHEMERAL_STREAM.CONTROL partition', async () => {
+            const control = { type: 'typing', userId: '0x1' };
+            await streamrController.publishControl('stream-2', control);
+            expect(mockClient.publish).toHaveBeenCalledWith(
+                { streamId: 'stream-2', partition: STREAM_CONFIG.EPHEMERAL_STREAM.CONTROL },
+                control
+            );
+        });
+    });
+
+    // ==================== publishReaction() ====================
+    describe('publishReaction()', () => {
+        it('should publish to MESSAGE_STREAM.MESSAGES partition', async () => {
+            const reaction = { type: 'reaction', messageId: 'm1', emoji: '👍' };
+            await streamrController.publishReaction('stream-1', reaction);
+            expect(mockClient.publish).toHaveBeenCalledWith(
+                { streamId: 'stream-1', partition: STREAM_CONFIG.MESSAGE_STREAM.MESSAGES },
+                reaction
+            );
+        });
+    });
+
+    // ==================== publishMedia() ====================
+    describe('publishMedia()', () => {
+        it('should publish to EPHEMERAL_STREAM.MEDIA partition', async () => {
+            const media = { type: 'chunk', data: 'base64...' };
+            await streamrController.publishMedia('stream-2', media);
+            expect(mockClient.publish).toHaveBeenCalledWith(
+                { streamId: 'stream-2', partition: STREAM_CONFIG.EPHEMERAL_STREAM.MEDIA },
+                media
+            );
+        });
+    });
+
+    // ==================== subscribeToPartition() ====================
+    describe('subscribeToPartition()', () => {
+        it('should throw if client is null', async () => {
+            streamrController.client = null;
+            await expect(streamrController.subscribeToPartition('stream', 0, vi.fn()))
+                .rejects.toThrow('Streamr client not initialized');
+        });
+
+        it('should call client.subscribe with streamId and partition', async () => {
+            const handler = vi.fn();
+            await streamrController.subscribeToPartition('stream-1', 0, handler);
+            expect(mockClient.subscribe).toHaveBeenCalledWith(
+                { streamId: 'stream-1', partition: 0 },
+                expect.any(Function)
+            );
+        });
+
+        it('should store subscription in subscriptions map', async () => {
+            await streamrController.subscribeToPartition('stream-1', 0, vi.fn());
+            const partitionSubs = streamrController.subscriptions.get('stream-1');
+            expect(partitionSubs).toBeDefined();
+            expect(partitionSubs[0]).toBeDefined();
+        });
+
+        it('should return existing subscription if already subscribed', async () => {
+            const existingSub = { unsubscribe: vi.fn() };
+            streamrController.subscriptions.set('stream-1', { 0: existingSub });
+            const result = await streamrController.subscribeToPartition('stream-1', 0, vi.fn());
+            expect(result).toBe(existingSub);
+            expect(mockClient.subscribe).not.toHaveBeenCalled();
+        });
+
+        it('should decrypt messages when password provided', async () => {
+            let capturedHandler;
+            mockClient.subscribe.mockImplementation(async (opts, handler) => {
+                capturedHandler = handler;
+                return { unsubscribe: vi.fn() };
+            });
+
+            const handler = vi.fn();
+            await streamrController.subscribeToPartition('stream-1', 0, handler, 'pass');
+            
+            // Simulate receiving encrypted message
+            await capturedHandler('encrypted-string', { getPublisherId: () => '0xsender' });
+            expect(cryptoManager.decryptJSON).toHaveBeenCalledWith('encrypted-string', 'pass');
+        });
+
+        it('should inject senderId from StreamMessage', async () => {
+            let capturedHandler;
+            mockClient.subscribe.mockImplementation(async (opts, handler) => {
+                capturedHandler = handler;
+                return { unsubscribe: vi.fn() };
+            });
+
+            const handler = vi.fn();
+            await streamrController.subscribeToPartition('stream-1', 0, handler);
+            
+            const data = { text: 'hello' };
+            await capturedHandler(data, { getPublisherId: () => '0xpublisher' });
+            expect(handler).toHaveBeenCalledWith(expect.objectContaining({ senderId: '0xpublisher' }));
+        });
+    });
+
+    // ==================== subscribeSimple() ====================
+    describe('subscribeSimple()', () => {
+        it('should subscribe to partition 0', async () => {
+            const handler = vi.fn();
+            await streamrController.subscribeSimple('stream-1', handler);
+            expect(mockClient.subscribe).toHaveBeenCalledWith(
+                { streamId: 'stream-1', partition: 0 },
+                expect.any(Function)
+            );
+        });
+    });
+
+    // ==================== unsubscribe() ====================
+    describe('unsubscribe()', () => {
+        it('should unsubscribe all partitions and remove from map', async () => {
+            const sub0 = { unsubscribe: vi.fn().mockResolvedValue(undefined) };
+            const sub1 = { unsubscribe: vi.fn().mockResolvedValue(undefined) };
+            streamrController.subscriptions.set('stream-1', { 0: sub0, 1: sub1 });
+
+            await streamrController.unsubscribe('stream-1');
+
+            expect(sub0.unsubscribe).toHaveBeenCalled();
+            expect(sub1.unsubscribe).toHaveBeenCalled();
+            expect(streamrController.subscriptions.has('stream-1')).toBe(false);
+        });
+
+        it('should do nothing for unknown streamId', async () => {
+            await streamrController.unsubscribe('unknown-stream');
+            // No error thrown
+        });
+    });
+
+    // ==================== unsubscribeFromPartition() ====================
+    describe('unsubscribeFromPartition()', () => {
+        it('should unsubscribe single partition', async () => {
+            const sub0 = { unsubscribe: vi.fn().mockResolvedValue(undefined) };
+            const sub1 = { unsubscribe: vi.fn().mockResolvedValue(undefined) };
+            streamrController.subscriptions.set('stream-1', { 0: sub0, 1: sub1 });
+
+            await streamrController.unsubscribeFromPartition('stream-1', 0);
+
+            expect(sub0.unsubscribe).toHaveBeenCalled();
+            expect(sub1.unsubscribe).not.toHaveBeenCalled();
+            expect(streamrController.subscriptions.get('stream-1')[1]).toBe(sub1);
+        });
+
+        it('should clean up map if no partitions remain', async () => {
+            const sub0 = { unsubscribe: vi.fn().mockResolvedValue(undefined) };
+            streamrController.subscriptions.set('stream-1', { 0: sub0 });
+
+            await streamrController.unsubscribeFromPartition('stream-1', 0);
+
+            expect(streamrController.subscriptions.has('stream-1')).toBe(false);
+        });
+
+        it('should do nothing for non-existent partition', async () => {
+            await streamrController.unsubscribeFromPartition('stream-1', 5);
+            // No error thrown
+        });
+    });
+
+    // ==================== isSubscribedToPartition() ====================
+    describe('isSubscribedToPartition()', () => {
+        it('should return true when subscribed', () => {
+            streamrController.subscriptions.set('stream-1', { 0: {} });
+            expect(streamrController.isSubscribedToPartition('stream-1', 0)).toBe(true);
+        });
+
+        it('should return false when not subscribed', () => {
+            expect(streamrController.isSubscribedToPartition('stream-1', 0)).toBeFalsy();
+        });
+
+        it('should return false for wrong partition', () => {
+            streamrController.subscriptions.set('stream-1', { 0: {} });
+            expect(streamrController.isSubscribedToPartition('stream-1', 1)).toBeFalsy();
+        });
+    });
+
+    // ==================== ensureMediaSubscription() ====================
+    describe('ensureMediaSubscription()', () => {
+        it('should subscribe to media partition if not subscribed', async () => {
+            const handler = vi.fn();
+            await streamrController.ensureMediaSubscription('stream-2', handler);
+            expect(mockClient.subscribe).toHaveBeenCalledWith(
+                { streamId: 'stream-2', partition: STREAM_CONFIG.EPHEMERAL_STREAM.MEDIA },
+                expect.any(Function)
+            );
+        });
+
+        it('should skip if already subscribed to media partition', async () => {
+            streamrController.subscriptions.set('stream-2', {
+                [STREAM_CONFIG.EPHEMERAL_STREAM.MEDIA]: {}
+            });
+            await streamrController.ensureMediaSubscription('stream-2', vi.fn());
+            expect(mockClient.subscribe).not.toHaveBeenCalled();
+        });
+    });
+
+    // ==================== grantPublicPermissions() ====================
+    describe('grantPublicPermissions()', () => {
+        it('should set public subscribe and publish', async () => {
+            await streamrController.grantPublicPermissions('stream-1');
+            expect(mockClient.setPermissions).toHaveBeenCalledWith({
+                streamId: 'stream-1',
+                assignments: [{ public: true, permissions: ['subscribe', 'publish'] }]
+            });
+        });
+
+        it('should accept stream object with id property', async () => {
+            await streamrController.grantPublicPermissions({ id: 'stream-1' });
+            expect(mockClient.setPermissions).toHaveBeenCalledWith(
+                expect.objectContaining({ streamId: 'stream-1' })
+            );
+        });
+    });
+
+    // ==================== grantPublicReadOnlyPermissions() ====================
+    describe('grantPublicReadOnlyPermissions()', () => {
+        it('should set public subscribe only', async () => {
+            await streamrController.grantPublicReadOnlyPermissions('stream-1');
+            expect(mockClient.setPermissions).toHaveBeenCalledWith({
+                streamId: 'stream-1',
+                assignments: [{ public: true, permissions: ['subscribe'] }]
+            });
+        });
+    });
+
+    // ==================== grantManyToOnePermissions() ====================
+    describe('grantManyToOnePermissions()', () => {
+        it('should set public publish only', async () => {
+            await streamrController.grantManyToOnePermissions('dm-stream');
+            expect(mockClient.setPermissions).toHaveBeenCalledWith({
+                streamId: 'dm-stream',
+                assignments: [{ public: true, permissions: ['publish'] }]
+            });
+        });
+    });
+
+    // ==================== setStreamPermissions() ====================
+    describe('setStreamPermissions()', () => {
+        it('should throw if client is null', async () => {
+            streamrController.client = null;
+            await expect(streamrController.setStreamPermissions('s'))
+                .rejects.toThrow('Streamr client not initialized');
+        });
+
+        it('should set public permissions when public=true', async () => {
+            await streamrController.setStreamPermissions('s', { public: true });
+            expect(mockClient.setPermissions).toHaveBeenCalledWith({
+                streamId: 's',
+                assignments: [{ public: true, permissions: ['subscribe', 'publish'] }]
+            });
+        });
+
+        it('should set member permissions for each address (lowercase)', async () => {
+            await streamrController.setStreamPermissions('s', {
+                members: ['0xABC', '0xDEF']
+            });
+            const call = mockClient.setPermissions.mock.calls[0][0];
+            expect(call.assignments).toHaveLength(2);
+            expect(call.assignments[0].userId).toBe('0xabc');
+            expect(call.assignments[1].userId).toBe('0xdef');
+        });
+
+        it('should do nothing when no assignments', async () => {
+            await streamrController.setStreamPermissions('s', {});
+            expect(mockClient.setPermissions).not.toHaveBeenCalled();
+        });
+
+        it('should combine public + member permissions', async () => {
+            await streamrController.setStreamPermissions('s', {
+                public: true,
+                members: ['0xABC']
+            });
+            const call = mockClient.setPermissions.mock.calls[0][0];
+            expect(call.assignments).toHaveLength(2);
+            expect(call.assignments[0].public).toBe(true);
+            expect(call.assignments[1].userId).toBe('0xabc');
+        });
+    });
+
+    // ==================== grantPermissionsToAddresses() ====================
+    describe('grantPermissionsToAddresses()', () => {
+        it('should throw if client is null', async () => {
+            streamrController.client = null;
+            await expect(streamrController.grantPermissionsToAddresses('s', ['0x1']))
+                .rejects.toThrow('Streamr client not initialized');
+        });
+
+        it('should do nothing for empty addresses array', async () => {
+            await streamrController.grantPermissionsToAddresses('s', []);
+            expect(mockClient.setPermissions).not.toHaveBeenCalled();
+        });
+
+        it('should grant subscribe+publish to each address', async () => {
+            await streamrController.grantPermissionsToAddresses('s', ['0xABC', '0xDEF']);
+            const call = mockClient.setPermissions.mock.calls[0][0];
+            expect(call.assignments).toHaveLength(2);
+            expect(call.assignments[0]).toEqual({
+                userId: '0xabc',
+                permissions: ['subscribe', 'publish']
+            });
+        });
+    });
+
+    // ==================== revokePermissionsFromAddresses() ====================
+    describe('revokePermissionsFromAddresses()', () => {
+        it('should throw if client is null', async () => {
+            streamrController.client = null;
+            await expect(streamrController.revokePermissionsFromAddresses('s', ['0x1']))
+                .rejects.toThrow('Streamr client not initialized');
+        });
+
+        it('should do nothing for empty addresses', async () => {
+            await streamrController.revokePermissionsFromAddresses('s', []);
+            expect(mockClient.setPermissions).not.toHaveBeenCalled();
+        });
+
+        it('should revoke with empty permissions array', async () => {
+            await streamrController.revokePermissionsFromAddresses('s', ['0xABC']);
+            const call = mockClient.setPermissions.mock.calls[0][0];
+            expect(call.assignments[0]).toEqual({
+                userId: '0xabc',
+                permissions: []
+            });
+        });
+    });
+
+    // ==================== updatePermissions() ====================
+    describe('updatePermissions()', () => {
+        it('should throw if client is null', async () => {
+            streamrController.client = null;
+            await expect(streamrController.updatePermissions('s', '0x1234567890123456789012345678901234567890', { canGrant: true }))
+                .rejects.toThrow('Streamr client not initialized');
+        });
+
+        it('should throw for invalid address', async () => {
+            await expect(streamrController.updatePermissions('s', 'invalid', { canGrant: true }))
+                .rejects.toThrow('Invalid Ethereum address');
+        });
+
+        it('should grant subscribe+publish+grant when canGrant=true', async () => {
+            await streamrController.updatePermissions('s', '0x1234567890123456789012345678901234567890', { canGrant: true });
+            const call = mockClient.setPermissions.mock.calls[0][0];
+            expect(call.assignments[0].permissions).toEqual(['subscribe', 'publish', 'grant']);
+        });
+
+        it('should grant only subscribe+publish when canGrant=false', async () => {
+            await streamrController.updatePermissions('s', '0x1234567890123456789012345678901234567890', { canGrant: false });
+            const call = mockClient.setPermissions.mock.calls[0][0];
+            expect(call.assignments[0].permissions).toEqual(['subscribe', 'publish']);
+        });
+
+        it('should normalize address to lowercase', async () => {
+            await streamrController.updatePermissions('s', '0xABCDEF1234567890123456789012345678901234', { canGrant: false });
+            const call = mockClient.setPermissions.mock.calls[0][0];
+            expect(call.assignments[0].userId).toBe('0xabcdef1234567890123456789012345678901234');
+        });
+    });
+
+    // ==================== getStreamPermissions() ====================
+    describe('getStreamPermissions()', () => {
+        it('should throw if client is null', async () => {
+            streamrController.client = null;
+            await expect(streamrController.getStreamPermissions('s'))
+                .rejects.toThrow('Streamr client not initialized');
+        });
+
+        it('should return array result from getPermissions()', async () => {
+            mockStream.getPermissions.mockReturnValue([{ userId: '0x1', permissions: ['subscribe'] }]);
+            const result = await streamrController.getStreamPermissions('s');
+            expect(result).toEqual([{ userId: '0x1', permissions: ['subscribe'] }]);
+        });
+
+        it('should handle async iterator from getPermissions()', async () => {
+            const perms = [{ userId: '0x1' }, { userId: '0x2' }];
+            let idx = 0;
+            mockStream.getPermissions.mockReturnValue({
+                [Symbol.asyncIterator]() {
+                    return {
+                        next: async () => {
+                            if (idx < perms.length) return { done: false, value: perms[idx++] };
+                            return { done: true };
+                        }
+                    };
+                }
+            });
+            const result = await streamrController.getStreamPermissions('s');
+            expect(result).toEqual(perms);
+        });
+
+        it('should handle promise result from getPermissions()', async () => {
+            const perms = [{ userId: '0x1' }];
+            mockStream.getPermissions.mockReturnValue(Promise.resolve(perms));
+            const result = await streamrController.getStreamPermissions('s');
+            expect(result).toEqual(perms);
+        });
+
+        it('should throw on error', async () => {
+            mockClient.getStream.mockRejectedValue(new Error('not found'));
+            await expect(streamrController.getStreamPermissions('s'))
+                .rejects.toThrow('not found');
+        });
+    });
+
+    // ==================== hasDeletePermission() ====================
+    describe('hasDeletePermission()', () => {
+        it('should return false if client is null', async () => {
+            streamrController.client = null;
+            expect(await streamrController.hasDeletePermission('s')).toBe(false);
+        });
+
+        it('should return true when has DELETE permission', async () => {
+            mockStream.hasPermission.mockResolvedValue(true);
+            expect(await streamrController.hasDeletePermission('s')).toBe(true);
+        });
+
+        it('should return false when lacks DELETE permission', async () => {
+            mockStream.hasPermission.mockResolvedValue(false);
+            expect(await streamrController.hasDeletePermission('s')).toBe(false);
+        });
+
+        it('should fall back to streamId check when StreamPermission not available', async () => {
+            window.StreamPermission = null;
+            mockClient.getAddress.mockResolvedValue('0xowner');
+            expect(await streamrController.hasDeletePermission('0xowner/stream-1')).toBe(true);
+        });
+
+        it('should return false on error', async () => {
+            mockClient.getStream.mockRejectedValue(new Error('fail'));
+            expect(await streamrController.hasDeletePermission('s')).toBe(false);
+        });
+    });
+
+    // ==================== hasPublishPermission() ====================
+    describe('hasPublishPermission()', () => {
+        it('should return false result if client is null', async () => {
+            streamrController.client = null;
+            const result = await streamrController.hasPublishPermission('s');
+            expect(result.hasPermission).toBe(false);
+        });
+
+        it('should return true when has PUBLISH permission', async () => {
+            mockStream.hasPermission.mockResolvedValue(true);
+            const result = await streamrController.hasPublishPermission('s');
+            expect(createPermissionResult).toHaveBeenCalledWith(true, false);
+        });
+
+        it('should return false when lacks PUBLISH permission', async () => {
+            mockStream.hasPermission.mockResolvedValue(false);
+            await streamrController.hasPublishPermission('s');
+            expect(createPermissionResult).toHaveBeenCalledWith(false, false);
+        });
+
+        it('should return rpcError result on RPC error', async () => {
+            isRpcError.mockReturnValue(true);
+            mockStream.hasPermission.mockRejectedValue(new Error('CALL_EXCEPTION'));
+            await streamrController.hasPublishPermission('s');
+            expect(createPermissionResult).toHaveBeenCalledWith(null, true, 'CALL_EXCEPTION');
+        });
+
+        it('should return false when StreamPermission not available', async () => {
+            window.StreamPermission = null;
+            await streamrController.hasPublishPermission('s');
+            expect(createPermissionResult).toHaveBeenCalledWith(false, false);
+        });
+    });
+
+    // ==================== hasSubscribePermission() ====================
+    describe('hasSubscribePermission()', () => {
+        it('should return false if client is null', async () => {
+            streamrController.client = null;
+            expect(await streamrController.hasSubscribePermission('s')).toBe(false);
+        });
+
+        it('should return true when has SUBSCRIBE permission', async () => {
+            mockStream.hasPermission.mockResolvedValue(true);
+            expect(await streamrController.hasSubscribePermission('s')).toBe(true);
+        });
+
+        it('should return false on error', async () => {
+            mockStream.hasPermission.mockRejectedValue(new Error('fail'));
+            expect(await streamrController.hasSubscribePermission('s')).toBe(false);
+        });
+
+        it('should return false when StreamPermission not available', async () => {
+            window.StreamPermission = null;
+            expect(await streamrController.hasSubscribePermission('s')).toBe(false);
+        });
+    });
+
+    // ==================== checkPermissions() ====================
+    describe('checkPermissions()', () => {
+        it('should return all false if client is null', async () => {
+            streamrController.client = null;
+            const result = await streamrController.checkPermissions('s');
+            expect(result).toEqual({
+                canPublish: false, canSubscribe: false,
+                canGrant: false, canEdit: false, canDelete: false, isOwner: false
+            });
+        });
+
+        it('should return all permission results from hasPermission', async () => {
+            mockStream.hasPermission.mockResolvedValue(true);
+            const result = await streamrController.checkPermissions('s');
+            expect(result.canPublish).toBe(true);
+            expect(result.canSubscribe).toBe(true);
+            expect(result.canGrant).toBe(true);
+            expect(result.canEdit).toBe(true);
+            expect(result.canDelete).toBe(true);
+            expect(result.isOwner).toBe(true);
+        });
+
+        it('should set isOwner true only when canGrant+canEdit+canDelete', async () => {
+            let callCount = 0;
+            mockStream.hasPermission.mockImplementation(async ({ permission }) => {
+                // PUBLISH=true, SUBSCRIBE=true, GRANT=false, EDIT=true, DELETE=true
+                callCount++;
+                if (permission === 'GRANT') return false;
+                return true;
+            });
+            const result = await streamrController.checkPermissions('s');
+            expect(result.isOwner).toBe(false);
+        });
+
+        it('should return all false on error', async () => {
+            mockClient.getStream.mockRejectedValue(new Error('fail'));
+            const result = await streamrController.checkPermissions('s');
+            expect(result.isOwner).toBe(false);
+            expect(result.canPublish).toBe(false);
+        });
+
+        it('should return all false when StreamPermission not available', async () => {
+            window.StreamPermission = null;
+            const result = await streamrController.checkPermissions('s');
+            expect(result.isOwner).toBe(false);
+        });
+    });
+
+    // ==================== getStreamStorageInfo() ====================
+    describe('getStreamStorageInfo()', () => {
+        it('should return disabled if client is null', async () => {
+            streamrController.client = null;
+            const result = await streamrController.getStreamStorageInfo('s');
+            expect(result).toEqual({ enabled: false, nodes: [], storageDays: null });
+        });
+
+        it('should return enabled with nodes when storage nodes exist', async () => {
+            mockStream.getStorageNodes.mockReturnValue(['0xnode1']);
+            const result = await streamrController.getStreamStorageInfo('s');
+            expect(result.enabled).toBe(true);
+            expect(result.nodes).toEqual(['0xnode1']);
+            expect(result.storageDays).toBe(180);
+        });
+
+        it('should handle async iterable storage nodes', async () => {
+            let idx = 0;
+            const nodes = ['0xnode1', '0xnode2'];
+            mockStream.getStorageNodes.mockReturnValue({
+                [Symbol.asyncIterator]() {
+                    return {
+                        next: async () => {
+                            if (idx < nodes.length) return { done: false, value: nodes[idx++] };
+                            return { done: true };
+                        }
+                    };
+                }
+            });
+            const result = await streamrController.getStreamStorageInfo('s');
+            expect(result.enabled).toBe(true);
+            expect(result.nodes).toEqual(['0xnode1', '0xnode2']);
+        });
+
+        it('should handle promise storage nodes', async () => {
+            mockStream.getStorageNodes.mockReturnValue(Promise.resolve(['0xnode1']));
+            const result = await streamrController.getStreamStorageInfo('s');
+            expect(result.enabled).toBe(true);
+        });
+
+        it('should return disabled when no nodes', async () => {
+            mockStream.getStorageNodes.mockReturnValue([]);
+            const result = await streamrController.getStreamStorageInfo('s');
+            expect(result.enabled).toBe(false);
+            expect(result.storageDays).toBeNull();
+        });
+
+        it('should return disabled on error', async () => {
+            mockClient.getStream.mockRejectedValue(new Error('fail'));
+            const result = await streamrController.getStreamStorageInfo('s');
+            expect(result.enabled).toBe(false);
+        });
+    });
+
+    // ==================== enableStorage() ====================
+    describe('enableStorage()', () => {
+        it('should throw if client is null', async () => {
+            streamrController.client = null;
+            await expect(streamrController.enableStorage('stream-1'))
+                .rejects.toThrow('Client not initialized');
+        });
+
+        it('should reject non-message streams', async () => {
+            const result = await streamrController.enableStorage('stream-2');
+            expect(result).toEqual({ success: false, provider: null, storageDays: null });
+        });
+
+        it('should add to storage node for message stream', async () => {
+            await streamrController.enableStorage('stream-1');
+            expect(mockStream.addToStorageNode).toHaveBeenCalled();
+        });
+
+        it('should set storage days for streamr provider', async () => {
+            STREAM_CONFIG.NODE_ADDRESS = '0xstorage';
+            await streamrController.enableStorage('stream-1', { storageProvider: 'streamr' });
+            expect(mockStream.setStorageDayCount).toHaveBeenCalled();
+        });
+
+        it('should return success result', async () => {
+            const result = await streamrController.enableStorage('stream-1');
+            expect(result.success).toBe(true);
+        });
+
+        it('should return failure on error', async () => {
+            executeWithRetry.mockRejectedValueOnce(new Error('fail'));
+            const result = await streamrController.enableStorage('stream-1');
+            expect(result.success).toBe(false);
+        });
+    });
+
+    // ==================== setStorageDays() ====================
+    describe('setStorageDays()', () => {
+        it('should throw if client is null', async () => {
+            streamrController.client = null;
+            await expect(streamrController.setStorageDays('s', 90)).rejects.toThrow();
+        });
+
+        it('should call stream.setStorageDayCount', async () => {
+            const result = await streamrController.setStorageDays('s', 90);
+            expect(mockStream.setStorageDayCount).toHaveBeenCalledWith(90);
+            expect(result).toBe(true);
+        });
+
+        it('should return false on error', async () => {
+            mockStream.setStorageDayCount.mockRejectedValue(new Error('fail'));
+            const result = await streamrController.setStorageDays('s', 90);
+            expect(result).toBe(false);
+        });
+    });
+
+    // ==================== getStorageDays() ====================
+    describe('getStorageDays()', () => {
+        it('should throw if client is null', async () => {
+            streamrController.client = null;
+            await expect(streamrController.getStorageDays('s')).rejects.toThrow();
+        });
+
+        it('should return storage days', async () => {
+            mockStream.getStorageDayCount.mockResolvedValue(180);
+            expect(await streamrController.getStorageDays('s')).toBe(180);
+        });
+
+        it('should return null on error', async () => {
+            mockStream.getStorageDayCount.mockRejectedValue(new Error('fail'));
+            expect(await streamrController.getStorageDays('s')).toBeNull();
+        });
+    });
+
+    // ==================== fetchHistory() ====================
+    describe('fetchHistory()', () => {
+        it('should throw if client is null', async () => {
+            streamrController.client = null;
+            await expect(streamrController.fetchHistory('s')).rejects.toThrow();
+        });
+
+        it('should return messages from resend iterator', async () => {
+            const msgs = [
+                createMockMessage({ id: '1', text: 'hello' }),
+                createMockMessage({ id: '2', text: 'world' })
+            ];
+            mockClient.resend.mockResolvedValue(createMockAsyncIterator(msgs));
+
+            const result = await streamrController.fetchHistory('stream-1', 0, 10);
+            expect(result).toEqual([
+                { id: '1', text: 'hello' },
+                { id: '2', text: 'world' }
+            ]);
+        });
+
+        it('should call resend with last and partition', async () => {
+            mockClient.resend.mockResolvedValue(createMockAsyncIterator([]));
+            await streamrController.fetchHistory('stream-1', 0, 50);
+            expect(mockClient.resend).toHaveBeenCalledWith('stream-1', { last: 50, partition: 0 });
+        });
+
+        it('should skip decrypt errors and continue', async () => {
+            let calls = 0;
+            const iter = {
+                [Symbol.asyncIterator]() {
+                    return {
+                        next: async () => {
+                            calls++;
+                            if (calls === 1) throw Object.assign(new Error('key'), { code: 'DECRYPT_ERROR' });
+                            if (calls === 2) return { done: false, value: { content: { id: '1' } } };
+                            return { done: true };
+                        }
+                    };
+                }
+            };
+            mockClient.resend.mockResolvedValue(iter);
+            const result = await streamrController.fetchHistory('stream-1');
+            expect(result).toEqual([{ id: '1' }]);
+        });
+
+        it('should return empty array on fetch error', async () => {
+            mockClient.resend.mockRejectedValue(new Error('network'));
+            const result = await streamrController.fetchHistory('stream-1');
+            expect(result).toEqual([]);
+        });
+    });
+
+    // ==================== fetchPartitionHistory() ====================
+    describe('fetchPartitionHistory()', () => {
+        it('should throw if client is null', async () => {
+            streamrController.client = null;
+            await expect(streamrController.fetchPartitionHistory('s', 0)).rejects.toThrow();
+        });
+
+        it('should return messages with publisherId and timestamp', async () => {
+            const msgs = [
+                createMockMessage({ id: '1' }, '0xpub1', 1000),
+                createMockMessage({ id: '2' }, '0xpub2', 2000)
+            ];
+            mockClient.resend.mockResolvedValue(createMockAsyncIterator(msgs));
+
+            const result = await streamrController.fetchPartitionHistory('stream-1', 1, 10);
+            expect(result).toHaveLength(2);
+            expect(result[0]).toEqual({
+                content: { id: '1' },
+                publisherId: '0xpub1',
+                timestamp: 1000
+            });
+        });
+
+        it('should use streamId+partition object for resend', async () => {
+            mockClient.resend.mockResolvedValue(createMockAsyncIterator([]));
+            await streamrController.fetchPartitionHistory('stream-1', 1, 5);
+            expect(mockClient.resend).toHaveBeenCalledWith(
+                { streamId: 'stream-1', partition: 1 },
+                { last: 5 }
+            );
+        });
+
+        it('should return empty array on error', async () => {
+            mockClient.resend.mockRejectedValue(new Error('fail'));
+            const result = await streamrController.fetchPartitionHistory('stream-1', 0);
+            expect(result).toEqual([]);
+        });
+    });
+
+    // ==================== fetchOlderHistory() ====================
+    describe('fetchOlderHistory()', () => {
+        it('should throw if client is null', async () => {
+            streamrController.client = null;
+            await expect(streamrController.fetchOlderHistory('s', 0, Date.now()))
+                .rejects.toThrow();
+        });
+
+        it('should fetch messages before given timestamp', async () => {
+            const msgs = [
+                createMockMessage({ id: '1', text: 'a', sender: '0x1', timestamp: 100, type: 'text' }),
+                createMockMessage({ id: '2', text: 'b', sender: '0x1', timestamp: 200, type: 'text' })
+            ];
+            mockClient.resend.mockResolvedValue(createMockAsyncIterator(msgs));
+
+            const result = await streamrController.fetchOlderHistory('stream-1', 0, 500, 10);
+            expect(result.messages).toHaveLength(2);
+        });
+
+        it('should call resend with from/to timestamps', async () => {
+            mockClient.resend.mockResolvedValue(createMockAsyncIterator([]));
+            await streamrController.fetchOlderHistory('stream-1', 0, 5000, 10);
+            expect(mockClient.resend).toHaveBeenCalledWith('stream-1', {
+                partition: 0,
+                from: { timestamp: 0 },
+                to: { timestamp: 4999 }
+            });
+        });
+
+        it('should return hasMore=true when more messages than count', async () => {
+            const msgs = [];
+            for (let i = 0; i < 5; i++) {
+                msgs.push(createMockMessage({ id: `${i}`, text: 'x', sender: '0x1', timestamp: i * 100, type: 'text' }));
+            }
+            mockClient.resend.mockResolvedValue(createMockAsyncIterator(msgs));
+            const result = await streamrController.fetchOlderHistory('stream-1', 0, 9999, 3);
+            expect(result.hasMore).toBe(true);
+            expect(result.messages).toHaveLength(3);
+        });
+
+        it('should skip ephemeral messages (presence, typing)', async () => {
+            const msgs = [
+                createMockMessage({ type: 'presence', userId: '0x1' }),
+                createMockMessage({ id: '1', text: 'real', sender: '0x1', timestamp: 100, type: 'text' })
+            ];
+            mockClient.resend.mockResolvedValue(createMockAsyncIterator(msgs));
+            const result = await streamrController.fetchOlderHistory('stream-1', 0, 9999, 10);
+            expect(result.messages).toHaveLength(1);
+            expect(result.messages[0].type).toBe('text');
+        });
+
+        it('should abort when signal is aborted', async () => {
+            const controller = new AbortController();
+            controller.abort();
+            // Even with messages, should return empty when already aborted
+            const msgs = [createMockMessage({ id: '1', text: 'x', sender: '0x1', timestamp: 100, type: 'text' })];
+            mockClient.resend.mockResolvedValue(createMockAsyncIterator(msgs));
+            const result = await streamrController.fetchOlderHistory('stream-1', 0, 9999, 10, null, controller.signal);
+            expect(result.messages).toHaveLength(0);
+        });
+
+        it('should decrypt with password', async () => {
+            const encryptedMsg = createMockMessage(JSON.stringify({ id: '1', text: 'hi', sender: '0x1', timestamp: 100, type: 'text' }));
+            mockClient.resend.mockResolvedValue(createMockAsyncIterator([encryptedMsg]));
+            const result = await streamrController.fetchOlderHistory('stream-1', 0, 9999, 10, 'pass');
+            expect(cryptoManager.decryptJSON).toHaveBeenCalled();
+        });
+
+        it('should return empty on fetch error', async () => {
+            mockClient.resend.mockRejectedValue(new Error('fail'));
+            const result = await streamrController.fetchOlderHistory('stream-1', 0, 1000);
+            expect(result).toEqual({ messages: [], hasMore: false });
+        });
+    });
+
+    // ==================== subscribeWithHistory() ====================
+    describe('subscribeWithHistory()', () => {
+        it('should throw if client is null', async () => {
+            streamrController.client = null;
+            await expect(streamrController.subscribeWithHistory('s', 0, vi.fn()))
+                .rejects.toThrow();
+        });
+
+        it('should subscribe to streamId and partition', async () => {
+            const handler = vi.fn();
+            await streamrController.subscribeWithHistory('stream-1', 0, handler, 10);
+            expect(mockClient.subscribe).toHaveBeenCalledWith(
+                { streamId: 'stream-1', partition: 0 },
+                expect.any(Function),
+                expect.any(Function)
+            );
+        });
+
+        it('should fetch history when historyCount > 0', async () => {
+            mockClient.resend.mockResolvedValue(createMockAsyncIterator([]));
+            const handler = vi.fn();
+            await streamrController.subscribeWithHistory('stream-1', 0, handler, 10);
+            // fetchHistoryAsync is called which uses resend
+            expect(mockClient.resend).toHaveBeenCalled();
+        });
+
+        it('should not fetch history when historyCount is 0', async () => {
+            const handler = vi.fn();
+            await streamrController.subscribeWithHistory('stream-1', 0, handler, 0);
+            expect(mockClient.resend).not.toHaveBeenCalled();
+        });
+
+        it('should decrypt messages when password provided', async () => {
+            let capturedHandler;
+            mockClient.subscribe.mockImplementation(async (opts, handler) => {
+                capturedHandler = handler;
+                return { unsubscribe: vi.fn() };
+            });
+            mockClient.resend.mockResolvedValue(createMockAsyncIterator([]));
+
+            await streamrController.subscribeWithHistory('stream-1', 0, vi.fn(), 0, 'pass');
+            
+            // Simulate encrypted message through handler
+            await capturedHandler('encrypted-data', { getPublisherId: () => '0x1' });
+            expect(cryptoManager.decryptJSON).toHaveBeenCalledWith('encrypted-data', 'pass');
+        });
+
+        it('should return subscription object', async () => {
+            const mockSub = { unsubscribe: vi.fn() };
+            mockClient.subscribe.mockResolvedValue(mockSub);
+            mockClient.resend.mockResolvedValue(createMockAsyncIterator([]));
+            const result = await streamrController.subscribeWithHistory('stream-1', 0, vi.fn(), 10);
+            expect(result).toBe(mockSub);
+        });
+    });
+
+    // ==================== fetchHistoryAsync() ====================
+    describe('fetchHistoryAsync()', () => {
+        it('should pass messages to handler', async () => {
+            const handler = vi.fn();
+            const msgs = [
+                createMockMessage({ id: '1', text: 'hi', sender: '0x1', timestamp: 100, type: 'text' })
+            ];
+            mockClient.resend.mockResolvedValue(createMockAsyncIterator(msgs));
+
+            await streamrController.fetchHistoryAsync('stream-1', 0, 10, handler);
+            expect(handler).toHaveBeenCalledWith(expect.objectContaining({ id: '1', text: 'hi' }));
+        });
+
+        it('should skip ephemeral types (presence, typing)', async () => {
+            const handler = vi.fn();
+            const msgs = [
+                createMockMessage({ type: 'presence', userId: '0x1' }),
+                createMockMessage({ type: 'typing', userId: '0x1' }),
+                createMockMessage({ id: '1', text: 'ok', sender: '0x1', timestamp: 100, type: 'text' })
+            ];
+            mockClient.resend.mockResolvedValue(createMockAsyncIterator(msgs));
+
+            await streamrController.fetchHistoryAsync('stream-1', 0, 10, handler);
+            expect(handler).toHaveBeenCalledTimes(1);
+        });
+
+        it('should inject senderId from getPublisherId()', async () => {
+            const handler = vi.fn();
+            const msgs = [
+                createMockMessage({ id: '1', text: 'hi', sender: '0x1', timestamp: 100, type: 'text' }, '0xpub1')
+            ];
+            mockClient.resend.mockResolvedValue(createMockAsyncIterator(msgs));
+
+            await streamrController.fetchHistoryAsync('stream-1', 0, 10, handler);
+            expect(handler).toHaveBeenCalledWith(expect.objectContaining({ senderId: '0xpub1' }));
+        });
+
+        it('should not throw on network error', async () => {
+            const handler = vi.fn();
+            mockClient.resend.mockRejectedValue(new Error('CORS'));
+            await expect(streamrController.fetchHistoryAsync('stream-1', 0, 10, handler))
+                .resolves.toBeUndefined();
+        });
+
+        it('should decrypt with password', async () => {
+            const handler = vi.fn();
+            const msgs = [
+                createMockMessage(JSON.stringify({ id: '1', text: 'hi', sender: '0x1', timestamp: 100, type: 'text' }))
+            ];
+            mockClient.resend.mockResolvedValue(createMockAsyncIterator(msgs));
+            await streamrController.fetchHistoryAsync('stream-1', 0, 10, handler, 'pass');
+            expect(cryptoManager.decryptJSON).toHaveBeenCalled();
+        });
+
+        it('should accept valid message types on partition 0', async () => {
+            const handler = vi.fn();
+            const msgs = [
+                createMockMessage({ id: '1', text: 'hi', sender: '0x1', timestamp: 100, type: 'text' }),
+                createMockMessage({ type: 'reaction', messageId: 'm1', emoji: '👍' }),
+                createMockMessage({ type: 'image', imageId: 'img1' }),
+                createMockMessage({ type: 'video_announce', metadata: {} })
+            ];
+            mockClient.resend.mockResolvedValue(createMockAsyncIterator(msgs));
+            await streamrController.fetchHistoryAsync('stream-1', 0, 10, handler);
+            expect(handler).toHaveBeenCalledTimes(4);
+        });
+
+        it('should accept encrypted envelope messages', async () => {
+            const handler = vi.fn();
+            const msgs = [
+                createMockMessage({ ct: 'base64data', iv: 'base64iv', e: 'aes-256-gcm' })
+            ];
+            mockClient.resend.mockResolvedValue(createMockAsyncIterator(msgs));
+            await streamrController.fetchHistoryAsync('stream-1', 0, 10, handler);
+            expect(handler).toHaveBeenCalledTimes(1);
+        });
+
+        it('should skip invalid message types on partition 0', async () => {
+            const handler = vi.fn();
+            const msgs = [
+                createMockMessage({ type: 'unknown_type', data: {} }),
+                createMockMessage({ random: 'data' })
+            ];
+            mockClient.resend.mockResolvedValue(createMockAsyncIterator(msgs));
+            await streamrController.fetchHistoryAsync('stream-1', 0, 10, handler);
+            expect(handler).not.toHaveBeenCalled();
+        });
+
+        it('should continue on decrypt error in iterator', async () => {
+            const handler = vi.fn();
+            let calls = 0;
+            const iter = {
+                [Symbol.asyncIterator]() {
+                    return {
+                        next: async () => {
+                            calls++;
+                            if (calls === 1) throw Object.assign(new Error('key'), { code: 'DECRYPT_ERROR' });
+                            if (calls === 2) return { done: false, value: createMockMessage({ id: '1', text: 'hi', sender: '0x1', timestamp: 100, type: 'text' }) };
+                            return { done: true };
+                        }
+                    };
+                }
+            };
+            mockClient.resend.mockResolvedValue(iter);
+            await streamrController.fetchHistoryAsync('stream-1', 0, 10, handler);
+            expect(handler).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    // ==================== subscribeToDualStream() ====================
+    describe('subscribeToDualStream()', () => {
+        it('should throw if client is null', async () => {
+            streamrController.client = null;
+            await expect(streamrController.subscribeToDualStream('m-1', 'e-2', {}))
+                .rejects.toThrow();
+        });
+
+        it('should subscribe to message stream with history', async () => {
+            mockClient.resend.mockResolvedValue(createMockAsyncIterator([]));
+            const handlers = { onMessage: vi.fn(), onControl: vi.fn() };
+            await streamrController.subscribeToDualStream('stream-1', 'stream-2', handlers, null, 10);
+
+            // Should have subscriptions for both streams
+            expect(streamrController.subscriptions.has('stream-1')).toBe(true);
+            expect(streamrController.subscriptions.has('stream-2')).toBe(true);
+        });
+
+        it('should subscribe to ephemeral stream without history', async () => {
+            mockClient.resend.mockResolvedValue(createMockAsyncIterator([]));
+            const handlers = { onMessage: vi.fn(), onControl: vi.fn(), onMedia: vi.fn() };
+            await streamrController.subscribeToDualStream('stream-1', 'stream-2', handlers);
+
+            // subscribe called for message(p0), control(p0), media(p1)
+            expect(mockClient.subscribe).toHaveBeenCalledTimes(3);
+        });
+
+        it('should skip already subscribed streams', async () => {
+            streamrController.subscriptions.set('stream-1', { 0: {} });
+            streamrController.subscriptions.set('stream-2', { 0: {} });
+            mockClient.resend.mockResolvedValue(createMockAsyncIterator([]));
+
+            const handlers = { onMessage: vi.fn(), onControl: vi.fn() };
+            await streamrController.subscribeToDualStream('stream-1', 'stream-2', handlers);
+
+            expect(mockClient.subscribe).not.toHaveBeenCalled();
+        });
+
+        it('should return true on success', async () => {
+            mockClient.resend.mockResolvedValue(createMockAsyncIterator([]));
+            const result = await streamrController.subscribeToDualStream(
+                'stream-1', 'stream-2', { onMessage: vi.fn() }
+            );
+            expect(result).toBe(true);
+        });
+
+        it('should handle onMessage only (no onControl/onMedia)', async () => {
+            mockClient.resend.mockResolvedValue(createMockAsyncIterator([]));
+            const handlers = { onMessage: vi.fn() };
+            await streamrController.subscribeToDualStream('stream-1', 'stream-2', handlers);
+
+            // Only 1 subscribe call (message partition)
+            expect(mockClient.subscribe).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    // ==================== unsubscribeFromDualStream() ====================
+    describe('unsubscribeFromDualStream()', () => {
+        it('should unsubscribe from both streams', async () => {
+            const msgSub = { unsubscribe: vi.fn().mockResolvedValue(undefined) };
+            const ephSub = { unsubscribe: vi.fn().mockResolvedValue(undefined) };
+            streamrController.subscriptions.set('stream-1', { 0: msgSub });
+            streamrController.subscriptions.set('stream-2', { 0: ephSub });
+
+            await streamrController.unsubscribeFromDualStream('stream-1', 'stream-2');
+
+            expect(msgSub.unsubscribe).toHaveBeenCalled();
+            expect(ephSub.unsubscribe).toHaveBeenCalled();
+        });
+    });
+
+    // ==================== deleteStream() ====================
+    describe('deleteStream()', () => {
+        it('should throw if client is null', async () => {
+            streamrController.client = null;
+            await expect(streamrController.deleteStream('stream-1'))
+                .rejects.toThrow('Streamr client not initialized');
+        });
+
+        it('should throw for invalid stream ID format', async () => {
+            await expect(streamrController.deleteStream('invalid-stream'))
+                .rejects.toThrow('Invalid stream ID format');
+        });
+
+        it('should delete both message and ephemeral streams', async () => {
+            await streamrController.deleteStream('owner/stream-1');
+            // executeWithRetry is called for delete operations
+            expect(executeWithRetry).toHaveBeenCalled();
+        });
+
+        it('should derive ephemeral from message stream ID', async () => {
+            await streamrController.deleteStream('owner/stream-1');
+            // Should delete both -1 and -2
+            const retryCallNames = executeWithRetry.mock.calls.map(c => c[0]);
+            expect(retryCallNames.some(name => name.includes('message'))).toBe(true);
+        });
+
+        it('should derive message from ephemeral stream ID', async () => {
+            await streamrController.deleteStream('owner/stream-2');
+            const retryCallNames = executeWithRetry.mock.calls.map(c => c[0]);
+            expect(retryCallNames.some(name => name.includes('message'))).toBe(true);
+        });
+    });
+
+    // ==================== createStream() ====================
+    describe('createStream()', () => {
+        it('should throw if client is null', async () => {
+            streamrController.client = null;
+            await expect(streamrController.createStream('test', '0xowner'))
+                .rejects.toThrow('Streamr client not initialized');
+        });
+
+        it('should create dual streams and return both IDs', async () => {
+            const mockMsg = { id: '0xmyaddress/abcd1234-1' };
+            const mockEph = { id: '0xmyaddress/abcd1234-2' };
+            let callCount = 0;
+            executeWithRetryAndVerify.mockImplementation(async (name, fn) => {
+                callCount++;
+                if (callCount === 1) return mockMsg;
+                return mockEph;
+            });
+
+            const result = await streamrController.createStream('Test Channel', '0xowner');
+            expect(result.messageStreamId).toBe('0xmyaddress/abcd1234-1');
+            expect(result.ephemeralStreamId).toBe('0xmyaddress/abcd1234-2');
+            expect(result.type).toBe('public');
+            expect(result.name).toBe('Test Channel');
+        });
+
+        it('should set public permissions for public channels', async () => {
+            const mockMsg = { id: '0xmyaddress/abcd1234-1' };
+            const mockEph = { id: '0xmyaddress/abcd1234-2' };
+            let callCount = 0;
+            executeWithRetryAndVerify.mockImplementation(async (name, fn) => {
+                callCount++;
+                if (callCount === 1) return mockMsg;
+                return mockEph;
+            });
+
+            await streamrController.createStream('Test', '0xowner', 'public');
+            // setPermissions called for both streams (public permissions)
+            expect(mockClient.setPermissions).toHaveBeenCalled();
+        });
+
+        it('should use setStreamPermissions for native channels', async () => {
+            const mockMsg = { id: '0xmyaddress/abcd1234-1' };
+            const mockEph = { id: '0xmyaddress/abcd1234-2' };
+            let callCount = 0;
+            executeWithRetryAndVerify.mockImplementation(async (name, fn) => {
+                callCount++;
+                if (callCount === 1) return mockMsg;
+                return mockEph;
+            });
+
+            await streamrController.createStream('Private', '0xowner', 'native', ['0xmember1']);
+            // setPermissions called via setStreamPermissions
+            expect(mockClient.setPermissions).toHaveBeenCalled();
+        });
+
+        it('should use read-only permissions for readOnly channels', async () => {
+            const mockMsg = { id: '0xmyaddress/abcd1234-1' };
+            const mockEph = { id: '0xmyaddress/abcd1234-2' };
+            let callCount = 0;
+            executeWithRetryAndVerify.mockImplementation(async (name, fn) => {
+                callCount++;
+                if (callCount === 1) return mockMsg;
+                return mockEph;
+            });
+
+            await streamrController.createStream('ReadOnly', '0xowner', 'public', [], { readOnly: true });
+            // First perm call is read-only (subscribe only)
+            const firstPermCall = mockClient.setPermissions.mock.calls[0][0];
+            expect(firstPermCall.assignments[0].permissions).toEqual(['subscribe']);
+        });
+    });
+
+    // ==================== createDMInbox() ====================
+    describe('createDMInbox()', () => {
+        it('should throw if client is null', async () => {
+            streamrController.client = null;
+            await expect(streamrController.createDMInbox('pk123'))
+                .rejects.toThrow('Streamr client not initialized');
+        });
+
+        it('should create or get both DM streams', async () => {
+            // First getStream call throws (stream doesn't exist), then createStream succeeds
+            mockClient.getStream.mockRejectedValue(new Error('not found'));
+            
+            let createCount = 0;
+            executeWithRetryAndVerify.mockImplementation(async (name, fn) => {
+                createCount++;
+                return { id: createCount === 1 ? '0xmyaddress/Pombo-DM-1' : '0xmyaddress/Pombo-DM-2' };
+            });
+
+            const result = await streamrController.createDMInbox('pk123');
+            expect(result.messageStreamId).toContain('Pombo-DM-1');
+            expect(result.ephemeralStreamId).toContain('Pombo-DM-2');
+        });
+
+        it('should set many-to-one permissions', async () => {
+            mockClient.getStream.mockRejectedValue(new Error('not found'));
+            let count = 0;
+            executeWithRetryAndVerify.mockImplementation(async () => {
+                count++;
+                return { id: count === 1 ? '0xmyaddress/Pombo-DM-1' : '0xmyaddress/Pombo-DM-2' };
+            });
+
+            await streamrController.createDMInbox('pk123');
+            // grantManyToOnePermissions called → setPermissions with publish only
+            const permCalls = mockClient.setPermissions.mock.calls;
+            expect(permCalls.length).toBeGreaterThanOrEqual(2);
+            expect(permCalls[0][0].assignments[0].permissions).toEqual(['publish']);
+        });
+
+        it('should reuse existing streams (idempotent)', async () => {
+            // getStream succeeds - streams already exist
+            mockClient.getStream.mockResolvedValue(mockStream);
+            mockStream.getDescription.mockResolvedValue(JSON.stringify({ pk: 'existing-pk' }));
+
+            const result = await streamrController.createDMInbox('pk123');
+            expect(result.messageStreamId).toBeDefined();
+            // Should NOT have called executeWithRetryAndVerify (no creation needed)
+            expect(executeWithRetryAndVerify).not.toHaveBeenCalled();
+        });
+    });
+
+    // ==================== DM Encryption ====================
+    describe('DM Encryption', () => {
+        describe('_createPomboKey()', () => {
+            it('should return null if EncryptionKey not available', () => {
+                window.EncryptionKey = null;
+                expect(streamrController._createPomboKey()).toBeNull();
+            });
+
+            it('should create key when EncryptionKey available with Buffer', () => {
+                window.EncryptionKey = function(id, data) { this.id = id; this.data = data; };
+                const result = streamrController._createPomboKey();
+                expect(result).toBeDefined();
+                expect(result.id).toBeDefined();
+            });
+        });
+
+        describe('setDMPublishKey()', () => {
+            it('should do nothing if client is null', async () => {
+                streamrController.client = null;
+                await streamrController.setDMPublishKey('0x1/Pombo-DM-1');
+                // No error
+            });
+
+            it('should skip non-DM streams', async () => {
+                await streamrController.setDMPublishKey('owner/regular-channel-1');
+                expect(mockClient.updateEncryptionKey).not.toHaveBeenCalled();
+            });
+
+            it('should skip if already set for this stream', async () => {
+                streamrController._dmPublishKeySet.add('0x1/pombo-dm-1');
+                await streamrController.setDMPublishKey('0x1/pombo-dm-1');
+                expect(mockClient.updateEncryptionKey).not.toHaveBeenCalled();
+            });
+
+            it('should call updateEncryptionKey for DM streams', async () => {
+                window.EncryptionKey = function(id, data) { this.id = id; this.data = data; };
+                mockClient.updateEncryptionKey = vi.fn().mockResolvedValue(undefined);
+                await streamrController.setDMPublishKey('0x1/Pombo-DM-1');
+                expect(mockClient.updateEncryptionKey).toHaveBeenCalled();
+                expect(streamrController._dmPublishKeySet.has('0x1/Pombo-DM-1')).toBe(true);
+            });
+        });
+
+        describe('addDMDecryptKey()', () => {
+            it('should do nothing if client is null', async () => {
+                streamrController.client = null;
+                await streamrController.addDMDecryptKey('0xpeer');
+                // No error
+            });
+
+            it('should call addEncryptionKey with normalized address', async () => {
+                window.EncryptionKey = function(id, data) { this.id = id; this.data = data; };
+                mockClient.addEncryptionKey = vi.fn().mockResolvedValue(undefined);
+                await streamrController.addDMDecryptKey('0xABCDEF');
+                expect(mockClient.addEncryptionKey).toHaveBeenCalledWith(
+                    expect.any(Object),
+                    '0xabcdef'
+                );
+            });
+        });
+
+        describe('handleDMDecryptError()', () => {
+            it('should return false for non-DM streams', async () => {
+                const result = await streamrController.handleDMDecryptError(
+                    new Error('decrypt'), 'owner/channel-1', vi.fn()
+                );
+                expect(result).toBe(false);
+            });
+
+            it('should return false if no publisherId in error', async () => {
+                const result = await streamrController.handleDMDecryptError(
+                    { message: 'decrypt' }, '0x1/pombo-dm-1', vi.fn()
+                );
+                expect(result).toBe(false);
+            });
+
+            it('should return false if already tried for this publisher', async () => {
+                streamrController._dmKeyAddedForPublisher.add('0xpub');
+                const error = { messageId: { publisherId: '0xPUB', timestamp: 1000 }, message: 'decrypt' };
+                const result = await streamrController.handleDMDecryptError(
+                    error, '0x1/pombo-dm-1', vi.fn()
+                );
+                expect(result).toBe(false);
+            });
+
+            it('should add key and track publisher on first encounter', async () => {
+                window.EncryptionKey = function(id, data) { this.id = id; this.data = data; };
+                mockClient.addEncryptionKey = vi.fn().mockResolvedValue(undefined);
+                
+                const error = { messageId: { publisherId: '0xNewPub', timestamp: 1000 }, message: 'decrypt' };
+                const result = await streamrController.handleDMDecryptError(
+                    error, '0x1/pombo-dm-1', vi.fn()
+                );
+                expect(result).toBe(true);
+                expect(streamrController._dmKeyAddedForPublisher.has('0xnewpub')).toBe(true);
+            });
+
+            it('should parse JSON string messageId', async () => {
+                window.EncryptionKey = function(id, data) { this.id = id; this.data = data; };
+                mockClient.addEncryptionKey = vi.fn().mockResolvedValue(undefined);
+                
+                const error = { 
+                    messageId: JSON.stringify({ publisherId: '0xjson', timestamp: 1000 }), 
+                    message: 'decrypt' 
+                };
+                const result = await streamrController.handleDMDecryptError(
+                    error, '0x1/pombo-dm-1', vi.fn()
+                );
+                expect(result).toBe(true);
+            });
+        });
+    });
+});

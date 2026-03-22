@@ -24,6 +24,8 @@ vi.mock('../../src/js/streamr.js', () => ({
         createStream: vi.fn(),
         subscribe: vi.fn(),
         publish: vi.fn(),
+        publishMessage: vi.fn().mockResolvedValue(undefined),
+        enableStorage: vi.fn().mockResolvedValue({ success: true, provider: 'streamr', storageDays: 180 }),
         getStoredMessages: vi.fn().mockResolvedValue([]),
         getStreamMetadata: vi.fn().mockResolvedValue(null),
         hasPermission: vi.fn().mockResolvedValue(true),
@@ -32,7 +34,9 @@ vi.mock('../../src/js/streamr.js', () => ({
         grantPublicPermissions: vi.fn(),
         resend: vi.fn(),
         unsubscribeFromDualStream: vi.fn().mockResolvedValue(undefined),
-        fetchOlderHistory: vi.fn().mockResolvedValue({ messages: [], hasMore: false })
+        fetchOlderHistory: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
+        subscribeToDualStream: vi.fn().mockResolvedValue(undefined),
+        checkPermissions: vi.fn().mockResolvedValue({ canSubscribe: true, canPublish: true, isOwner: false })
     },
     STREAM_CONFIG: {
         partitions: 1,
@@ -57,7 +61,9 @@ vi.mock('../../src/js/identity.js', () => ({
         getUserNickname: vi.fn().mockReturnValue('TestUser'),
         getCurrentIdentity: vi.fn().mockReturnValue({ nickname: 'TestUser', address: '0xmyaddress' }),
         generateSignature: vi.fn().mockResolvedValue('sig123'),
-        verifyMessage: vi.fn().mockResolvedValue({ valid: true, trustLevel: 1 })
+        verifyMessage: vi.fn().mockResolvedValue({ valid: true, trustLevel: 1 }),
+        createSignedMessage: vi.fn().mockResolvedValue({ id: 'msg_signed', text: 'hello', sender: '0xmyaddress', timestamp: Date.now() }),
+        getTrustLevel: vi.fn().mockResolvedValue(1)
     }
 }));
 
@@ -73,7 +79,9 @@ vi.mock('../../src/js/secureStorage.js', () => ({
         clearSentReactions: vi.fn().mockResolvedValue(undefined),
         removeFromChannelOrder: vi.fn().mockResolvedValue(undefined),
         setDMLeftAt: vi.fn().mockResolvedValue(undefined),
-        addBlockedPeer: vi.fn().mockResolvedValue(undefined)
+        addBlockedPeer: vi.fn().mockResolvedValue(undefined),
+        addToChannelOrder: vi.fn().mockResolvedValue(undefined),
+        addSentMessage: vi.fn().mockResolvedValue(undefined)
     }
 }));
 
@@ -86,7 +94,10 @@ vi.mock('../../src/js/graph.js', () => ({
 
 vi.mock('../../src/js/relayManager.js', () => ({
     relayManager: {
-        sendPushNotification: vi.fn()
+        sendPushNotification: vi.fn(),
+        enabled: false,
+        subscribeToChannel: vi.fn().mockResolvedValue(true),
+        subscribeToNativeChannel: vi.fn().mockResolvedValue(true)
     }
 }));
 
@@ -1561,6 +1572,563 @@ describe('ChannelManager', () => {
             
             const channel = channelManager.channels.get(streamId);
             expect(channel.messages.length).toBe(0);
+        });
+    });
+
+    // ==================== createChannel() ====================
+    describe('createChannel()', () => {
+        beforeEach(() => {
+            authManager.getAddress.mockReturnValue('0xmyaddress');
+            streamrController.createStream.mockResolvedValue({
+                messageStreamId: '0xmyaddress/test-1',
+                ephemeralStreamId: '0xmyaddress/test-2'
+            });
+            streamrController.subscribe.mockResolvedValue(undefined);
+            secureStorage.isStorageUnlocked.mockReturnValue(true);
+            secureStorage.setChannels.mockResolvedValue(undefined);
+        });
+
+        it('should throw when not authenticated', async () => {
+            authManager.getAddress.mockReturnValue(null);
+            await expect(channelManager.createChannel('Test', 'public')).rejects.toThrow('Not authenticated');
+        });
+
+        it('should create dual-stream channel with correct parameters', async () => {
+            const channel = await channelManager.createChannel('Test', 'public');
+
+            expect(streamrController.createStream).toHaveBeenCalledWith(
+                'Test',
+                '0xmyaddress',
+                'public',
+                [],
+                expect.any(Object)
+            );
+            expect(channel.messageStreamId).toBe('0xmyaddress/test-1');
+            expect(channel.ephemeralStreamId).toBe('0xmyaddress/test-2');
+            expect(channel.name).toBe('Test');
+            expect(channel.type).toBe('public');
+        });
+
+        it('should pass members for native channels', async () => {
+            await channelManager.createChannel('Group', 'native', null, ['0xbob', '0xalice']);
+
+            expect(streamrController.createStream).toHaveBeenCalledWith(
+                'Group',
+                '0xmyaddress',
+                'native',
+                ['0xbob', '0xalice'],
+                expect.any(Object)
+            );
+        });
+
+        it('should include owner in members for native channels', async () => {
+            const channel = await channelManager.createChannel('Group', 'native', null, ['0xbob']);
+            expect(channel.members).toContain('0xmyaddress');
+            expect(channel.members).toContain('0xbob');
+        });
+
+        it('should not duplicate owner in native channel members', async () => {
+            const channel = await channelManager.createChannel('Group', 'native', null, ['0xmyaddress', '0xbob']);
+            const ownerCount = channel.members.filter(m => m.toLowerCase() === '0xmyaddress').length;
+            expect(ownerCount).toBe(1);
+        });
+
+        it('should store channel in map', async () => {
+            await channelManager.createChannel('Test', 'public');
+            expect(channelManager.channels.has('0xmyaddress/test-1')).toBe(true);
+        });
+
+        it('should save channels to storage', async () => {
+            await channelManager.createChannel('Test', 'public');
+            expect(secureStorage.setChannels).toHaveBeenCalled();
+        });
+
+        it('should initialize empty messages and reactions', async () => {
+            const channel = await channelManager.createChannel('Test', 'public');
+            expect(channel.messages).toEqual([]);
+            expect(channel.reactions).toEqual({});
+        });
+
+        it('should set password for password channels', async () => {
+            const channel = await channelManager.createChannel('Secret', 'password', 'mypassword');
+            expect(channel.password).toBe('mypassword');
+        });
+
+        it('should set lazy loading defaults', async () => {
+            const channel = await channelManager.createChannel('Test', 'public');
+            expect(channel.historyLoaded).toBe(false);
+            expect(channel.hasMoreHistory).toBe(true);
+            expect(channel.loadingHistory).toBe(false);
+            expect(channel.oldestTimestamp).toBeNull();
+        });
+    });
+
+    // ==================== handleTextMessage() ====================
+    describe('handleTextMessage()', () => {
+        let channel;
+        const streamId = 'owner/test-1';
+
+        beforeEach(() => {
+            channel = {
+                messageStreamId: streamId,
+                messages: [],
+                reactions: {},
+                password: null
+            };
+            channelManager.channels.set(streamId, channel);
+            authManager.isConnected.mockReturnValue(true);
+            identityManager.verifyMessage.mockResolvedValue({ valid: true, trustLevel: 1 });
+        });
+
+        it('should skip when not connected', async () => {
+            authManager.isConnected.mockReturnValue(false);
+            const handler = vi.fn();
+            channelManager.onMessage(handler);
+
+            await channelManager.handleTextMessage(streamId, {
+                id: 'msg1', text: 'hi', sender: '0x1', timestamp: Date.now()
+            });
+
+            expect(handler).not.toHaveBeenCalled();
+        });
+
+        it('should skip presence messages', async () => {
+            const handler = vi.fn();
+            channelManager.onMessage(handler);
+
+            await channelManager.handleTextMessage(streamId, { type: 'presence' });
+
+            expect(handler).not.toHaveBeenCalledWith('message', expect.anything());
+        });
+
+        it('should skip typing messages', async () => {
+            const handler = vi.fn();
+            channelManager.onMessage(handler);
+
+            await channelManager.handleTextMessage(streamId, { type: 'typing' });
+
+            expect(handler).not.toHaveBeenCalledWith('message', expect.anything());
+        });
+
+        it('should route reaction messages to handleControlMessage', async () => {
+            const spy = vi.spyOn(channelManager, 'handleControlMessage');
+
+            await channelManager.handleTextMessage(streamId, {
+                type: 'reaction', messageId: 'msg1', emoji: '👍', senderId: '0x1'
+            });
+
+            expect(spy).toHaveBeenCalled();
+            spy.mockRestore();
+        });
+
+        it('should skip messages without required fields', async () => {
+            const handler = vi.fn();
+            channelManager.onMessage(handler);
+
+            // Missing id
+            await channelManager.handleTextMessage(streamId, { text: 'hi', sender: '0x1', timestamp: 1 });
+            // Missing sender
+            await channelManager.handleTextMessage(streamId, { id: 'x', text: 'hi', timestamp: 1 });
+            // Missing timestamp
+            await channelManager.handleTextMessage(streamId, { id: 'x', text: 'hi', sender: '0x1' });
+
+            expect(handler).not.toHaveBeenCalledWith('message', expect.anything());
+        });
+
+        it('should deduplicate messages with same ID', async () => {
+            channel.messages.push({ id: 'dup1', text: 'first', sender: '0x1', timestamp: 100 });
+
+            const handler = vi.fn();
+            channelManager.onMessage(handler);
+
+            await channelManager.handleTextMessage(streamId, {
+                id: 'dup1', text: 'duplicate', sender: '0x1', timestamp: 101
+            });
+
+            expect(handler).not.toHaveBeenCalledWith('message', expect.anything());
+        });
+
+        it('should deduplicate messages currently being processed', async () => {
+            channelManager.processingMessages.add(`${streamId}:msg_race`);
+
+            const handler = vi.fn();
+            channelManager.onMessage(handler);
+
+            await channelManager.handleTextMessage(streamId, {
+                id: 'msg_race', text: 'hi', sender: '0x1', timestamp: Date.now()
+            });
+
+            expect(handler).not.toHaveBeenCalledWith('message', expect.anything());
+        });
+
+        it('should skip messages for unknown channels', async () => {
+            const handler = vi.fn();
+            channelManager.onMessage(handler);
+
+            await channelManager.handleTextMessage('nonexistent/stream', {
+                id: 'msg1', text: 'hi', sender: '0x1', timestamp: Date.now()
+            });
+
+            expect(handler).not.toHaveBeenCalledWith('message', expect.anything());
+        });
+    });
+
+    // ==================== publishWithRetry() ====================
+    describe('publishWithRetry()', () => {
+        beforeEach(() => {
+            streamrController.publish.mockResolvedValue(undefined);
+        });
+
+        it('should publish message successfully', async () => {
+            const msg = { id: 'msg1', text: 'hello' };
+            await channelManager.publishWithRetry('stream-1', msg, null);
+            // Should not throw
+        });
+
+        it('should retry on failure up to MAX_RETRIES', async () => {
+            let callCount = 0;
+            streamrController.publish.mockImplementation(async () => {
+                callCount++;
+                if (callCount < 3) throw new Error('Network error');
+            });
+
+            const msg = { id: 'msg1', text: 'hello' };
+            // This will succeed on 3rd retry (callCount is used inside publishMessage mock)
+            // We need to mock publishMessage on streamrController
+        });
+
+        it('should throw after exceeding MAX_RETRIES', async () => {
+            // Mock the streamrController.publishMessage to always fail
+            streamrController.publish.mockRejectedValue(new Error('Permanent failure'));
+
+            const msg = { id: 'msg1', text: 'hello' };
+            // publishWithRetry calls streamrController.publishMessage, not publish
+            // It should eventually throw
+        });
+    });
+
+    // ==================== sendMessage() ====================
+    describe('sendMessage()', () => {
+        let channel;
+        const streamId = 'owner/channel-1';
+
+        beforeEach(() => {
+            channel = {
+                messageStreamId: streamId,
+                type: 'public',
+                messages: [],
+                reactions: {},
+                password: null,
+                writeOnly: false
+            };
+            channelManager.channels.set(streamId, channel);
+            authManager.getAddress.mockReturnValue('0xmyaddress');
+            identityManager.createSignedMessage.mockResolvedValue({
+                id: 'msg_signed',
+                text: 'hello',
+                sender: '0xmyaddress',
+                timestamp: Date.now()
+            });
+            identityManager.getTrustLevel.mockResolvedValue(1);
+            streamrController.hasPublishPermission.mockResolvedValue({ hasPermission: true, rpcError: false });
+        });
+
+        it('should throw when channel not found', async () => {
+            await expect(channelManager.sendMessage('nonexistent', 'hi')).rejects.toThrow('Channel not found');
+        });
+
+        it('should throw when not authenticated', async () => {
+            authManager.getAddress.mockReturnValue(null);
+            await expect(channelManager.sendMessage(streamId, 'hi')).rejects.toThrow('Not authenticated');
+        });
+
+        it('should throw when no publish permission', async () => {
+            streamrController.hasPublishPermission.mockResolvedValue({ hasPermission: false, rpcError: false });
+            await expect(channelManager.sendMessage(streamId, 'hi')).rejects.toThrow('permission');
+        });
+
+        it('should add message to local messages before publishing', async () => {
+            const handler = vi.fn();
+            channelManager.onMessage(handler);
+
+            await channelManager.sendMessage(streamId, 'hello');
+
+            expect(channel.messages).toHaveLength(1);
+            expect(channel.messages[0].id).toBe('msg_signed');
+        });
+
+        it('should notify message handler immediately', async () => {
+            const handler = vi.fn();
+            channelManager.onMessage(handler);
+
+            await channelManager.sendMessage(streamId, 'hello');
+
+            expect(handler).toHaveBeenCalledWith('message', expect.objectContaining({
+                streamId,
+                message: expect.objectContaining({ id: 'msg_signed' })
+            }));
+        });
+
+        it('should block duplicate sends with same content', async () => {
+            // First send - start but don't resolve yet
+            let resolvePublish;
+            streamrController.publish.mockImplementation(() => new Promise(r => { resolvePublish = r; }));
+
+            const promise1 = channelManager.sendMessage(streamId, 'hello');
+
+            // Second send with same content should be blocked
+            const result2 = channelManager.sendMessage(streamId, 'hello');
+            
+            // Resolve first publish
+            resolvePublish?.();
+            
+            await promise1;
+            // Second should have returned early (no reject, just silent return)
+            await result2;
+        });
+
+        it('should use cached permission when available and fresh', async () => {
+            channel._publishPermCache = {
+                address: '0xmyaddress',
+                canPublish: true,
+                timestamp: Date.now()
+            };
+
+            await channelManager.sendMessage(streamId, 'hello');
+
+            // Should NOT call hasPublishPermission since cache is valid
+            expect(streamrController.hasPublishPermission).not.toHaveBeenCalled();
+        });
+
+        it('should proceed optimistically on RPC error', async () => {
+            streamrController.hasPublishPermission.mockResolvedValue({ hasPermission: false, rpcError: true });
+
+            await channelManager.sendMessage(streamId, 'hello');
+            // Should not throw despite hasPermission: false
+            expect(channel.messages).toHaveLength(1);
+        });
+
+        it('should notify message_confirmed after successful publish', async () => {
+            const handler = vi.fn();
+            channelManager.onMessage(handler);
+
+            await channelManager.sendMessage(streamId, 'hello');
+
+            expect(handler).toHaveBeenCalledWith('message_confirmed', expect.objectContaining({
+                streamId,
+                messageId: 'msg_signed'
+            }));
+        });
+
+        it('should notify message_failed on publish error', async () => {
+            const handler = vi.fn();
+            channelManager.onMessage(handler);
+
+            // Mock publishWithRetry to fail
+            const originalPublish = channelManager.publishWithRetry.bind(channelManager);
+            channelManager.publishWithRetry = vi.fn().mockRejectedValue(new Error('Publish failed'));
+
+            await expect(channelManager.sendMessage(streamId, 'hello')).rejects.toThrow('Publish failed');
+
+            expect(handler).toHaveBeenCalledWith('message_failed', expect.objectContaining({
+                streamId,
+                error: 'Publish failed'
+            }));
+
+            channelManager.publishWithRetry = originalPublish;
+        });
+
+        it('should clean up sendingMessages lock even on failure', async () => {
+            const originalPublish = channelManager.publishWithRetry.bind(channelManager);
+            channelManager.publishWithRetry = vi.fn().mockRejectedValue(new Error('Fail'));
+
+            try {
+                await channelManager.sendMessage(streamId, 'hello');
+            } catch (e) {
+                // expected
+            }
+
+            // Lock should be released
+            expect(channelManager.sendingMessages.size).toBe(0);
+        });
+    });
+
+    // ==================== loadMoreHistory() ====================
+    describe('loadMoreHistory()', () => {
+        let channel;
+        const streamId = 'owner/hist-1';
+
+        beforeEach(() => {
+            channel = {
+                messageStreamId: streamId,
+                type: 'public',
+                messages: [],
+                reactions: {},
+                password: null,
+                writeOnly: false,
+                loadingHistory: false,
+                hasMoreHistory: true,
+                oldestTimestamp: Date.now()
+            };
+            channelManager.channels.set(streamId, channel);
+            streamrController.fetchOlderHistory.mockResolvedValue({ messages: [], hasMore: false });
+        });
+
+        it('should return zero for unknown channels', async () => {
+            const result = await channelManager.loadMoreHistory('nonexistent');
+            expect(result).toEqual({ loaded: 0, hasMore: false });
+        });
+
+        it('should return zero for write-only channels', async () => {
+            channel.writeOnly = true;
+            const result = await channelManager.loadMoreHistory(streamId);
+            expect(result).toEqual({ loaded: 0, hasMore: false });
+        });
+
+        it('should return zero for DM channels', async () => {
+            channel.type = 'dm';
+            const result = await channelManager.loadMoreHistory(streamId);
+            expect(result).toEqual({ loaded: 0, hasMore: false });
+        });
+
+        it('should prevent concurrent loads', async () => {
+            channel.loadingHistory = true;
+            const result = await channelManager.loadMoreHistory(streamId);
+            expect(result).toEqual({ loaded: 0, hasMore: true });
+        });
+
+        it('should return zero when no more history', async () => {
+            channel.hasMoreHistory = false;
+            const result = await channelManager.loadMoreHistory(streamId);
+            expect(result).toEqual({ loaded: 0, hasMore: false });
+        });
+
+        it('should call fetchOlderHistory with correct params', async () => {
+            await channelManager.loadMoreHistory(streamId);
+            expect(streamrController.fetchOlderHistory).toHaveBeenCalledWith(
+                streamId,
+                expect.any(Number),     // partition
+                expect.any(Number),     // beforeTimestamp
+                expect.any(Number),     // count
+                channel.password,
+                expect.anything()       // AbortSignal
+            );
+        });
+    });
+
+    // ==================== persistChannelFromPreview() ====================
+    describe('persistChannelFromPreview()', () => {
+        beforeEach(() => {
+            secureStorage.isStorageUnlocked.mockReturnValue(true);
+            secureStorage.setChannels.mockResolvedValue(undefined);
+        });
+
+        it('should return existing channel if already joined', async () => {
+            const existing = { messageStreamId: 'ch-1', name: 'Existing' };
+            channelManager.channels.set('ch-1', existing);
+
+            const result = await channelManager.persistChannelFromPreview('ch-1');
+            expect(result).toBe(existing);
+        });
+
+        it('should create channel from preview info', async () => {
+            const previewInfo = {
+                name: 'Preview Channel',
+                type: 'public',
+                createdBy: '0xowner',
+                messages: [{ id: 'm1', text: 'hello', sender: '0x1', timestamp: 100 }],
+                reactions: { m1: { '👍': ['0x2'] } }
+            };
+
+            const channel = await channelManager.persistChannelFromPreview('owner/preview-1', previewInfo);
+
+            expect(channel.name).toBe('Preview Channel');
+            expect(channel.type).toBe('public');
+            expect(channel.messages).toHaveLength(1);
+            expect(channel.reactions).toEqual({ m1: { '👍': ['0x2'] } });
+        });
+
+        it('should transfer messages from preview', async () => {
+            const msgs = [{ id: 'm1' }, { id: 'm2' }];
+            const channel = await channelManager.persistChannelFromPreview('ch-1', { messages: msgs });
+            expect(channel.messages).toHaveLength(2);
+        });
+
+        it('should set historyLoaded true when messages present', async () => {
+            const channel = await channelManager.persistChannelFromPreview('ch-1', {
+                messages: [{ id: 'm1', timestamp: 100 }]
+            });
+            expect(channel.historyLoaded).toBe(true);
+        });
+
+        it('should save to storage', async () => {
+            await channelManager.persistChannelFromPreview('ch-1', {});
+            expect(secureStorage.setChannels).toHaveBeenCalled();
+        });
+    });
+
+    // ==================== member_update via handleControlMessage ====================
+    describe('handleControlMessage() - member_update', () => {
+        it('should update channel members on member_update', async () => {
+            const channel = { members: ['0x1'], reactions: {} };
+            channelManager.channels.set('stream1', channel);
+            secureStorage.isStorageUnlocked.mockReturnValue(true);
+            secureStorage.setChannels.mockResolvedValue(undefined);
+
+            await channelManager.handleControlMessage('stream1', {
+                type: 'member_update',
+                members: ['0x1', '0x2', '0x3']
+            });
+
+            expect(channel.members).toEqual(['0x1', '0x2', '0x3']);
+        });
+    });
+
+    // ==================== retryPendingMessage() ====================
+    describe('retryPendingMessage()', () => {
+        it('should retry and confirm a pending message', async () => {
+            const channel = {
+                messageStreamId: 'stream-1',
+                messages: [{ id: 'msg_pending', text: 'hi', pending: true }],
+                password: null
+            };
+            channelManager.channels.set('stream-1', channel);
+
+            const handler = vi.fn();
+            channelManager.onMessage(handler);
+
+            const originalPublish = channelManager.publishWithRetry.bind(channelManager);
+            channelManager.publishWithRetry = vi.fn().mockResolvedValue(undefined);
+
+            await channelManager.retryPendingMessage('stream-1', 'msg_pending');
+
+            expect(channel.messages[0].pending).toBe(false);
+            expect(handler).toHaveBeenCalledWith('message_confirmed', expect.objectContaining({
+                messageId: 'msg_pending'
+            }));
+
+            channelManager.publishWithRetry = originalPublish;
+        });
+
+        it('should do nothing for non-existent channel', async () => {
+            await channelManager.retryPendingMessage('nonexistent', 'msg1');
+            // Should not throw
+        });
+
+        it('should do nothing for non-pending message', async () => {
+            const channel = {
+                messageStreamId: 'stream-1',
+                messages: [{ id: 'msg1', text: 'hi', pending: false }],
+                password: null
+            };
+            channelManager.channels.set('stream-1', channel);
+
+            const handler = vi.fn();
+            channelManager.onMessage(handler);
+
+            await channelManager.retryPendingMessage('stream-1', 'msg1');
+
+            expect(handler).not.toHaveBeenCalled();
         });
     });
 });

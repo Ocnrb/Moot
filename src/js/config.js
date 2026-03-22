@@ -77,8 +77,8 @@ export const CONFIG = {
     retry: {
         maxAttempts: 7,
         baseDelayMs: 3000,
-        // Multiplier for exponential backoff (attempt * baseDelayMs)
-        backoffMultiplier: 1
+        // Multiplier for exponential backoff: delay = baseDelay * multiplier^(attempt-1)
+        backoffMultiplier: 2
     },
 
     // Stream Configuration
@@ -118,6 +118,80 @@ export const CONFIG = {
         // This allows history/resend without key-exchange (publisher offline)
         encryptionKeyId: 'pombo-dm-v1',
         encryptionKeyHex: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2'
+    },
+
+    // Channel Settings
+    channels: {
+        reactionDebounceMs: 500,       // Minimum time between same reaction sends
+        onlineTimeoutMs: 25000,        // 25s to consider user offline (5x heartbeat)
+        maxRetries: 3,                 // Message publish retry limit
+        retryDelayMs: 2000,            // Delay between retries
+        batchWindowMs: 100,            // Window to collect messages for batch verification
+        batchMaxSize: 50               // Maximum batch size before flushing
+    },
+
+    // Identity & ENS
+    identity: {
+        ensCacheDurationMs: 24 * 60 * 60 * 1000,      // 24h ENS cache
+        maxEnsCacheSize: 500,                          // Max cached ENS entries
+        messageTimestampToleranceMs: 5 * 60 * 1000     // 5min replay-attack window
+    },
+
+    // Media / File Transfer
+    media: {
+        maxImageCacheBytes: 100 * 1024 * 1024,            // 100MB max image cache in memory
+        imageMaxWidth: 1280,
+        imageMaxHeight: 720,
+        imageQuality: 1.0,
+        pieceSize: 64 * 1024,                  // 64KB chunks
+        pieceSendDelayMs: 15,                  // Delay between piece sends
+        maxConcurrentRequests: 8,
+        pieceRequestTimeoutMs: 10000,          // 10s per piece
+        maxFileSize: 500 * 1024 * 1024,        // 500MB max upload
+        minSeeders: 1,
+        preferredSeeders: 3,
+        seederRequestIntervalMs: 2000,
+        seederDiscoveryTimeoutMs: 30000,
+        seederRefreshIntervalMs: 10000,
+        maxSeederRequests: 10,
+        maxSeedStorage: 700 * 1024 * 1024,     // 700MB persistent storage
+        seedFilesExpireDays: 7
+    },
+
+    // Subscription Manager / Polling
+    subscriptions: {
+        pollIntervalMs: 30000,         // 30s between background polls
+        pollBatchSize: 3,              // Channels per poll cycle
+        pollStaggerDelayMs: 2000,      // Delay between channel checks
+        minPollIntervalMs: 10000,      // Minimum time between checks for same channel
+        maxConcurrentSubs: 1,          // Only 1 full subscription at a time
+        activityCheckMessages: 3,      // Messages to fetch for activity check
+        previewPresenceIntervalMs: 20000, // Presence broadcast interval in preview
+        initialPollDelayMs: 5000       // Delay before first background poll
+    },
+
+    // Push Notifications
+    push: {
+        tagBytes: 1,                   // K-anonymity tag size (256 possible tags)
+        powDifficulty: 4,              // PoW leading zeros required
+        powMaxTimeMs: 30000,           // Max PoW computation time
+        powYieldInterval: 10000,       // Yield to UI every N iterations
+        reRegistrationIntervalMs: 6 * 60 * 60 * 1000  // 6h token refresh
+    },
+
+    // Notifications UI
+    notifications: {
+        inviteToastDurationMs: 15000   // Invite toast display duration
+    },
+
+    // Cryptography
+    crypto: {
+        pbkdf2Iterations: 310000       // PBKDF2 key derivation iterations
+    },
+
+    // Graph API
+    graph: {
+        cacheDurationMs: 30000         // 30s query result cache
     },
 
     // Application Metadata

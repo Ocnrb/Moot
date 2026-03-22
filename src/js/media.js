@@ -14,13 +14,14 @@ import { channelManager } from './channels.js';
 import { secureStorage } from './secureStorage.js';
 import { dmManager } from './dm.js';
 import { dmCrypto } from './dmCrypto.js';
+import { CONFIG as APP_CONFIG } from './config.js';
 
 // === CONFIGURATION ===
 const CONFIG = {
     // Image settings
-    IMAGE_MAX_WIDTH: 1280,
-    IMAGE_MAX_HEIGHT: 720,
-    IMAGE_QUALITY: 1.0,
+    IMAGE_MAX_WIDTH: APP_CONFIG.media.imageMaxWidth,
+    IMAGE_MAX_HEIGHT: APP_CONFIG.media.imageMaxHeight,
+    IMAGE_QUALITY: APP_CONFIG.media.imageQuality,
     ALLOWED_IMAGE_TYPES: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
     
     // Video/File settings
@@ -30,23 +31,23 @@ const CONFIG = {
     // Browser-playable formats (for showing player vs download link)
     PLAYABLE_VIDEO_TYPES: ['video/mp4', 'video/webm', 'video/ogg', 'video/x-m4v', 'video/m4v'],
 
-    PIECE_SIZE: 64 * 1024, // 64KB chunks (safe for WebRTC)
-    PIECE_SEND_DELAY: 15, // 15ms between piece sends 
-    MAX_CONCURRENT_REQUESTS: 8,
-    PIECE_REQUEST_TIMEOUT: 10000, // 10 seconds
-    MAX_FILE_SIZE: 500 * 1024 * 1024, // 500MB max
+    PIECE_SIZE: APP_CONFIG.media.pieceSize,
+    PIECE_SEND_DELAY: APP_CONFIG.media.pieceSendDelayMs,
+    MAX_CONCURRENT_REQUESTS: APP_CONFIG.media.maxConcurrentRequests,
+    PIECE_REQUEST_TIMEOUT: APP_CONFIG.media.pieceRequestTimeoutMs,
+    MAX_FILE_SIZE: APP_CONFIG.media.maxFileSize,
     
     // Seeder Discovery settings
-    MIN_SEEDERS: 1,                    // Minimum seeders before starting download
-    PREFERRED_SEEDERS: 3,              // Preferred number of seeders for faster downloads
-    SEEDER_REQUEST_INTERVAL: 2000,     // Time between seeder requests (ms)
-    SEEDER_DISCOVERY_TIMEOUT: 30000,   // Max time to wait for initial seeders (ms)
-    SEEDER_REFRESH_INTERVAL: 10000,    // Re-request seeders every X ms during download
-    MAX_SEEDER_REQUESTS: 10,           // Max seeder request attempts
+    MIN_SEEDERS: APP_CONFIG.media.minSeeders,
+    PREFERRED_SEEDERS: APP_CONFIG.media.preferredSeeders,
+    SEEDER_REQUEST_INTERVAL: APP_CONFIG.media.seederRequestIntervalMs,
+    SEEDER_DISCOVERY_TIMEOUT: APP_CONFIG.media.seederDiscoveryTimeoutMs,
+    SEEDER_REFRESH_INTERVAL: APP_CONFIG.media.seederRefreshIntervalMs,
+    MAX_SEEDER_REQUESTS: APP_CONFIG.media.maxSeederRequests,
     
     // Seeding Persistence settings
-    MAX_SEED_STORAGE: 700 * 1024 * 1024,  // 700MB max persistent storage
-    SEED_FILES_EXPIRE_DAYS: 7,             // Auto-clean after 7 days
+    MAX_SEED_STORAGE: APP_CONFIG.media.maxSeedStorage,
+    SEED_FILES_EXPIRE_DAYS: APP_CONFIG.media.seedFilesExpireDays,
     AUTO_SEED_ON_JOIN: true,               // Re-announce as seeder when joining channel
     PERSIST_PUBLIC_CHANNELS: true,         // Persist files from public channels
     PERSIST_PRIVATE_CHANNELS: false        // Don't persist files from private channels (privacy)
@@ -55,8 +56,10 @@ const CONFIG = {
 
 class MediaController {
     constructor() {
-        // Image cache: imageId -> base64 data
+        // Image cache: imageId -> base64 data (LRU eviction when over byte limit)
         this.imageCache = new Map();
+        this.imageCacheBytes = 0;
+        this.MAX_IMAGE_CACHE_BYTES = APP_CONFIG.media.maxImageCacheBytes;
         
         // Local files being seeded: fileId -> { file, metadata, streamId }
         this.localFiles = new Map();
@@ -149,6 +152,7 @@ class MediaController {
         
         // Clear all maps
         this.imageCache.clear();
+        this.imageCacheBytes = 0;
         this.localFiles.clear();
         this.downloadedUrls.clear();
         this.incomingFiles.clear();
@@ -325,6 +329,8 @@ class MediaController {
         
         // Cache locally
         this.imageCache.set(imageId, base64Data);
+        this.imageCacheBytes += base64Data.length * 2;
+        this.evictImageCacheIfNeeded();
         
         // Create image message with data embedded (for LogStore persistence)
         // This goes to messageStream so it's stored and retrievable from history
@@ -438,6 +444,8 @@ class MediaController {
         
         // Cache the image
         this.imageCache.set(data.imageId, data.data);
+        this.imageCacheBytes += data.data.length * 2;
+        this.evictImageCacheIfNeeded();
         Logger.debug('Image received:', data.imageId);
         
         // Notify handlers
@@ -463,8 +471,25 @@ class MediaController {
     cacheImage(imageId, data) {
         if (!this.imageCache.has(imageId)) {
             this.imageCache.set(imageId, data);
+            this.imageCacheBytes += data.length * 2;
+            this.evictImageCacheIfNeeded();
             Logger.debug('Image cached from message:', imageId);
         }
+    }
+
+    /**
+     * Evict oldest image cache entries when total size exceeds byte limit (LRU by insertion order)
+     */
+    evictImageCacheIfNeeded() {
+        if (this.imageCacheBytes <= this.MAX_IMAGE_CACHE_BYTES) return;
+        let evicted = 0;
+        for (const [key, value] of this.imageCache) {
+            if (this.imageCacheBytes <= this.MAX_IMAGE_CACHE_BYTES) break;
+            this.imageCacheBytes -= value.length * 2; // base64 string ~2 bytes/char in JS
+            this.imageCache.delete(key);
+            evicted++;
+        }
+        Logger.debug(`Image cache evicted ${evicted} entries, ~${(this.imageCacheBytes / 1024 / 1024).toFixed(1)}MB remaining`);
     }
 
     /**

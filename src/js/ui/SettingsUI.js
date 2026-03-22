@@ -463,7 +463,7 @@ class SettingsUI {
                         // Check for other accounts
                         if (this.authManager.hasSavedWallet()) {
                             setTimeout(() => {
-                                window.ethChat?.connectWallet();
+                                this.deps.connectWallet?.();
                             }, 500);
                         }
                     } catch (e) {
@@ -773,10 +773,14 @@ class SettingsUI {
         if (this.elements.settingsUsername) {
             this.elements.settingsUsername.addEventListener('change', async (e) => {
                 const newName = e.target.value;
-                await this.identityManager.setUsername(newName);
-                this.authManager.updateWalletName(newName || null);
-                this.deps.updateDisplayName?.(newName || null);
-                this.showNotification('Username updated!', 'success');
+                try {
+                    await this.identityManager.setUsername(newName);
+                    this.authManager.updateWalletName(newName || null);
+                    this.deps.updateDisplayName?.(newName || null);
+                    this.showNotification('Username updated!', 'success');
+                } catch (err) {
+                    this.showNotification('Failed to update username', 'error');
+                }
             });
         }
 

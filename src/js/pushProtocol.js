@@ -4,6 +4,8 @@
 // for Pombo's push notifications system.
 // ==================================================
 
+import { CONFIG } from './config.js';
+
 // ethers is exposed globally by vendor.bundle.js
 const getEthers = () => {
     if (typeof window !== 'undefined' && window.ethers) return window.ethers;
@@ -29,7 +31,7 @@ const getEthers = () => {
 // Start small, increase as user base grows.
 // Rule: Increase TAG_BYTES only when K > 100 consistently.
 // ================================================
-const TAG_BYTES = 1; // 256 possible tags - good K-anonymity even with <10k users
+const TAG_BYTES = CONFIG.push.tagBytes; // 256 possible tags - good K-anonymity even with <10k users
 const TAG_HEX_CHARS = 2 + (TAG_BYTES * 2); // "0x" + hex chars
 
 // ================================================
@@ -105,8 +107,8 @@ export function getCurrentEpoch() {
  * @param {number} difficulty - Number of zeros required (default: 4)
  * @returns {Promise<{pow: string, nonce: number, epoch: number}>}
  */
-export async function calculatePoW(tag, difficulty = 4) {
-    const maxTime = 30000; // 30 seconds max
+export async function calculatePoW(tag, difficulty = CONFIG.push.powDifficulty) {
+    const maxTime = CONFIG.push.powMaxTimeMs;
     const eth = getEthers();
     const target = '0'.repeat(difficulty);
     const startTime = Date.now();
@@ -127,8 +129,8 @@ export async function calculatePoW(tag, difficulty = 4) {
         
         nonce++;
         
-        // Yield every 10000 iterations to not block UI completely
-        if (nonce % 10000 === 0) {
+        // Yield every N iterations to not block UI completely
+        if (nonce % CONFIG.push.powYieldInterval === 0) {
             await new Promise(resolve => setTimeout(resolve, 0));
         }
     }
@@ -232,7 +234,7 @@ export const DEFAULT_CONFIG = {
     pushStreamId: '0xae340e799e8151f6a4999d245e466197aa217667/push',
     
     // PoW difficulty (must match relay)
-    powDifficulty: 4,
+    powDifficulty: CONFIG.push.powDifficulty,
     
     // List of known relays
     relays: [

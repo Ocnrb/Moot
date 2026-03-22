@@ -9,6 +9,7 @@
  */
 
 import { Logger } from './logger.js';
+import { StorageError, ValidationError } from './utils/errors.js';
 
 // Storage key for wallets (keystores are NOT encrypted - they already are)
 const WALLETS_STORAGE_KEY = 'pombo_keystores';
@@ -79,7 +80,7 @@ class AuthManager {
      */
     async saveWalletEncrypted(password, name = null, progressCallback = null) {
         if (!this.wallet) {
-            throw new Error('No local wallet to save');
+            throw new ValidationError('No local wallet to save', 'NO_LOCAL_WALLET');
         }
 
         try {
@@ -146,7 +147,7 @@ class AuthManager {
             const wallets = this.loadAllKeystores();
             
             if (Object.keys(wallets).length === 0) {
-                throw new Error('No saved wallets found');
+                throw new StorageError('No saved wallets found', 'NO_SAVED_WALLETS');
             }
             
             // Get specific wallet or first available
@@ -157,7 +158,7 @@ class AuthManager {
                 walletAddress = address.toLowerCase();
                 walletData = wallets[walletAddress];
                 if (!walletData) {
-                    throw new Error(`Wallet not found: ${address}`);
+                    throw new StorageError(`Wallet not found: ${address}`, 'WALLET_NOT_FOUND');
                 }
             } else {
                 // Get most recently used wallet
@@ -212,29 +213,29 @@ class AuthManager {
      */
     validateKeystore(keystore) {
         if (!keystore) {
-            throw new Error('Invalid keystore: empty');
+            throw new ValidationError('Invalid keystore: empty', 'KEYSTORE_INVALID');
         }
         
         if (keystore.version !== 3) {
-            throw new Error(`Invalid keystore version: ${keystore.version} (expected 3)`);
+            throw new ValidationError(`Invalid keystore version: ${keystore.version} (expected 3)`, 'KEYSTORE_INVALID');
         }
         
         if (!keystore.crypto && !keystore.Crypto) {
-            throw new Error('Invalid keystore: missing crypto section');
+            throw new ValidationError('Invalid keystore: missing crypto section', 'KEYSTORE_INVALID');
         }
         
         const crypto = keystore.crypto || keystore.Crypto;
         
         if (!crypto.cipher || !crypto.ciphertext || !crypto.cipherparams) {
-            throw new Error('Invalid keystore: missing cipher data');
+            throw new ValidationError('Invalid keystore: missing cipher data', 'KEYSTORE_INVALID');
         }
         
         if (!crypto.kdf || !crypto.kdfparams) {
-            throw new Error('Invalid keystore: missing KDF data');
+            throw new ValidationError('Invalid keystore: missing KDF data', 'KEYSTORE_INVALID');
         }
         
         if (!crypto.mac) {
-            throw new Error('Invalid keystore: missing MAC');
+            throw new ValidationError('Invalid keystore: missing MAC', 'KEYSTORE_INVALID');
         }
         
         return true;
@@ -253,7 +254,11 @@ class AuthManager {
             return JSON.parse(saved);
         } catch (error) {
             Logger.error('Failed to load keystores:', error);
-            return {};
+            throw new StorageError(
+                'Keystore data is corrupted and could not be parsed',
+                'KEYSTORE_PARSE_FAILED',
+                { cause: error }
+            );
         }
     }
 
@@ -281,10 +286,17 @@ class AuthManager {
      */
     updateWalletName(newName, address = null) {
         const targetAddress = (address || this.address)?.toLowerCase();
-        if (!targetAddress) return false;
+        if (!targetAddress) {
+            throw new ValidationError('No wallet address available', 'NO_WALLET_ADDRESS');
+        }
         
         const wallets = this.loadAllKeystores();
-        if (!wallets[targetAddress]) return false;
+        if (!wallets[targetAddress]) {
+            throw new ValidationError(
+                `Wallet not found: ${targetAddress}`,
+                'WALLET_NOT_FOUND'
+            );
+        }
         
         wallets[targetAddress].name = newName || `Account ${targetAddress.slice(0, 8)}`;
         localStorage.setItem(WALLETS_STORAGE_KEY, JSON.stringify(wallets));

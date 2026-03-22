@@ -14,6 +14,7 @@
 
 import { Logger } from './logger.js';
 import { CONFIG } from './config.js';
+import { CryptoError } from './utils/errors.js';
 import { streamrController } from './streamr.js';
 import { channelManager } from './channels.js';
 import { secureStorage } from './secureStorage.js';
@@ -34,6 +35,10 @@ class DMManager {
 
         // Conversations: peerAddress (lowercase) → messageStreamId in channelManager
         this.conversations = new Map();
+
+        // Guards against concurrent getOrCreateConversation for the same peer
+        // peerAddress → Promise<channel>
+        this.pendingConversations = new Map();
 
         // Whether inbox has been verified/created
         this.inboxReady = false;
@@ -254,7 +259,8 @@ class DMManager {
      * Decrypt an E2E encrypted DM envelope.
      * @param {Object} data - Encrypted envelope { ct, iv, e } with senderId
      * @param {string} senderAddress - Sender's address (lowercase)
-     * @returns {Promise<Object|null>} - Decrypted data with senderId restored, or null on failure
+     * @returns {Promise<Object|null>} - Decrypted data with senderId restored, or null if not encrypted / missing keys
+     * @throws {CryptoError} If decryption fails on a genuinely encrypted envelope
      */
     async decryptDMEnvelope(data, senderAddress) {
         if (!dmCrypto.isEncrypted(data)) {
@@ -283,7 +289,11 @@ class DMManager {
             return decrypted;
         } catch (e) {
             Logger.error('DM: Decryption failed from', senderAddress, e.message);
-            return null;
+            throw new CryptoError(
+                `DM decryption failed from ${senderAddress}`,
+                'DM_DECRYPT_FAILED',
+                { cause: e }
+            );
         }
     }
 
@@ -311,7 +321,12 @@ class DMManager {
         if (!channelStreamId) return;
 
         // Decrypt E2E envelope if present
-        const controlData = await this.decryptDMEnvelope(data, senderAddress);
+        let controlData;
+        try {
+            controlData = await this.decryptDMEnvelope(data, senderAddress);
+        } catch {
+            return; // Decryption failed — already logged inside decryptDMEnvelope
+        }
         if (!controlData) return;
 
         // Inject identity fields for control messages
@@ -350,7 +365,11 @@ class DMManager {
         }
 
         // E2E decrypt if needed
-        data = await this.decryptDMEnvelope(data, senderAddress);
+        try {
+            data = await this.decryptDMEnvelope(data, senderAddress);
+        } catch {
+            return; // Decryption failed — already logged inside decryptDMEnvelope
+        }
         if (!data) return;
 
         // Soft-leave check: ignore messages older than the leave timestamp
@@ -381,7 +400,12 @@ class DMManager {
         if (!channel) {
             // Auto-create conversation for new sender
             Logger.info('DM: New conversation from', senderAddress);
-            channel = await this.getOrCreateConversation(senderAddress);
+            try {
+                channel = await this.getOrCreateConversation(senderAddress);
+            } catch (e) {
+                Logger.error('DM: Failed to create conversation for', senderAddress, e);
+                return;
+            }
             if (!channel) {
                 Logger.error('DM: Failed to create conversation for', senderAddress);
                 return;
@@ -438,6 +462,31 @@ class DMManager {
             this.conversations.delete(normalizedPeer);
         }
 
+        // Guard against concurrent creation for the same peer:
+        // If another call is already creating this conversation, wait for it
+        const pending = this.pendingConversations.get(normalizedPeer);
+        if (pending) {
+            return pending;
+        }
+
+        // Create the promise and store it SYNCHRONOUSLY before any await
+        const creationPromise = this._createConversation(normalizedPeer, localName);
+        this.pendingConversations.set(normalizedPeer, creationPromise);
+
+        try {
+            return await creationPromise;
+        } finally {
+            this.pendingConversations.delete(normalizedPeer);
+        }
+    }
+
+    /**
+     * Internal: actually create a DM conversation (called only once per peer)
+     * @param {string} normalizedPeer - Lowercase peer address
+     * @param {string} [localName] - Optional local name
+     * @returns {Promise<Object>} - Channel object
+     */
+    async _createConversation(normalizedPeer, localName) {
         // Build deterministic stream IDs for the PEER's inbox (where we publish TO)
         const peerInboxId = streamrController.getDMInboxId(normalizedPeer);
         const peerEphemeralId = streamrController.getDMEphemeralId(normalizedPeer);
@@ -837,6 +886,7 @@ class DMManager {
     async destroy() {
         await this.unsubscribeFromInbox();
         this.conversations.clear();
+        this.pendingConversations.clear();
         this.inboxMessageStreamId = null;
         this.inboxEphemeralStreamId = null;
         this.inboxSubscription = null;

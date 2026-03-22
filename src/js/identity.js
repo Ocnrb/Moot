@@ -13,12 +13,13 @@ import { authManager } from './auth.js';
 import { secureStorage } from './secureStorage.js';
 import { Logger } from './logger.js';
 import { cryptoWorkerPool } from './workers/cryptoWorkerPool.js';
+import { CONFIG } from './config.js';
 
-// ENS cache duration (24 hours)
-const ENS_CACHE_DURATION = 24 * 60 * 60 * 1000;
+// ENS cache duration
+const ENS_CACHE_DURATION = CONFIG.identity.ensCacheDurationMs;
 
-// Message timestamp tolerance (5 minutes) - prevents replay attacks
-const MESSAGE_TIMESTAMP_TOLERANCE = 5 * 60 * 1000;
+// Message timestamp tolerance - prevents replay attacks
+const MESSAGE_TIMESTAMP_TOLERANCE = CONFIG.identity.messageTimestampToleranceMs;
 
 // Ethereum mainnet provider for ENS
 const ENS_PROVIDER_URL = 'https://eth.llamarpc.com';
@@ -29,6 +30,7 @@ class IdentityManager {
         this.trustedContacts = new Map();
         this.ensProvider = null;
         this.username = null;
+        this.MAX_ENS_CACHE_SIZE = CONFIG.identity.maxEnsCacheSize;
     }
 
     /**
@@ -279,6 +281,11 @@ class IdentityManager {
             return cached.name;
         }
 
+        // Prune expired entries periodically to prevent unbounded growth
+        if (this.ensCache.size > this.MAX_ENS_CACHE_SIZE) {
+            this.pruneExpiredENSEntries();
+        }
+
         // No provider available
         if (!this.ensProvider) {
             return null;
@@ -434,10 +441,34 @@ class IdentityManager {
         }
     }
 
+    /**
+     * Remove expired entries from ENS cache to prevent unbounded memory growth
+     */
+    pruneExpiredENSEntries() {
+        const now = Date.now();
+        for (const [addr, entry] of this.ensCache) {
+            if (now - entry.timestamp > ENS_CACHE_DURATION) {
+                this.ensCache.delete(addr);
+            }
+        }
+        // If still over limit after pruning expired, evict oldest entries
+        if (this.ensCache.size > this.MAX_ENS_CACHE_SIZE) {
+            const sorted = [...this.ensCache.entries()]
+                .sort((a, b) => a[1].timestamp - b[1].timestamp);
+            const toRemove = sorted.slice(0, this.ensCache.size - this.MAX_ENS_CACHE_SIZE);
+            for (const [addr] of toRemove) {
+                this.ensCache.delete(addr);
+            }
+        }
+        Logger.debug(`ENS cache pruned to ${this.ensCache.size} entries`);
+    }
+
     async saveENSCache() {
         if (!secureStorage.isStorageUnlocked()) {
             return;
         }
+        // Prune before persisting to avoid saving stale entries
+        this.pruneExpiredENSEntries();
         const data = Object.fromEntries(this.ensCache.entries());
         await secureStorage.setENSCache(data);
     }

@@ -17,6 +17,7 @@ import { authManager } from './auth.js';
 import { identityManager } from './identity.js';
 import { mediaController } from './media.js';
 import { Logger } from './logger.js';
+import { CONFIG } from './config.js';
 
 class SubscriptionManager {
     constructor() {
@@ -34,14 +35,17 @@ class SubscriptionManager {
         // Activity change handlers
         this.activityHandlers = [];
         
+        // Preview message callback (set by ui.js to avoid circular dependency)
+        this.onPreviewMessage = null;
+        
         // Configuration
         this.config = {
-            POLL_INTERVAL: 30000,           // 30 seconds between background polls
-            POLL_BATCH_SIZE: 3,             // Check N channels per poll cycle
-            POLL_STAGGER_DELAY: 2000,       // Delay between channel checks in batch
-            MIN_POLL_INTERVAL: 10000,       // Minimum time between checks for same channel
-            MAX_CONCURRENT_SUBS: 1,         // Only 1 full subscription at a time (active channel)
-            ACTIVITY_CHECK_MESSAGES: 3,     // Number of messages to fetch for activity check
+            POLL_INTERVAL: CONFIG.subscriptions.pollIntervalMs,
+            POLL_BATCH_SIZE: CONFIG.subscriptions.pollBatchSize,
+            POLL_STAGGER_DELAY: CONFIG.subscriptions.pollStaggerDelayMs,
+            MIN_POLL_INTERVAL: CONFIG.subscriptions.minPollIntervalMs,
+            MAX_CONCURRENT_SUBS: CONFIG.subscriptions.maxConcurrentSubs,
+            ACTIVITY_CHECK_MESSAGES: CONFIG.subscriptions.activityCheckMessages,
         };
         
         // Polling state
@@ -199,12 +203,12 @@ class SubscriptionManager {
             return;
         }
         
-        // Still in preview mode - forward to UI
+        // Still in preview mode - forward to UI via callback
         Logger.debug('Preview message callback:', msg?.id, msg?.type || 'text');
-        if (window.uiController && window.uiController.handlePreviewMessage) {
-            window.uiController.handlePreviewMessage(msg);
+        if (this.onPreviewMessage) {
+            this.onPreviewMessage(msg);
         } else {
-            Logger.warn('uiController.handlePreviewMessage not available');
+            Logger.warn('subscriptionManager.onPreviewMessage not configured');
         }
     }
 
@@ -296,7 +300,7 @@ class SubscriptionManager {
         publishPresence();
         
         // Then periodically (every 20 seconds)
-        this.previewPresenceInterval = setInterval(publishPresence, 20000);
+        this.previewPresenceInterval = setInterval(publishPresence, CONFIG.subscriptions.previewPresenceIntervalMs);
     }
 
     /**
@@ -394,7 +398,7 @@ class SubscriptionManager {
         }, this.config.POLL_INTERVAL);
 
         // Run first poll immediately (after short delay)
-        setTimeout(() => this.pollBackgroundChannels(), 5000);
+        setTimeout(() => this.pollBackgroundChannels(), CONFIG.subscriptions.initialPollDelayMs);
     }
 
     /**

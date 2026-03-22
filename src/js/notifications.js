@@ -10,6 +10,7 @@ import { channelManager } from './channels.js';
 import { uiController } from './ui.js';
 import { Logger } from './logger.js';
 import { escapeHtml } from './ui/utils.js';
+import { CONFIG } from './config.js';
 
 class NotificationManager {
     constructor() {
@@ -278,7 +279,7 @@ class NotificationManager {
             return;
         }
 
-        const duration = 15000;
+        const duration = CONFIG.notifications.inviteToastDurationMs;
         const toast = document.createElement('div');
         toast.className = 'toast invite';
         toast.dataset.inviteId = invite.inviteId;
@@ -368,14 +369,10 @@ class NotificationManager {
             Logger.info('Invite accepted:', inviteId);
             
             // Show toast
-            if (window.uiController) {
-                window.uiController.showNotification(`Joined channel: ${invite.channel.name}!`, 'success');
-            }
+            uiController.showNotification(`Joined channel: ${invite.channel.name}!`, 'success');
         } catch (error) {
             Logger.error('Failed to accept invite:', error);
-            if (window.uiController) {
-                window.uiController.showNotification('Failed to join channel: ' + error.message, 'error');
-            }
+            uiController.showNotification('Failed to join channel: ' + error.message, 'error');
         }
     }
 

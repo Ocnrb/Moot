@@ -24,6 +24,7 @@ export async function executeWithRetry(operationName, asyncFn, options = {}) {
     const {
         maxRetries = CONFIG.retry.maxAttempts,
         baseDelay = CONFIG.retry.baseDelayMs,
+        backoffMultiplier = CONFIG.retry.backoffMultiplier,
         onAttempt = null,
         onError = null,
         shouldRetry = () => true
@@ -62,7 +63,7 @@ export async function executeWithRetry(operationName, asyncFn, options = {}) {
             }
 
             if (attempt < maxRetries) {
-                const delay = attempt * baseDelay;
+                const delay = baseDelay * Math.pow(backoffMultiplier, attempt - 1);
                 Logger.debug(`Retrying ${operationName} in ${delay / 1000}s...`);
                 await new Promise(resolve => setTimeout(resolve, delay));
             }
@@ -86,7 +87,8 @@ export async function executeWithRetry(operationName, asyncFn, options = {}) {
 export async function executeWithRetryAndVerify(operationName, asyncFn, checkExistsFn, options = {}) {
     const {
         maxRetries = CONFIG.retry.maxAttempts,
-        baseDelay = CONFIG.retry.baseDelayMs
+        baseDelay = CONFIG.retry.baseDelayMs,
+        backoffMultiplier = CONFIG.retry.backoffMultiplier
     } = options;
 
     let lastError;
@@ -112,7 +114,7 @@ export async function executeWithRetryAndVerify(operationName, asyncFn, checkExi
             }
 
             if (attempt < maxRetries) {
-                const delay = attempt * baseDelay;
+                const delay = baseDelay * Math.pow(backoffMultiplier, attempt - 1);
                 Logger.debug(`Retrying ${operationName} in ${delay / 1000}s...`);
                 await new Promise(resolve => setTimeout(resolve, delay));
             }
@@ -121,4 +123,80 @@ export async function executeWithRetryAndVerify(operationName, asyncFn, checkExi
 
     Logger.error(`All ${operationName} attempts failed`);
     throw lastError;
+}
+
+// ── Circuit Breaker ──────────────────────────────────────────────
+
+/** @type {Map<string, { failures: number, lastFailure: number, state: 'closed'|'open'|'half-open' }>} */
+const circuits = new Map();
+
+/**
+ * Simple circuit breaker for recurring operations (periodic refresh, polling).
+ * - CLOSED (normal): operations execute normally, failures increment counter
+ * - OPEN (tripped): operations are skipped entirely for `resetTimeoutMs`
+ * - HALF-OPEN: one probe call allowed; success closes circuit, failure re-opens
+ *
+ * @param {string} name - Unique circuit name (e.g. 'relay-refresh')
+ * @param {Function} asyncFn - Async function to execute
+ * @param {Object} [opts]
+ * @param {number} [opts.threshold=5] - Consecutive failures to trip
+ * @param {number} [opts.resetTimeoutMs=60000] - Cooldown before half-open probe
+ * @returns {Promise<any>} - Result of asyncFn, or undefined if circuit is open
+ */
+export async function withCircuitBreaker(name, asyncFn, opts = {}) {
+    const { threshold = 5, resetTimeoutMs = 60000 } = opts;
+
+    if (!circuits.has(name)) {
+        circuits.set(name, { failures: 0, lastFailure: 0, state: 'closed' });
+    }
+
+    const circuit = circuits.get(name);
+
+    // OPEN → check if cooldown expired
+    if (circuit.state === 'open') {
+        if (Date.now() - circuit.lastFailure < resetTimeoutMs) {
+            Logger.debug(`Circuit breaker [${name}]: OPEN — skipping`);
+            return undefined;
+        }
+        // Cooldown expired → allow one probe
+        circuit.state = 'half-open';
+        Logger.debug(`Circuit breaker [${name}]: HALF-OPEN — probing`);
+    }
+
+    try {
+        const result = await asyncFn();
+        // Success → close circuit
+        if (circuit.state !== 'closed') {
+            Logger.info(`Circuit breaker [${name}]: recovered → CLOSED`);
+        }
+        circuit.failures = 0;
+        circuit.state = 'closed';
+        return result;
+    } catch (error) {
+        circuit.failures++;
+        circuit.lastFailure = Date.now();
+
+        if (circuit.state === 'half-open' || circuit.failures >= threshold) {
+            circuit.state = 'open';
+            Logger.warn(`Circuit breaker [${name}]: OPEN after ${circuit.failures} failures (cooldown ${resetTimeoutMs / 1000}s)`);
+        }
+        throw error;
+    }
+}
+
+/**
+ * Reset a named circuit (e.g. when user reconnects).
+ * @param {string} name
+ */
+export function resetCircuit(name) {
+    circuits.delete(name);
+}
+
+/**
+ * Get current state of a named circuit (for testing/diagnostics).
+ * @param {string} name
+ * @returns {{ failures: number, state: string } | undefined}
+ */
+export function getCircuitState(name) {
+    return circuits.get(name);
 }

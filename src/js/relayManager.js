@@ -5,8 +5,10 @@
 // ===========================================================
 
 import { Logger } from './logger.js';
+import { CONFIG as APP_CONFIG } from './config.js';
 import { streamrController } from './streamr.js';
 import { channelManager } from './channels.js';
+import { withCircuitBreaker, getCircuitState } from './utils/retry.js';
 import { 
     calculateChannelTag,
     calculateNativeChannelTag,
@@ -33,8 +35,8 @@ const CONFIG = {
     // Storage key for state persistence
     storageKey: 'pombo_push_registration',
     
-    // Re-registration interval (6 hours) to refresh tokens before expiry
-    reRegistrationInterval: 6 * 60 * 60 * 1000
+    // Re-registration interval to refresh tokens before expiry
+    reRegistrationInterval: APP_CONFIG.push.reRegistrationIntervalMs
 };
 
 // ================================================
@@ -296,12 +298,20 @@ class RelayManager {
         
         Logger.debug('Refreshing', totalChannels, 'channel subscriptions...');
         
+        const cbOpts = { threshold: 3, resetTimeoutMs: 120000 };
+        
         // Refresh public/password channels
         for (const streamId of this.subscribedChannels) {
+            if (getCircuitState('relay-refresh')?.state === 'open') {
+                Logger.warn('Relay circuit open — skipping remaining channel refreshes');
+                return;
+            }
             try {
-                const channelTag = calculateChannelTag(streamId);
-                const payload = createRegistrationPayload(channelTag, this.pushSubscription);
-                await streamrController.client.publish(CONFIG.pushStreamId, payload);
+                await withCircuitBreaker('relay-refresh', async () => {
+                    const channelTag = calculateChannelTag(streamId);
+                    const payload = createRegistrationPayload(channelTag, this.pushSubscription);
+                    await streamrController.client.publish(CONFIG.pushStreamId, payload);
+                }, cbOpts);
             } catch (error) {
                 Logger.warn('Failed to refresh public channel subscription:', streamId.slice(0, 20) + '...');
             }
@@ -309,10 +319,16 @@ class RelayManager {
         
         // Refresh native channels
         for (const streamId of this.subscribedNativeChannels) {
+            if (getCircuitState('relay-refresh')?.state === 'open') {
+                Logger.warn('Relay circuit open — skipping remaining channel refreshes');
+                return;
+            }
             try {
-                const channelTag = calculateNativeChannelTag(streamId);
-                const payload = createRegistrationPayload(channelTag, this.pushSubscription);
-                await streamrController.client.publish(CONFIG.pushStreamId, payload);
+                await withCircuitBreaker('relay-refresh', async () => {
+                    const channelTag = calculateNativeChannelTag(streamId);
+                    const payload = createRegistrationPayload(channelTag, this.pushSubscription);
+                    await streamrController.client.publish(CONFIG.pushStreamId, payload);
+                }, cbOpts);
             } catch (error) {
                 Logger.warn('Failed to refresh native channel subscription:', streamId.slice(0, 20) + '...');
             }

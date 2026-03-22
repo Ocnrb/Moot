@@ -56,10 +56,10 @@ const STREAM_CONFIG = {
     DEFAULT_STORAGE_PROVIDER: 'streamr',
 
     // Number of messages to load on join (higher to account for reactions)
-    INITIAL_MESSAGES: 30,
+    INITIAL_MESSAGES: CONFIG.stream.initialMessages,
     
     // Number of messages to load on scroll (pagination)
-    LOAD_MORE_COUNT: 30,
+    LOAD_MORE_COUNT: CONFIG.stream.loadMoreCount,
     
     // Message Stream (with storage): 2 partitions (messages + sync)
     MESSAGE_STREAM: {

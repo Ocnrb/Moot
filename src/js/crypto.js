@@ -4,6 +4,8 @@
  * Used for password-based encrypted channels
  */
 
+import { CONFIG } from './config.js';
+
 class CryptoManager {
     constructor() {
         this.textEncoder = new TextEncoder();
@@ -90,7 +92,7 @@ class CryptoManager {
             {
                 name: 'PBKDF2',
                 salt: salt,
-                iterations: 310000,
+                iterations: CONFIG.crypto.pbkdf2Iterations,
                 hash: 'SHA-256'
             },
             keyMaterial,

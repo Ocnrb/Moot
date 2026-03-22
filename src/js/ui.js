@@ -584,6 +584,9 @@ class UIController {
      * Updates unread badges when new messages are detected in background channels
      */
     setupActivityHandler() {
+        // Wire preview message callback (avoids circular dependency with subscriptionManager)
+        subscriptionManager.onPreviewMessage = (msg) => this.handlePreviewMessage(msg);
+        
         subscriptionManager.onActivity((streamId, activity) => {
             Logger.debug('Background activity update:', streamId, activity);
             

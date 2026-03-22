@@ -18,6 +18,8 @@ import { relayManager } from './relayManager.js';
 import { parseChainError } from './utils/chainErrors.js';
 import { dmManager } from './dm.js';
 import { dmCrypto } from './dmCrypto.js';
+import { CONFIG } from './config.js';
+import { StorageError } from './utils/errors.js';
 
 class ChannelManager {
     constructor() {
@@ -25,6 +27,9 @@ class ChannelManager {
         this.currentChannel = null;
         this.switchGeneration = 0; // Incremented on every channel switch to detect stale async results
         this.messageHandlers = [];
+        
+        // Callback for post-save sync (set by app.js to avoid circular dependency)
+        this.onChannelsSaved = null;
         
         // Deduplication: track message IDs currently being processed (receive-side)
         this.processingMessages = new Set();
@@ -36,24 +41,24 @@ class ChannelManager {
         // Deduplication: track reactions currently being sent
         // Prevents duplicate reaction sends on rapid clicks
         this.pendingReactions = new Set(); // streamId:messageId:emoji:action
-        this.REACTION_DEBOUNCE_MS = 500; // Minimum time between same reaction sends
+        this.REACTION_DEBOUNCE_MS = CONFIG.channels.reactionDebounceMs;
         
         // Online presence tracking
         this.onlineUsers = new Map(); // streamId -> Map(userId -> {lastActive, nickname, address})
         this.presenceInterval = null;
-        this.ONLINE_TIMEOUT = 25000; // 25 seconds to consider user offline (5x heartbeat interval)
+        this.ONLINE_TIMEOUT = CONFIG.channels.onlineTimeoutMs;
         this.onlineUsersHandlers = [];
         
         // Pending messages (failed to send, will retry)
         this.pendingMessages = new Map(); // streamId -> [messages]
-        this.MAX_RETRIES = 3;
-        this.RETRY_DELAY = 2000; // 2 seconds
+        this.MAX_RETRIES = CONFIG.channels.maxRetries;
+        this.RETRY_DELAY = CONFIG.channels.retryDelayMs;
         
         // OPTIMIZATION: Batch message verification for history loading
         // Messages arriving within BATCH_WINDOW_MS are batched and verified in parallel
         this.pendingVerifications = new Map(); // streamId -> { messages: [], timer: null }
-        this.BATCH_WINDOW_MS = 100; // Window to collect messages for batch processing
-        this.BATCH_MAX_SIZE = 50; // Maximum batch size before flushing
+        this.BATCH_WINDOW_MS = CONFIG.channels.batchWindowMs;
+        this.BATCH_MAX_SIZE = CONFIG.channels.batchMaxSize;
         
         // AbortController for in-flight history fetches - aborted on channel switch
         this.historyAbortController = null;
@@ -63,49 +68,45 @@ class ChannelManager {
      * Load channels from secure storage (encrypted)
      */
     loadChannels() {
-        try {
-            if (!secureStorage.isStorageUnlocked()) {
-                Logger.warn('Secure storage not unlocked - cannot load channels');
-                return;
-            }
-            
-            const channelsData = secureStorage.getChannels();
-            Logger.debug('Loading channels from secure storage');
+        if (!secureStorage.isStorageUnlocked()) {
+            Logger.warn('Secure storage not unlocked - cannot load channels');
+            return;
+        }
+        
+        const channelsData = secureStorage.getChannels();
+        Logger.debug('Loading channels from secure storage');
 
-            if (channelsData && channelsData.length > 0) {
-                for (const channel of channelsData) {
-                    const existing = this.channels.get(channel.messageStreamId);
-                    
-                    if (existing) {
-                        // Channel already in memory — update metadata only,
-                        // preserve in-memory state (messages, reactions, history flags)
-                        const preserve = ['messages', 'reactions', 'historyLoaded', 'hasMoreHistory',
-                            'loadingHistory', 'oldestTimestamp', 'streamId'];
-                        for (const [key, value] of Object.entries(channel)) {
-                            if (!preserve.includes(key)) {
-                                existing[key] = value;
-                            }
+        if (channelsData && channelsData.length > 0) {
+            for (const channel of channelsData) {
+                const existing = this.channels.get(channel.messageStreamId);
+                
+                if (existing) {
+                    // Channel already in memory — update metadata only,
+                    // preserve in-memory state (messages, reactions, history flags)
+                    const preserve = ['messages', 'reactions', 'historyLoaded', 'hasMoreHistory',
+                        'loadingHistory', 'oldestTimestamp', 'streamId'];
+                    for (const [key, value] of Object.entries(channel)) {
+                        if (!preserve.includes(key)) {
+                            existing[key] = value;
                         }
-                    } else {
-                        // New channel — initialize empty runtime state
-                        channel.messages = [];
-                        channel.reactions = {};
-                        channel.historyLoaded = false;
-                        channel.hasMoreHistory = true;
-                        channel.loadingHistory = false;
-                        channel.oldestTimestamp = null;
-                        channel.streamId = channel.messageStreamId;
-                        this.channels.set(channel.messageStreamId, channel);
                     }
+                } else {
+                    // New channel — initialize empty runtime state
+                    channel.messages = [];
+                    channel.reactions = {};
+                    channel.historyLoaded = false;
+                    channel.hasMoreHistory = true;
+                    channel.loadingHistory = false;
+                    channel.oldestTimestamp = null;
+                    channel.streamId = channel.messageStreamId;
+                    this.channels.set(channel.messageStreamId, channel);
                 }
-
-                Logger.debug(`Loaded ${channelsData.length} channels from secure storage (metadata only)`);
-                Logger.debug('Channels in map:', Array.from(this.channels.keys()));
-            } else {
-                Logger.debug('No saved channels found');
             }
-        } catch (error) {
-            Logger.error('Failed to load channels:', error);
+
+            Logger.debug(`Loaded ${channelsData.length} channels from secure storage (metadata only)`);
+            Logger.debug('Channels in map:', Array.from(this.channels.keys()));
+        } else {
+            Logger.debug('No saved channels found');
         }
     }
 
@@ -153,9 +154,14 @@ class ChannelManager {
             Logger.debug('Channels saved to secure storage (metadata only)');
 
             // Schedule auto-push to sync (debounced 30s)
-            window.syncManager?.scheduleAutoPush();
+            this.onChannelsSaved?.();
         } catch (error) {
             Logger.error('Failed to save channels:', error);
+            throw new StorageError(
+                'Failed to save channels to secure storage',
+                'CHANNELS_SAVE_FAILED',
+                { cause: error }
+            );
         }
     }
 
@@ -349,11 +355,11 @@ class ChannelManager {
                 //    share cached getStreamPermissions() internally, so they're efficient together
                 needGraphData ? (async () => {
                     try {
-                        const [detectedType, streamMembers] = await Promise.all([
+                        const [detectedType, membersResult] = await Promise.all([
                             !channelType ? graphAPI.detectStreamType(messageStreamId) : Promise.resolve(channelType),
                             graphAPI.getStreamMembers(messageStreamId)
                         ]);
-                        return { success: true, detectedType, streamMembers };
+                        return { success: true, detectedType, streamMembers: membersResult.ok ? membersResult.data : [] };
                     } catch (graphError) {
                         Logger.warn('Graph API failed, falling back to inference:', graphError.message);
                         return { success: false, error: graphError };
@@ -616,7 +622,7 @@ class ChannelManager {
             Logger.debug('Syncing channel from The Graph:', messageStreamId);
             
             // OPTIMIZATION: Fetch all Graph data in parallel
-            const [streamData, type, members] = await Promise.all([
+            const [streamData, type, membersResult] = await Promise.all([
                 graphAPI.getStream(messageStreamId),
                 graphAPI.detectStreamType(messageStreamId),
                 graphAPI.getStreamMembers(messageStreamId)
@@ -631,6 +637,8 @@ class ChannelManager {
             if (type !== 'unknown') {
                 channel.type = type;
             }
+
+            const members = membersResult.ok ? membersResult.data : [];
 
             // Update members
             channel.members = members.map(m => m.address);
@@ -795,7 +803,8 @@ class ChannelManager {
         try {
             // PRIMARY: Use The Graph API for on-chain data (includes permissions)
             Logger.debug('Fetching members from The Graph...');
-            const graphMembers = await graphAPI.getStreamMembers(streamId);
+            const membersResult = await graphAPI.getStreamMembers(streamId);
+            const graphMembers = membersResult.ok ? membersResult.data : [];
             Logger.debug('Graph members result:', graphMembers);
             
             if (graphMembers && graphMembers.length > 0) {
@@ -861,7 +870,11 @@ class ChannelManager {
 
         // Update local cache (addresses only)
         channel.members = members.map(m => m.address);
-        await this.saveChannels();
+        try {
+            await this.saveChannels();
+        } catch (e) {
+            Logger.error('Failed to persist member cache:', e);
+        }
 
         return members;
     }
@@ -1358,7 +1371,11 @@ class ChannelManager {
             const channel = this.channels.get(streamId);
             if (channel) {
                 channel.members = data.members;
-                await this.saveChannels();
+                try {
+                    await this.saveChannels();
+                } catch (e) {
+                    Logger.error('Failed to persist member update:', e);
+                }
             }
         }
     }
@@ -1703,17 +1720,18 @@ class ChannelManager {
                 throw new Error('You do not have permission to send messages in this channel.');
             }
 
-            // Create signed message using identity manager
-            message = await identityManager.createSignedMessage(text, messageStreamId, replyTo);
-            
-            // DEDUPLICATION: Check if this message is already being sent
-            // This prevents double-sends from rapid clicks or retry loops
-            sendKey = `${messageStreamId}:${message.id}`;
+            // DEDUPLICATION: Use content-based key to block duplicate sends synchronously
+            // This key is created BEFORE the async createSignedMessage to prevent
+            // two rapid clicks from both passing the check before either adds to the Set
+            sendKey = `${messageStreamId}:${text}:${replyTo || ''}`;
             if (this.sendingMessages.has(sendKey)) {
-                Logger.warn('Message already being sent, skipping duplicate:', message.id);
-                return; // Don't throw - just silently skip duplicate
+                Logger.warn('Duplicate send blocked (same content already in flight)');
+                return;
             }
             this.sendingMessages.add(sendKey);
+
+            // Create signed message using identity manager
+            message = await identityManager.createSignedMessage(text, messageStreamId, replyTo);
 
             // Add verification info for local display
             message.verified = {
@@ -2178,6 +2196,9 @@ class ChannelManager {
             
             // Cancel any pending batch verifications for this channel
             this.cancelPendingVerifications(messageStreamId);
+            
+            // Clean up online users tracking for this channel
+            this.onlineUsers.delete(messageStreamId);
             
             this.channels.delete(messageStreamId);
             await this.saveChannels();

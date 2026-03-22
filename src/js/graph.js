@@ -13,6 +13,8 @@
 
 import { secureStorage } from './secureStorage.js';
 import { Logger } from './logger.js';
+import { CONFIG } from './config.js';
+import { NetworkError, Ok, Err } from './utils/errors.js';
 
 // Default API key (fallback if user doesn't provide their own)
 const DEFAULT_API_KEY = 'f56ddaf00b5cbe1eeb1bc003072b5422';
@@ -23,7 +25,7 @@ const SUBGRAPH_ID = 'EGWFdhhiWypDuz22Uy7b3F69E9MEkyfU9iAQMttkH5Rj';
 class GraphAPI {
     constructor() {
         this.cache = new Map();
-        this.CACHE_DURATION = 30000; // 30 seconds cache
+        this.CACHE_DURATION = CONFIG.graph.cacheDurationMs;
     }
 
     /**
@@ -245,7 +247,7 @@ class GraphAPI {
     /**
      * Get list of members (addresses with permissions) for a stream
      * @param {string} streamId - Stream ID
-     * @returns {Promise<Array>} - Array of { address, canPublish, canSubscribe, canGrant, canEdit, isOwner }
+     * @returns {Promise<Result<Array>>} - Result with array of members, or error
      */
     async getStreamMembers(streamId) {
         try {
@@ -255,7 +257,7 @@ class GraphAPI {
             const now = Math.floor(Date.now() / 1000);
             
             // Filter out public permissions and map to member format
-            return permissions
+            const members = permissions
                 .filter(p => p.userAddress && p.userAddress !== '0x0000000000000000000000000000000000000000')
                 .map(p => {
                     // Check expiration times (null = unlimited)
@@ -275,9 +277,14 @@ class GraphAPI {
                         isOwner: p.canGrant && p.canEdit && p.canDelete
                     };
                 });
+            return Ok(members);
         } catch (error) {
             Logger.warn('Failed to get stream members:', error);
-            return [];
+            return Err(new NetworkError(
+                'Failed to get stream members',
+                'GRAPH_MEMBERS_FAILED',
+                { cause: error }
+            ));
         }
     }
 
@@ -288,7 +295,8 @@ class GraphAPI {
      */
     async getStreamOwner(streamId) {
         try {
-            const members = await this.getStreamMembers(streamId);
+            const result = await this.getStreamMembers(streamId);
+            const members = result.ok ? result.data : [];
             const owner = members.find(m => m.isOwner);
             return owner?.address || null;
         } catch (error) {
@@ -326,10 +334,14 @@ class GraphAPI {
 
         try {
             const data = await this.query(query);
-            return data?.streams || [];
+            return Ok(data?.streams || []);
         } catch (error) {
             Logger.warn('Failed to search streams:', error);
-            return [];
+            return Err(new NetworkError(
+                'Failed to search streams',
+                'GRAPH_SEARCH_FAILED',
+                { cause: error }
+            ));
         }
     }
 

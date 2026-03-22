@@ -10,6 +10,8 @@
  */
 
 import { Logger } from './logger.js';
+import { CONFIG } from './config.js';
+import { StorageError } from './utils/errors.js';
 
 class SecureStorage {
     constructor() {
@@ -19,7 +21,7 @@ class SecureStorage {
         this.cache = null;            // Decrypted data cache
         this.isGuestMode = false;     // Guest mode - no persistence
         this.STORAGE_PREFIX = 'pombo_secure_';
-        this.PBKDF2_ITERATIONS = 310000;
+        this.PBKDF2_ITERATIONS = CONFIG.crypto.pbkdf2Iterations;
     }
 
     /**
@@ -213,21 +215,11 @@ class SecureStorage {
             Logger.info('📦 Loaded and decrypted data from storage');
         } catch (error) {
             Logger.error('Failed to decrypt storage - may be corrupted or from different key');
-            // Initialize fresh storage
-            this.cache = {
-                channels: [],
-                trustedContacts: {},
-                ensCache: {},
-                username: null,
-                graphApiKey: null,
-                sessionData: null,
-                channelLastAccess: {},
-                channelOrder: [],
-                lastOpenedChannel: null,
-                blockedPeers: [],
-                dmLeftAt: {},
-                version: 2
-            };
+            throw new StorageError(
+                'Failed to decrypt storage — data may be corrupted or encrypted with a different key',
+                'STORAGE_DECRYPT_FAILED',
+                { cause: error }
+            );
         }
     }
 
@@ -252,6 +244,11 @@ class SecureStorage {
             Logger.debug('💾 Saved encrypted data to storage');
         } catch (error) {
             Logger.error('Failed to save to secure storage:', error);
+            throw new StorageError(
+                'Failed to save encrypted data to storage',
+                'STORAGE_SAVE_FAILED',
+                { cause: error }
+            );
         }
     }
 

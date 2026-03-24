@@ -33,9 +33,10 @@ vi.mock('../../src/js/streamr.js', () => ({
     },
     STREAM_CONFIG: {
         MESSAGE_STREAM: {
-            PARTITIONS: 2,
+            PARTITIONS: 3,
             MESSAGES: 0,
-            SYNC: 1
+            SYNC: 1,
+            SYNC_BLOBS: 2
         }
     }
 }));
@@ -59,7 +60,22 @@ vi.mock('../../src/js/secureStorage.js', () => ({
             username: null,
             graphApiKey: null
         }),
-        importFromSync: vi.fn().mockResolvedValue(false)
+        exportForBackup: vi.fn().mockReturnValue({
+            sentMessages: {},
+            sentReactions: {},
+            channels: [],
+            blockedPeers: [],
+            dmLeftAt: {},
+            trustedContacts: {},
+            ensCache: {},
+            username: null,
+            graphApiKey: null
+        }),
+        importFromSync: vi.fn().mockResolvedValue(false),
+        getUnsyncedImages: vi.fn().mockReturnValue({ [Symbol.asyncIterator]: () => ({ next: () => Promise.resolve({ done: true }) }) }),
+        decryptBlob: vi.fn().mockResolvedValue('base64data'),
+        markImageSynced: vi.fn().mockResolvedValue(undefined),
+        saveImageToLedger: vi.fn().mockResolvedValue(undefined)
     }
 }));
 
@@ -87,12 +103,19 @@ vi.mock('../../src/js/channels.js', () => ({
     }
 }));
 
+vi.mock('../../src/js/identity.js', () => ({
+    identityManager: {
+        loadUsername: vi.fn()
+    }
+}));
+
 import { syncManager } from '../../src/js/syncManager.js';
 import { authManager } from '../../src/js/auth.js';
 import { streamrController } from '../../src/js/streamr.js';
 import { secureStorage } from '../../src/js/secureStorage.js';
 import { dmCrypto } from '../../src/js/dmCrypto.js';
 import { channelManager } from '../../src/js/channels.js';
+import { identityManager } from '../../src/js/identity.js';
 import { dmManager } from '../../src/js/dm.js';
 
 describe('syncManager', () => {
@@ -320,6 +343,23 @@ describe('syncManager', () => {
             await syncManager.pullSync();
             
             expect(channelManager.loadChannels).toHaveBeenCalled();
+        });
+
+        it('should reload username after sync', async () => {
+            authManager.wallet = { privateKey: '0x1234' };
+            authManager.getAddress.mockReturnValue('0xabc123');
+            
+            const syncPayload = { type: 'sync', v: 1, ts: 1000, data: { username: 'SyncedName' } };
+            dmCrypto.decrypt.mockResolvedValue(syncPayload);
+            secureStorage.importFromSync.mockResolvedValue(false);
+            
+            streamrController.fetchPartitionHistory.mockResolvedValue([
+                { content: { ct: 'enc' }, publisherId: '0xABC123', timestamp: 1000 }
+            ]);
+            
+            await syncManager.pullSync();
+            
+            expect(identityManager.loadUsername).toHaveBeenCalled();
         });
     });
 

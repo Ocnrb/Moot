@@ -512,7 +512,7 @@ describe('WalletFlows Extended', () => {
             await walletFlows.loadWalletWithProgress('password123');
 
             expect(createModalFromTemplate).toHaveBeenCalledWith('modal-progress', expect.objectContaining({
-                title: 'Decrypting Account'
+                title: 'Unlocking Account'
             }));
         });
 
@@ -768,20 +768,20 @@ describe('WalletFlows Extended', () => {
 
         const validBackup = {
             format: 'pombo-account-backup',
-            version: 3,
+            version: 1,
             keystore: {
                 address: 'abc123def456'
             }
         };
 
         it('throws on invalid format', async () => {
-            const file = makeBackupFile({ format: 'wrong', version: 3 });
+            const file = makeBackupFile({ format: 'wrong', version: 1 });
 
             await expect(walletFlows.restoreFromBackup(file)).rejects.toThrow('Invalid backup format');
         });
 
         it('throws on wrong version', async () => {
-            const file = makeBackupFile({ format: 'pombo-account-backup', version: 2 });
+            const file = makeBackupFile({ format: 'pombo-account-backup', version: 99 });
 
             await expect(walletFlows.restoreFromBackup(file)).rejects.toThrow('Invalid backup format');
         });

@@ -190,8 +190,6 @@ describe('secureStorage', () => {
             mockSigner = {
                 signMessage: vi.fn().mockResolvedValue('0xsignature123')
             };
-            vi.spyOn(crypto.subtle, 'importKey').mockResolvedValue({});
-            vi.spyOn(crypto.subtle, 'deriveKey').mockResolvedValue({ type: 'secret' });
         });
 
         afterEach(() => {
@@ -215,22 +213,40 @@ describe('secureStorage', () => {
             expect(signedMessage).toContain(address.toLowerCase());
         });
 
-        it('should call crypto.subtle.importKey', async () => {
+        it('should offload PBKDF2 to crypto worker pool', async () => {
+            // The worker pool falls back to main-thread crypto in jsdom,
+            // so we verify the crypto.subtle calls still happen
+            vi.spyOn(crypto.subtle, 'importKey').mockResolvedValue({});
+            vi.spyOn(crypto.subtle, 'deriveKey').mockResolvedValue({ type: 'secret' });
+
             await secureStorage.deriveStorageKey(mockSigner, '0xtest');
             
             expect(crypto.subtle.importKey).toHaveBeenCalled();
-        });
-
-        it('should call crypto.subtle.deriveKey', async () => {
-            await secureStorage.deriveStorageKey(mockSigner, '0xtest');
-            
             expect(crypto.subtle.deriveKey).toHaveBeenCalled();
         });
 
         it('should return derived key', async () => {
+            vi.spyOn(crypto.subtle, 'importKey').mockResolvedValue({});
+            vi.spyOn(crypto.subtle, 'deriveKey').mockResolvedValue({ type: 'secret' });
+
             const result = await secureStorage.deriveStorageKey(mockSigner, '0xtest');
             
             expect(result).toEqual({ type: 'secret' });
+        });
+
+        it('should fall back to main-thread crypto when worker execute rejects', async () => {
+            // Import and mock the worker pool to simulate a per-task failure
+            const { cryptoWorkerPool } = await import('../../src/js/workers/cryptoWorkerPool.js');
+            vi.spyOn(cryptoWorkerPool, 'execute').mockRejectedValue(new Error('Worker crashed'));
+            vi.spyOn(crypto.subtle, 'importKey').mockResolvedValue({});
+            vi.spyOn(crypto.subtle, 'deriveKey').mockResolvedValue({ type: 'fallback-key' });
+
+            const result = await secureStorage.deriveStorageKey(mockSigner, '0xfallback');
+
+            expect(cryptoWorkerPool.execute).toHaveBeenCalledWith('DERIVE_KEY', expect.any(Object));
+            expect(crypto.subtle.importKey).toHaveBeenCalled();
+            expect(crypto.subtle.deriveKey).toHaveBeenCalled();
+            expect(result).toEqual({ type: 'fallback-key' });
         });
     });
 
@@ -264,6 +280,37 @@ describe('secureStorage', () => {
             it('should set and get username', async () => {
                 await secureStorage.setUsername('TestUser');
                 expect(secureStorage.getUsername()).toBe('TestUser');
+            });
+
+            it('should persist username to plain localStorage when not guest', async () => {
+                const setItemSpy = vi.spyOn(localStorage, 'setItem');
+                const saveSpy = vi.spyOn(secureStorage, 'saveToStorage').mockResolvedValue();
+                secureStorage.address = '0xtest1234';
+                secureStorage.isGuestMode = false;
+                await secureStorage.setUsername('Alice');
+                expect(setItemSpy).toHaveBeenCalledWith('pombo_username_0xtest1234', 'Alice');
+                setItemSpy.mockRestore();
+                saveSpy.mockRestore();
+            });
+
+            it('should remove from localStorage when username cleared', async () => {
+                const removeItemSpy = vi.spyOn(localStorage, 'removeItem');
+                const saveSpy = vi.spyOn(secureStorage, 'saveToStorage').mockResolvedValue();
+                secureStorage.address = '0xtest1234';
+                secureStorage.isGuestMode = false;
+                await secureStorage.setUsername(null);
+                expect(removeItemSpy).toHaveBeenCalledWith('pombo_username_0xtest1234');
+                removeItemSpy.mockRestore();
+                saveSpy.mockRestore();
+            });
+
+            it('should not write to localStorage in guest mode', async () => {
+                const setItemSpy = vi.spyOn(localStorage, 'setItem');
+                secureStorage.address = '0xtest1234';
+                secureStorage.isGuestMode = true;
+                await secureStorage.setUsername('Alice');
+                expect(setItemSpy).not.toHaveBeenCalledWith('pombo_username_0xtest1234', 'Alice');
+                setItemSpy.mockRestore();
             });
         });
 

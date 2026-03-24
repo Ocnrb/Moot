@@ -168,8 +168,8 @@ describe('STREAM_CONFIG', () => {
         expect(STREAM_CONFIG.EPHEMERAL_STREAM.MEDIA).toBe(1);
     });
 
-    it('should have 2 partitions for message stream', () => {
-        expect(STREAM_CONFIG.MESSAGE_STREAM.PARTITIONS).toBe(2);
+    it('should have 3 partitions for message stream', () => {
+        expect(STREAM_CONFIG.MESSAGE_STREAM.PARTITIONS).toBe(3);
     });
 
     it('should have 2 partitions for ephemeral stream', () => {

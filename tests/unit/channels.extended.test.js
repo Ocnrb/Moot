@@ -1100,7 +1100,8 @@ describe('ChannelManager Extended', () => {
                     onMedia: expect.any(Function)
                 }),
                 undefined,
-                expect.any(Number)
+                expect.any(Number),
+                expect.any(Function)
             );
         });
 
@@ -1119,7 +1120,8 @@ describe('ChannelManager Extended', () => {
                 'enc-stream-eph',
                 expect.any(Object),
                 'secret',
-                expect.any(Number)
+                expect.any(Number),
+                expect.any(Function)
             );
         });
 
@@ -1148,7 +1150,8 @@ describe('ChannelManager Extended', () => {
                 'stream-no-eph-ephemeral',
                 expect.any(Object),
                 undefined,
-                expect.any(Number)
+                expect.any(Number),
+                expect.any(Function)
             );
         });
     });

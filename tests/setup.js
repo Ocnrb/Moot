@@ -66,25 +66,178 @@ if (!globalThis.crypto) {
 }
 
 // ============================================
-// IndexedDB Mock (basic)
+// IndexedDB Mock (functional in-memory)
 // ============================================
 
-const indexedDBMock = {
-    open: vi.fn(() => ({
-        result: {
-            createObjectStore: vi.fn(),
-            transaction: vi.fn(),
-        },
-        onerror: null,
-        onsuccess: null,
-        onupgradeneeded: null,
-    })),
-    deleteDatabase: vi.fn(),
-};
+/**
+ * Minimal in-memory IndexedDB mock that supports:
+ *  - open / onupgradeneeded / onsuccess
+ *  - createObjectStore with keyPath
+ *  - createIndex
+ *  - transactions (readonly / readwrite)
+ *  - put, get, count, delete, openCursor
+ *  - index().openCursor(IDBKeyRange.only()), index().getAllKeys()
+ */
+function createIndexedDBMock() {
+    const databases = new Map();
 
-if (!globalThis.indexedDB) {
-    Object.defineProperty(globalThis, 'indexedDB', { value: indexedDBMock, writable: true });
+    class MockIDBKeyRange {
+        constructor(value) { this._value = value; }
+        static only(value) { return new MockIDBKeyRange(value); }
+        includes(val) { return val === this._value; }
+    }
+    if (!globalThis.IDBKeyRange) {
+        globalThis.IDBKeyRange = MockIDBKeyRange;
+    }
+
+    class MockStore {
+        constructor(keyPath) {
+            this.keyPath = keyPath;
+            this.data = new Map();
+            this.indexes = new Map(); // name → { keyPath, records ref }
+        }
+        createIndex(name, keyPath, _opts) {
+            this.indexes.set(name, { keyPath });
+            return { keyPath };
+        }
+        _resolve(req, val) {
+            req.result = val;
+            if (req.onsuccess) setTimeout(() => req.onsuccess({ target: req }), 0);
+        }
+        put(value) {
+            const key = value[this.keyPath];
+            this.data.set(key, structuredClone(value));
+            return { onsuccess: null, onerror: null };
+        }
+        get(key) {
+            const req = { result: null, onsuccess: null, onerror: null };
+            const val = this.data.has(key) ? structuredClone(this.data.get(key)) : undefined;
+            Promise.resolve().then(() => this._resolve(req, val));
+            return req;
+        }
+        count(key) {
+            const req = { result: 0, onsuccess: null, onerror: null };
+            const c = key !== undefined ? (this.data.has(key) ? 1 : 0) : this.data.size;
+            Promise.resolve().then(() => this._resolve(req, c));
+            return req;
+        }
+        delete(key) {
+            this.data.delete(key);
+            return { onsuccess: null, onerror: null };
+        }
+        openCursor() {
+            const entries = Array.from(this.data.values());
+            let idx = 0;
+            const req = { result: null, onsuccess: null, onerror: null };
+            const advance = () => {
+                if (idx < entries.length) {
+                    const value = structuredClone(entries[idx++]);
+                    req.result = {
+                        value,
+                        delete: () => { this.data.delete(value[this.keyPath]); },
+                        continue: () => Promise.resolve().then(advance)
+                    };
+                } else {
+                    req.result = null;
+                }
+                if (req.onsuccess) req.onsuccess({ target: req });
+            };
+            Promise.resolve().then(advance);
+            return req;
+        }
+        index(name) {
+            const idxDef = this.indexes.get(name);
+            if (!idxDef) throw new Error(`Index ${name} not found`);
+            const store = this;
+            return {
+                openCursor(range) {
+                    const matching = Array.from(store.data.values())
+                        .filter(r => range ? range.includes(r[idxDef.keyPath]) : true);
+                    let idx = 0;
+                    const req = { result: null, onsuccess: null, onerror: null };
+                    const advance = () => {
+                        if (idx < matching.length) {
+                            const value = structuredClone(matching[idx++]);
+                            req.result = {
+                                value,
+                                delete: () => { store.data.delete(value[store.keyPath]); },
+                                continue: () => Promise.resolve().then(advance)
+                            };
+                        } else {
+                            req.result = null;
+                        }
+                        if (req.onsuccess) req.onsuccess({ target: req });
+                    };
+                    Promise.resolve().then(advance);
+                    return req;
+                },
+                getAllKeys(range) {
+                    const req = { result: null, onsuccess: null, onerror: null };
+                    const keys = Array.from(store.data.values())
+                        .filter(r => range ? range.includes(r[idxDef.keyPath]) : true)
+                        .map(r => r[store.keyPath]);
+                    Promise.resolve().then(() => {
+                        req.result = keys;
+                        if (req.onsuccess) req.onsuccess({ target: req });
+                    });
+                    return req;
+                }
+            };
+        }
+    }
+
+    class MockDB {
+        constructor(name) {
+            this.name = name;
+            this.objectStoreNames = { contains: (n) => this.stores.has(n) };
+            this.stores = new Map();
+        }
+        createObjectStore(name, opts) {
+            const s = new MockStore(opts?.keyPath || null);
+            this.stores.set(name, s);
+            return s;
+        }
+        transaction(storeNames, mode) {
+            const names = Array.isArray(storeNames) ? storeNames : [storeNames];
+            const tx = {
+                objectStore: (n) => this.stores.get(n),
+                oncomplete: null, onerror: null, error: null
+            };
+            // Delay oncomplete enough for get→put chains inside the transaction
+            setTimeout(() => { if (tx.oncomplete) tx.oncomplete(); }, 10);
+            return tx;
+        }
+        close() {}
+    }
+
+    return {
+        _databases: databases,
+        open(name, version) {
+            const req = { result: null, onsuccess: null, onerror: null, onupgradeneeded: null };
+            Promise.resolve().then(() => {
+                let db = databases.get(name);
+                const isNew = !db;
+                if (!db) {
+                    db = new MockDB(name);
+                    databases.set(name, db);
+                }
+                req.result = db;
+                if (isNew && req.onupgradeneeded) {
+                    req.onupgradeneeded({ target: req });
+                }
+                if (req.onsuccess) req.onsuccess({ target: req });
+            });
+            return req;
+        },
+        deleteDatabase(name) {
+            databases.delete(name);
+            return { onsuccess: null, onerror: null };
+        }
+    };
 }
+
+const indexedDBMock = createIndexedDBMock();
+Object.defineProperty(globalThis, 'indexedDB', { value: indexedDBMock, writable: true, configurable: true });
 
 // CSS.escape polyfill for test environment
 if (!globalThis.CSS) {
@@ -152,6 +305,9 @@ beforeEach(() => {
     localStorageMock.store = {};
     sessionStorageMock.store = {};
     
+    // Clear IndexedDB databases
+    indexedDBMock._databases.clear();
+    
     // Clear all mock call history
     vi.clearAllMocks();
 });
@@ -170,4 +326,5 @@ export {
     sessionStorageMock,
     cryptoMock,
     clipboardMock,
+    indexedDBMock,
 };

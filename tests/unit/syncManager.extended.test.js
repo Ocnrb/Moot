@@ -22,7 +22,7 @@ vi.mock('../../src/js/streamr.js', () => ({
         setDMPublishKey: vi.fn().mockResolvedValue(undefined),
         addDMDecryptKey: vi.fn().mockResolvedValue(undefined)
     },
-    STREAM_CONFIG: { MESSAGE_STREAM: { PARTITIONS: 2, MESSAGES: 0, SYNC: 1 } }
+    STREAM_CONFIG: { MESSAGE_STREAM: { PARTITIONS: 3, MESSAGES: 0, SYNC: 1, SYNC_BLOBS: 2 } }
 }));
 
 vi.mock('../../src/js/dm.js', () => ({
@@ -36,7 +36,16 @@ vi.mock('../../src/js/secureStorage.js', () => ({
             blockedPeers: [], dmLeftAt: {}, trustedContacts: {},
             ensCache: {}, username: null, graphApiKey: null
         }),
-        importFromSync: vi.fn().mockResolvedValue(false)
+        exportForBackup: vi.fn().mockReturnValue({
+            sentMessages: {}, sentReactions: {}, channels: [],
+            blockedPeers: [], dmLeftAt: {}, trustedContacts: {},
+            ensCache: {}, username: null, graphApiKey: null
+        }),
+        importFromSync: vi.fn().mockResolvedValue(false),
+        getUnsyncedImages: vi.fn().mockReturnValue({ [Symbol.asyncIterator]: () => ({ next: () => Promise.resolve({ done: true }) }) }),
+        decryptBlob: vi.fn().mockResolvedValue('base64data'),
+        markImageSynced: vi.fn().mockResolvedValue(undefined),
+        saveImageToLedger: vi.fn().mockResolvedValue(undefined)
     }
 }));
 
@@ -60,6 +69,12 @@ vi.mock('../../src/js/dmCrypto.js', () => ({
 
 vi.mock('../../src/js/channels.js', () => ({
     channelManager: { loadChannels: vi.fn() }
+}));
+
+vi.mock('../../src/js/identity.js', () => ({
+    identityManager: {
+        loadUsername: vi.fn()
+    }
 }));
 
 import { syncManager } from '../../src/js/syncManager.js';
@@ -112,6 +127,8 @@ describe('syncManager extended', () => {
         it('should push then pull on success', async () => {
             const pushSpy = vi.spyOn(syncManager, 'pushSync').mockResolvedValue(undefined);
             const pullSpy = vi.spyOn(syncManager, 'pullSync').mockResolvedValue({ merged: true });
+            vi.spyOn(syncManager, 'pushImageBlobs').mockResolvedValue(undefined);
+            vi.spyOn(syncManager, 'pullImageBlobs').mockResolvedValue(undefined);
 
             const result = await syncManager.smartSync();
 
@@ -123,6 +140,8 @@ describe('syncManager extended', () => {
         it('should set pulled=false when pullSync returns null', async () => {
             vi.spyOn(syncManager, 'pushSync').mockResolvedValue(undefined);
             vi.spyOn(syncManager, 'pullSync').mockResolvedValue(null);
+            vi.spyOn(syncManager, 'pushImageBlobs').mockResolvedValue(undefined);
+            vi.spyOn(syncManager, 'pullImageBlobs').mockResolvedValue(undefined);
 
             const result = await syncManager.smartSync();
             expect(result.pulled).toBe(false);
@@ -131,6 +150,8 @@ describe('syncManager extended', () => {
         it('should notify handlers on completion', async () => {
             vi.spyOn(syncManager, 'pushSync').mockResolvedValue(undefined);
             vi.spyOn(syncManager, 'pullSync').mockResolvedValue(null);
+            vi.spyOn(syncManager, 'pushImageBlobs').mockResolvedValue(undefined);
+            vi.spyOn(syncManager, 'pullImageBlobs').mockResolvedValue(undefined);
             const handler = vi.fn();
             syncManager.on('sync_complete', handler);
 
@@ -148,6 +169,7 @@ describe('syncManager extended', () => {
 
         it('should rethrow on pull error', async () => {
             vi.spyOn(syncManager, 'pushSync').mockResolvedValue(undefined);
+            vi.spyOn(syncManager, 'pushImageBlobs').mockResolvedValue(undefined);
             vi.spyOn(syncManager, 'pullSync').mockRejectedValue(new Error('pull fail'));
 
             await expect(syncManager.smartSync()).rejects.toThrow('pull fail');
@@ -425,6 +447,44 @@ describe('syncManager extended', () => {
             const result = syncManager.mergeSentMessages(local, remote);
 
             expect(result.stream1.length).toBe(2);
+        });
+    });
+
+    // ==================== mergeSentMessages immutability ====================
+    describe('mergeSentMessages() immutability', () => {
+        it('should not mutate local input arrays', () => {
+            const localMsg = { id: 'msg1', timestamp: 1, text: 'hello' };
+            const local = { stream1: [localMsg] };
+            const remote = { stream1: [{ id: 'msg2', timestamp: 2, text: 'world' }] };
+
+            const result = syncManager.mergeSentMessages(local, remote);
+
+            // local array should be unchanged
+            expect(local.stream1).toHaveLength(1);
+            expect(local.stream1[0]).toBe(localMsg); // same reference, not mutated
+        });
+
+        it('should not mutate local message objects when adopting remote imageData', () => {
+            const localMsg = { id: 'img1', timestamp: 1, type: 'image', imageId: 'abc' };
+            const local = { stream1: [localMsg] };
+            const remote = { stream1: [{ id: 'img1', timestamp: 1, type: 'image', imageId: 'abc', imageData: 'base64data' }] };
+
+            syncManager.mergeSentMessages(local, remote);
+
+            // Original local message object should NOT have imageData
+            expect(localMsg.imageData).toBeUndefined();
+        });
+
+        it('should not mutate remote input arrays', () => {
+            const remoteMsg = { id: 'msg1', timestamp: 1, text: 'hello' };
+            const local = {};
+            const remote = { stream1: [remoteMsg] };
+
+            const result = syncManager.mergeSentMessages(local, remote);
+
+            // Mutating result should not affect remote
+            result.stream1[0].text = 'modified';
+            expect(remoteMsg.text).toBe('hello');
         });
     });
 });

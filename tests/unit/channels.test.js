@@ -773,12 +773,14 @@ describe('ChannelManager', () => {
                 await channelManager.handleControlMessage('stream1', {
                     type: 'typing',
                     senderId: '0xreal_sender',
-                    user: '0xspoofed'
+                    user: '0xspoofed',
+                    nickname: 'Alice'
                 });
 
                 expect(handler).toHaveBeenCalledWith('typing', {
                     streamId: 'stream1',
-                    user: '0xreal_sender'
+                    user: '0xreal_sender',
+                    nickname: 'Alice'
                 });
             });
 
@@ -793,7 +795,8 @@ describe('ChannelManager', () => {
 
                 expect(handler).toHaveBeenCalledWith('typing', {
                     streamId: 'stream1',
-                    user: '0xlegacy_user'
+                    user: '0xlegacy_user',
+                    nickname: null
                 });
             });
 

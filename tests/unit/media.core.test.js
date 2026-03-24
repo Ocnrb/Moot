@@ -99,6 +99,7 @@ describe('media.js core', () => {
         mediaController.persistedStorageSize = 0;
         mediaController.handlers = {};
         mediaController.db = null;
+        mediaController._pendingImageRequests = new Map();
     });
 
     afterEach(() => {

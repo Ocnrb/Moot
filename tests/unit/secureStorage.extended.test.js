@@ -407,7 +407,7 @@ describe('secureStorage extended', () => {
                 const backup = await secureStorage.exportAccountBackup(keystore, 'testpassword');
 
                 expect(backup.format).toBe('pombo-account-backup');
-                expect(backup.version).toBe(3);
+                expect(backup.version).toBe(1);
                 expect(backup.keystore).toBe(keystore);
                 expect(backup.encryptedData).toBeDefined();
                 expect(backup.encryptedData.kdf).toBe('scrypt');
@@ -467,14 +467,14 @@ describe('secureStorage extended', () => {
         });
 
         it('should throw on invalid backup version', async () => {
-            await expect(secureStorage.importAccountBackup({ format: 'pombo-account-backup', version: 1 }, 'pass'))
+            await expect(secureStorage.importAccountBackup({ format: 'pombo-account-backup', version: 99 }, 'pass'))
                 .rejects.toThrow('Invalid backup format');
         });
 
         it('should decrypt backup and return wallet + data', async () => {
             const mockWallet = { address: '0xrestoredwallet' };
             const decryptedData = {
-                version: 3,
+                version: 1,
                 exportedAt: '2024-01-01T00:00:00Z',
                 address: '0xrestoredwallet',
                 data: {
@@ -512,7 +512,7 @@ describe('secureStorage extended', () => {
             try {
                 const backup = {
                     format: 'pombo-account-backup',
-                    version: 3,
+                    version: 1,
                     keystore: { address: '0xrestoredwallet', crypto: {} },
                     encryptedData: {
                         kdf: 'scrypt',
@@ -549,7 +549,7 @@ describe('secureStorage extended', () => {
             try {
                 const backup = {
                     format: 'pombo-account-backup',
-                    version: 3,
+                    version: 1,
                     keystore: {},
                     encryptedData: {}
                 };
@@ -584,7 +584,7 @@ describe('secureStorage extended', () => {
             try {
                 const backup = {
                     format: 'pombo-account-backup',
-                    version: 3,
+                    version: 1,
                     keystore: {},
                     encryptedData: {
                         kdfparams: { n: 131072, r: 8, p: 1, dklen: 32, salt: '0xaa' },
@@ -605,7 +605,7 @@ describe('secureStorage extended', () => {
         it('should call progress callback during import', async () => {
             const mockWallet = { address: '0xprogress' };
             const decryptedData = {
-                version: 3, exportedAt: '2024-01-01', address: '0xprogress',
+                version: 1, exportedAt: '2024-01-01', address: '0xprogress',
                 data: { channels: [] }
             };
             const mockEthers = {
@@ -637,7 +637,7 @@ describe('secureStorage extended', () => {
                 const progressCb = vi.fn();
                 const backup = {
                     format: 'pombo-account-backup',
-                    version: 3,
+                    version: 1,
                     keystore: {},
                     encryptedData: {
                         kdfparams: { n: 131072, r: 8, p: 1, dklen: 32, salt: '0xaa' },
@@ -662,7 +662,7 @@ describe('secureStorage extended', () => {
         it('should import without progress callback', async () => {
             const mockWallet = { address: '0xnoprogress' };
             const decryptedData = {
-                version: 3, exportedAt: '2024-01-01', address: '0xnoprogress',
+                version: 1, exportedAt: '2024-01-01', address: '0xnoprogress',
                 data: { channels: [] }
             };
             const mockEthers = {
@@ -687,7 +687,7 @@ describe('secureStorage extended', () => {
             try {
                 const backup = {
                     format: 'pombo-account-backup',
-                    version: 3,
+                    version: 1,
                     keystore: {},
                     encryptedData: {
                         kdfparams: { n: 131072, r: 8, p: 1, dklen: 32, salt: '0xaa' },
@@ -853,6 +853,86 @@ describe('secureStorage extended', () => {
             await secureStorage.addSentReaction('stream-1', 'msg-1', '👍', '0xuser');
             const reactions = secureStorage.getSentReactions('stream-1');
             expect(reactions['msg-1']['👍']).toEqual(['0xuser']);
+        });
+    });
+
+    // ==================== addSentMessage strips imageData after IDB save ====================
+    describe('addSentMessage image strip', () => {
+        beforeEach(() => {
+            secureStorage.initAsGuest('0xImageStrip');
+        });
+
+        it('should strip imageData from cache after saving to IDB ledger', async () => {
+            const saveImageSpy = vi.spyOn(secureStorage, 'saveImageToLedger').mockResolvedValue(true);
+
+            await secureStorage.addSentMessage('stream-1', {
+                id: 'img-1', sender: '0x1', timestamp: 1, signature: '', channelId: 'stream-1',
+                type: 'image', imageId: 'imgid-1', imageData: 'data:image/jpeg;base64,bigdata'
+            });
+
+            const stored = secureStorage.getSentMessages('stream-1');
+            expect(stored).toHaveLength(1);
+            expect(stored[0].type).toBe('image');
+            expect(stored[0].imageId).toBe('imgid-1');
+            expect(stored[0].imageData).toBeUndefined();
+            expect(saveImageSpy).toHaveBeenCalledWith('imgid-1', 'data:image/jpeg;base64,bigdata', 'stream-1');
+        });
+
+        it('should not strip imageData for non-image messages', async () => {
+            await secureStorage.addSentMessage('stream-1', {
+                id: 'txt-1', sender: '0x1', timestamp: 1, signature: '', channelId: 'stream-1',
+                text: 'Hello world'
+            });
+
+            const stored = secureStorage.getSentMessages('stream-1');
+            expect(stored[0].text).toBe('Hello world');
+        });
+    });
+
+    // ==================== _trimImageDataFromCache forceAll ====================
+    describe('_trimImageDataFromCache', () => {
+        beforeEach(() => {
+            secureStorage.initAsGuest('0xTrimTest');
+            secureStorage.imageDB = {}; // simulate IDB available
+            secureStorage.cache.sentMessages = {
+                'stream-1': [
+                    { id: 'img1', type: 'image', imageData: 'data1', timestamp: 1 },
+                    { id: 'img2', type: 'image', imageData: 'data2', timestamp: 2 },
+                    { id: 'img3', type: 'image', imageData: 'data3', timestamp: 3 },
+                    { id: 'img4', type: 'image', imageData: 'data4', timestamp: 4 },
+                ]
+            };
+        });
+
+        it('should trim oldest half when forceAll=false and IDB available', () => {
+            secureStorage._trimImageDataFromCache(false);
+            const msgs = secureStorage.cache.sentMessages['stream-1'];
+            // 4 images → trim 2 oldest
+            expect(msgs[0].imageData).toBeUndefined();
+            expect(msgs[1].imageData).toBeUndefined();
+            expect(msgs[2].imageData).toBe('data3');
+            expect(msgs[3].imageData).toBe('data4');
+        });
+
+        it('should trim all when forceAll=true', () => {
+            secureStorage._trimImageDataFromCache(true);
+            const msgs = secureStorage.cache.sentMessages['stream-1'];
+            expect(msgs.every(m => m.imageData === undefined)).toBe(true);
+        });
+
+        it('should trim all when IDB unavailable regardless of forceAll', () => {
+            secureStorage.imageDB = null;
+            secureStorage._trimImageDataFromCache(false);
+            const msgs = secureStorage.cache.sentMessages['stream-1'];
+            expect(msgs.every(m => m.imageData === undefined)).toBe(true);
+        });
+
+        it('should be no-op when no image messages exist', () => {
+            secureStorage.cache.sentMessages = {
+                'stream-1': [{ id: 'txt1', type: 'text', text: 'hi', timestamp: 1 }]
+            };
+            secureStorage._trimImageDataFromCache(true);
+            expect(secureStorage.cache.sentMessages['stream-1'][0].text).toBe('hi');
         });
     });
 });

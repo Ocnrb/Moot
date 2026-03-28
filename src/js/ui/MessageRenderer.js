@@ -15,7 +15,7 @@ class MessageRenderer {
 
     /**
      * Set dependencies
-     * @param {Object} deps - { getCurrentAddress, getMessageReactions, registerMedia, getImage, cacheImage, requestImage, getCurrentChannel, getFileUrl, isSeeding, isVideoPlayable }
+     * @param {Object} deps - { getCurrentAddress, getMessageReactions, registerMedia, getImage, cacheImage, loadImageFromLedger, getCurrentChannel, getFileUrl, isSeeding, isVideoPlayable }
      */
     setDependencies(deps) {
         this.deps = { ...this.deps, ...deps };
@@ -180,14 +180,10 @@ class MessageRenderer {
                 </div>
             `;
         } else {
-            // Request image from network
-            const channel = this.deps.getCurrentChannel?.();
-            if (channel) {
-                this.deps.requestImage?.(channel.streamId, msg.imageId, channel.password);
-            }
-            // Also try IndexedDB ledger (async, will replace placeholder when ready)
+            // Load image from IndexedDB ledger (async, will replace placeholder when ready)
             this.deps.loadImageFromLedger?.(msg.imageId);
             // Include channel ID in placeholder to verify channel context when image arrives
+            const channel = this.deps.getCurrentChannel?.();
             const channelId = channel?.streamId || '';
             return `
                 <div data-image-id="${escapeAttr(msg.imageId)}" data-channel-id="${escapeAttr(channelId)}" class="bg-white/[0.05] rounded-xl p-4 max-w-xs">

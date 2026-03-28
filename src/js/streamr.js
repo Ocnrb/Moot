@@ -10,7 +10,8 @@
  * 
  * Ephemeral Stream (suffix -2): NO STORAGE
  * - Partition 0: Control/Metadata (presence, typing)
- * - Partition 1: Media chunks (P2P file transfer)
+ * - Partition 1: Media signals (P2P coordination: requests, discovery)
+ * - Partition 2: Media data (P2P heavy payloads: file pieces, image data) [Binary]
  * 
  * This solves the privacy problem where Streamr storage is per-stream,
  * not per-partition, causing presence metadata to be persisted.
@@ -61,21 +62,25 @@ const STREAM_CONFIG = {
     // Number of messages to load on scroll (pagination)
     LOAD_MORE_COUNT: CONFIG.stream.loadMoreCount,
     
-    // Message Stream (with storage): 3 partitions (messages + sync state + sync blobs)
+    // Message Stream (with storage)
+    // Regular channels: 1 partition (messages only)
+    // DM inboxes: 3 partitions (messages + sync + sync_blobs)
     MESSAGE_STREAM: {
         SUFFIX: '-1',
-        PARTITIONS: 3,
-        MESSAGES: 0,    // Text, reactions, images, video announcements
-        SYNC: 1,        // Cross-device sync payloads (self → self)
-        SYNC_BLOBS: 2   // Image blobs sync (heavy payloads, separate partition)
+        PARTITIONS: 1,        // Regular channels: messages only
+        DM_PARTITIONS: 3,     // DM inboxes: messages + sync + sync_blobs
+        MESSAGES: 0,          // Text, reactions, images, video announcements
+        SYNC: 1,              // Cross-device sync payloads (self → self, DM inbox only)
+        SYNC_BLOBS: 2         // Image blobs sync (DM inbox only)
     },
     
-    // Ephemeral Stream (no storage): 2 partitions
+    // Ephemeral Stream (no storage): 3 partitions
     EPHEMERAL_STREAM: {
         SUFFIX: '-2',
-        PARTITIONS: 2,
-        CONTROL: 0,  // Presence, typing
-        MEDIA: 1     // File chunks (P2P transfer)
+        PARTITIONS: 3,
+        CONTROL: 0,       // Presence, typing (JSON)
+        MEDIA_SIGNALS: 1, // P2P coordination: piece_request, source_request/announce (JSON)
+        MEDIA_DATA: 2     // P2P heavy payloads: file_piece (Binary - Uint8Array)
     }
 };
 
@@ -124,6 +129,7 @@ class StreamrController {
         this.subscriptions = new Map(); // streamId -> { partition -> subscription }
         this.channels = new Map(); // streamId -> channel config
         this.address = null;
+        this.mediaHandlers = new Map(); // ephemeralStreamId -> { handler, password }
         
         // DM decrypt key recovery tracking
         this._dmKeyAddedForPublisher = new Set();  // Publishers we've added Pombo key for
@@ -148,6 +154,14 @@ class StreamrController {
             this.client = new StreamrClient({
                 auth: {
                     privateKey: signer.privateKey
+                },
+                // Network layer tuning for media transfer
+                network: {
+                    controlLayer: {
+                        maxMessageSize: 1048576,                    // 1MB max message (default is lower)
+                        webrtcDatachannelBufferThresholdLow: 65536,  // 64KB low water mark (default 32KB)
+                        webrtcDatachannelBufferThresholdHigh: 262144  // 256KB high water mark (default 128KB)
+                    }
                 },
                 // RPC endpoints from centralized config
                 contracts: {
@@ -337,9 +351,9 @@ class StreamrController {
             Logger.info('Creating message stream...');
             const startTime = Date.now();
             
-            const messageStream = await createStreamWithRetry(messageStreamId, metadata, 'message', STREAM_CONFIG.MESSAGE_STREAM.PARTITIONS);
+            const messageStream = await createStreamWithRetry(messageStreamId, metadata, 'message', STREAM_CONFIG.MESSAGE_STREAM.PARTITIONS);  // 1 partition for channels
             
-            // Step 2: Create EPHEMERAL STREAM (2 partitions: control + media)
+            // Step 2: Create EPHEMERAL STREAM (3 partitions: control + media signals + media data)
             Logger.info('Creating ephemeral stream...');
             const ephemeralStream = await createStreamWithRetry(ephemeralStreamId, ephemeralMetadata, 'ephemeral', STREAM_CONFIG.EPHEMERAL_STREAM.PARTITIONS);
             
@@ -938,7 +952,7 @@ class StreamrController {
         const messageStream = await getOrCreate(
             messageStreamId,
             metadata,
-            STREAM_CONFIG.MESSAGE_STREAM.PARTITIONS
+            STREAM_CONFIG.MESSAGE_STREAM.DM_PARTITIONS  // 3 partitions: messages + sync + sync_blobs
         );
 
         // Step 2: Create/get ephemeral stream
@@ -1472,7 +1486,11 @@ class StreamrController {
 
             // Encrypt if password provided
             if (password) {
-                payload = await cryptoManager.encryptJSON(data, password);
+                if (data instanceof Uint8Array) {
+                    payload = await cryptoManager.encryptBinary(data, password);
+                } else {
+                    payload = await cryptoManager.encryptJSON(data, password);
+                }
             }
 
             await this.client.publish({
@@ -1531,14 +1549,25 @@ class StreamrController {
     }
 
     /**
-     * Publish media to EPHEMERAL STREAM (partition 1 - ephemeral chunks)
-     * In dual-stream architecture: caller must pass ephemeralStreamId
+     * Publish media signal to EPHEMERAL STREAM (partition 1 - lightweight P2P coordination)
+     * For: piece_request, source_request, source_announce (JSON)
      * @param {string} ephemeralStreamId - Ephemeral Stream ID (ends with -2)
-     * @param {Object} media - Media data (chunks, requests)
+     * @param {Object} signal - Signal data (requests, announcements)
      * @param {string} password - Password for encrypted channels (optional)
      */
-    async publishMedia(ephemeralStreamId, media, password = null) {
-        return await this.publish(ephemeralStreamId, STREAM_CONFIG.EPHEMERAL_STREAM.MEDIA, media, password);
+    async publishMediaSignal(ephemeralStreamId, signal, password = null) {
+        return await this.publish(ephemeralStreamId, STREAM_CONFIG.EPHEMERAL_STREAM.MEDIA_SIGNALS, signal, password);
+    }
+
+    /**
+     * Publish media data to EPHEMERAL STREAM (partition 2 - heavy P2P payloads)
+     * For: file_piece (Binary - Uint8Array)
+     * @param {string} ephemeralStreamId - Ephemeral Stream ID (ends with -2)
+     * @param {Uint8Array} data - Binary payload
+     * @param {string} password - Password for encrypted channels (optional)
+     */
+    async publishMediaData(ephemeralStreamId, data, password = null) {
+        return await this.publish(ephemeralStreamId, STREAM_CONFIG.EPHEMERAL_STREAM.MEDIA_DATA, data, password);
     }
 
     /**
@@ -1587,6 +1616,19 @@ class StreamrController {
         const messageHandler = async (content, streamMessage) => {
             try {
                 let data = content;
+                
+                // Handle binary content (Uint8Array from MEDIA_DATA partition)
+                if (content instanceof Uint8Array) {
+                    if (password) {
+                        data = await cryptoManager.decryptBinary(content, password);
+                    }
+                    const publisherId = streamMessage && (typeof streamMessage.getPublisherId === 'function' 
+                        ? streamMessage.getPublisherId() 
+                        : streamMessage.publisherId);
+                    await handler(data, publisherId);
+                    return;
+                }
+                
                 if (password && typeof content === 'string') {
                     data = await cryptoManager.decryptJSON(content, password);
                 }
@@ -1599,7 +1641,7 @@ class StreamrController {
                         data.senderId = publisherId;
                     }
                 }
-                handler(data);
+                await handler(data);
             } catch (error) {
                 Logger.error(`Failed to process partition ${partition} message:`, error);
             }
@@ -1650,18 +1692,39 @@ class StreamrController {
     }
 
     /**
-     * Ensure media partition is subscribed (lazy load when needed)
-     * In dual-stream architecture: subscribes to ephemeralStream partition 1
+     * Ensure media partitions are subscribed (lazy load when needed)
+     * In dual-stream architecture: subscribes to ephemeralStream partitions 1 (signals) and 2 (data)
+     * Uses stored media handler from subscribeToDualStream() if no handler is provided.
      * @param {string} ephemeralStreamId - Ephemeral Stream ID (ends with -2)
-     * @param {Function} handler - Media message handler
-     * @param {string} password - Optional password
+     * @param {Function} [handler] - Media message handler (optional, uses stored handler)
+     * @param {string} [password] - Optional password (optional, uses stored password)
      */
-    async ensureMediaSubscription(ephemeralStreamId, handler, password = null) {
-        const mediaPartition = STREAM_CONFIG.EPHEMERAL_STREAM.MEDIA;
-        if (this.isSubscribedToPartition(ephemeralStreamId, mediaPartition)) {
-            return;
+    async ensureMediaSubscription(ephemeralStreamId, handler, password) {
+        // Resolve handler/password from stored media handlers if not explicitly provided
+        if (!handler) {
+            const stored = this.mediaHandlers.get(ephemeralStreamId);
+            if (!stored) {
+                Logger.warn('ensureMediaSubscription: no handler stored for', ephemeralStreamId);
+                return;
+            }
+            handler = stored.handler;
+            if (password === undefined) password = stored.password;
         }
-        return this.subscribeToPartition(ephemeralStreamId, mediaPartition, handler, password);
+
+        const signalPartition = STREAM_CONFIG.EPHEMERAL_STREAM.MEDIA_SIGNALS;
+        const dataPartition = STREAM_CONFIG.EPHEMERAL_STREAM.MEDIA_DATA;
+        
+        const promises = [];
+        if (!this.isSubscribedToPartition(ephemeralStreamId, signalPartition)) {
+            promises.push(this.subscribeToPartition(ephemeralStreamId, signalPartition, handler, password));
+        }
+        if (!this.isSubscribedToPartition(ephemeralStreamId, dataPartition)) {
+            promises.push(this.subscribeToPartition(ephemeralStreamId, dataPartition, handler, password));
+        }
+        if (promises.length > 0) {
+            Logger.info('Lazy-subscribing to media partitions P1+P2:', ephemeralStreamId);
+            await Promise.all(promises);
+        }
     }
 
     /**
@@ -2129,6 +2192,19 @@ class StreamrController {
             try {
                 let data = content;
                 
+                // Handle binary content (Uint8Array from MEDIA_DATA partition)
+                if (content instanceof Uint8Array) {
+                    if (password) {
+                        data = await cryptoManager.decryptBinary(content, password);
+                    }
+                    // Extract senderId and wrap binary with metadata
+                    const publisherId = streamMessage && (typeof streamMessage.getPublisherId === 'function' 
+                        ? streamMessage.getPublisherId() 
+                        : streamMessage.publisherId);
+                    await handler(data, publisherId);
+                    return;
+                }
+                
                 // Decrypt if password provided
                 if (password && typeof content === 'string') {
                     data = await cryptoManager.decryptJSON(content, password);
@@ -2145,13 +2221,11 @@ class StreamrController {
                     }
                 }
                 
-                handler(data);
+                await handler(data);
             } catch (error) {
                 Logger.error('Failed to process message:', error);
             }
         };
-        
-        // Error handler for SDK-level errors (e.g., decrypt failures for old GroupKeys)
         const errorHandler = async (error) => {
             // Decrypt errors for missing GroupKeys
             if (error.code === 'DECRYPT_ERROR' || error.message?.includes('encryption key')) {
@@ -2423,16 +2497,12 @@ class StreamrController {
                     );
                 }
                 
-                // Partition 1: Media chunks - NO history
+                // Store media handler for lazy P1/P2 subscription via ensureMediaSubscription()
+                // Partitions 1 (signals) and 2 (data) are NOT subscribed here — they are
+                // subscribed on-demand when a download starts or a file is sent.
                 if (handlers.onMedia) {
-                    Logger.debug('Subscribing to ephemeralStream partition 1 (media) - no history');
-                    ephSubs[STREAM_CONFIG.EPHEMERAL_STREAM.MEDIA] = await this.subscribeWithHistory(
-                        ephemeralStreamId,
-                        STREAM_CONFIG.EPHEMERAL_STREAM.MEDIA,
-                        handlers.onMedia,
-                        0, // NO history - ephemeral P2P
-                        password
-                    );
+                    this.mediaHandlers.set(ephemeralStreamId, { handler: handlers.onMedia, password });
+                    Logger.debug('Media handler stored for lazy P1/P2 subscription:', ephemeralStreamId);
                 }
                 
                 this.subscriptions.set(ephemeralStreamId, ephSubs);
@@ -2452,11 +2522,27 @@ class StreamrController {
      * @param {string} ephemeralStreamId - Ephemeral Stream ID
      */
     async unsubscribeFromDualStream(messageStreamId, ephemeralStreamId) {
+        // Clean up stored media handler
+        this.mediaHandlers.delete(ephemeralStreamId);
+        
         await Promise.allSettled([
             this.unsubscribe(messageStreamId),
             this.unsubscribe(ephemeralStreamId)
         ]);
         Logger.debug('Unsubscribed from dual-stream:', messageStreamId);
+    }
+
+    /**
+     * Unsubscribe only from media partitions (P1 signals + P2 data), keeping P0 control alive.
+     * Used when no active media transfers remain on a background channel.
+     * @param {string} ephemeralStreamId - Ephemeral Stream ID (ends with -2)
+     */
+    async unsubscribeMediaPartitions(ephemeralStreamId) {
+        await Promise.allSettled([
+            this.unsubscribeFromPartition(ephemeralStreamId, STREAM_CONFIG.EPHEMERAL_STREAM.MEDIA_SIGNALS),
+            this.unsubscribeFromPartition(ephemeralStreamId, STREAM_CONFIG.EPHEMERAL_STREAM.MEDIA_DATA)
+        ]);
+        Logger.debug('Unsubscribed from media partitions P1+P2:', ephemeralStreamId);
     }
 
     // ==================== End Storage/Subscription Methods ====================

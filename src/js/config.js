@@ -143,14 +143,15 @@ export const CONFIG = {
         imageMaxWidth: 1280,
         imageMaxHeight: 720,
         imageQuality: 0.92,
-        pieceSize: 64 * 1024,                  // 64KB chunks
-        pieceSendDelayMs: 5,                  // Delay between piece sends
-        maxConcurrentRequests: 8,
-        pieceRequestTimeoutMs: 5000,          // 5s per piece
+        pieceSize: 220 * 1024,                  // 220KB chunks
+        pieceSendDelayMs: 5,                    // 5ms delay between piece sends
+        maxConcurrentRequests: 10,
+        concurrentSends: 50,                     // Parallel Streamr publishes (bounded concurrency)
+        pieceRequestTimeoutMs: 8000,           // 8s per piece (cross-device RTT headroom)
         maxFileSize: 500 * 1024 * 1024,        // 500MB max upload
         minSeeders: 1,
         preferredSeeders: 3,
-        seederRequestIntervalMs: 2000,
+        seederRequestIntervalMs: 1000,
         seederDiscoveryTimeoutMs: 30000,
         seederRefreshIntervalMs: 10000,
         maxSeederRequests: 10,

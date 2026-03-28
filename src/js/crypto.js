@@ -225,6 +225,53 @@ class CryptoManager {
     }
 
     /**
+     * Encrypt binary data (Uint8Array) with AES-GCM
+     * Returns Uint8Array (salt + iv + ciphertext) for zero-copy binary transport
+     * @param {Uint8Array} data - Binary data to encrypt
+     * @param {string} password - Password for encryption
+     * @returns {Promise<Uint8Array>} - Encrypted binary (salt[16] + iv[12] + ciphertext)
+     */
+    async encryptBinary(data, password) {
+        const salt = this.generateSalt();
+        const iv = this.generateIV();
+        const key = await this.deriveKey(password, salt);
+
+        const ciphertext = await crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv },
+            key,
+            data
+        );
+
+        const combined = new Uint8Array(salt.length + iv.length + ciphertext.byteLength);
+        combined.set(salt, 0);
+        combined.set(iv, salt.length);
+        combined.set(new Uint8Array(ciphertext), salt.length + iv.length);
+        return combined;
+    }
+
+    /**
+     * Decrypt binary data (Uint8Array) with AES-GCM
+     * @param {Uint8Array} encrypted - Encrypted binary (salt[16] + iv[12] + ciphertext)
+     * @param {string} password - Password for decryption
+     * @returns {Promise<Uint8Array>} - Decrypted binary data
+     */
+    async decryptBinary(encrypted, password) {
+        const salt = encrypted.slice(0, 16);
+        const iv = encrypted.slice(16, 28);
+        const ciphertext = encrypted.slice(28);
+
+        const key = await this.deriveKey(password, salt);
+
+        const plaintext = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv },
+            key,
+            ciphertext
+        );
+
+        return new Uint8Array(plaintext);
+    }
+
+    /**
      * Convert ArrayBuffer to Base64
      * @param {ArrayBuffer|Uint8Array} buffer - Buffer to convert
      * @returns {string} - Base64 string

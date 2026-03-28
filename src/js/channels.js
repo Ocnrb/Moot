@@ -20,6 +20,7 @@ import { dmManager } from './dm.js';
 import { dmCrypto } from './dmCrypto.js';
 import { CONFIG } from './config.js';
 import { StorageError } from './utils/errors.js';
+import { mediaController } from './media.js';
 
 class ChannelManager {
     constructor() {
@@ -1123,7 +1124,7 @@ class ChannelManager {
             {
                 onMessage: (data) => this.handleTextMessage(messageStreamId, data),
                 onControl: (data) => this.handleControlMessage(messageStreamId, data),
-                onMedia: (data) => this.handleMediaMessage(messageStreamId, data)
+                onMedia: (data, senderId) => this.handleMediaMessage(messageStreamId, data, senderId)
             },
             pwd,
             STREAM_CONFIG.INITIAL_MESSAGES,
@@ -1655,13 +1656,20 @@ class ChannelManager {
     }
 
     /**
-     * Handle media message
+     * Handle media message (JSON from MEDIA_SIGNALS or binary from MEDIA_DATA)
      * @param {string} streamId - Stream ID
-     * @param {Object} data - Media data
+     * @param {Object|Uint8Array} data - Media data (JSON object or binary)
+     * @param {string} [senderId] - Publisher ID (provided for binary messages)
      */
-    handleMediaMessage(streamId, data) {
+    handleMediaMessage(streamId, data, senderId) {
         // CRITICAL: Check if still connected before processing
         if (!authManager.isConnected()) {
+            return;
+        }
+        
+        // Binary data from MEDIA_DATA partition — delegate to mediaController for decoding
+        if (data instanceof Uint8Array) {
+            mediaController.handleMediaMessage(streamId, data, senderId);
             return;
         }
         

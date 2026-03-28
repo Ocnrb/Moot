@@ -110,7 +110,6 @@ class UIController {
             registerMedia: (url, type) => mediaHandler.registerMedia(url, type),
             getImage: (imageId) => mediaController.getImage(imageId),
             cacheImage: (imageId, data) => mediaController.cacheImage(imageId, data),
-            requestImage: (streamId, imageId, password) => mediaController.requestImage(streamId, imageId, password),
             loadImageFromLedger: (imageId) => {
                 secureStorage.getImageBlob(imageId).then(data => {
                     if (data) {

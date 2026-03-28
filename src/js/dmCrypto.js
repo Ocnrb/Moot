@@ -135,6 +135,48 @@ class DMCrypto {
     }
 
     /**
+     * Encrypt binary data (Uint8Array) for DM transport.
+     * Used for media payloads (file pieces, image data) on ephemeral P2.
+     * Output format: [12B iv][N ciphertext+authTag]
+     * @param {Uint8Array} data - Raw binary data
+     * @param {CryptoKey} aesKey - AES-256-GCM key (from ECDH shared secret)
+     * @returns {Promise<Uint8Array>} - Encrypted binary (iv + ciphertext)
+     */
+    async encryptBinary(data, aesKey) {
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const ciphertext = await crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv },
+            aesKey,
+            data
+        );
+        const result = new Uint8Array(12 + ciphertext.byteLength);
+        result.set(iv, 0);
+        result.set(new Uint8Array(ciphertext), 12);
+        return result;
+    }
+
+    /**
+     * Decrypt binary data (Uint8Array) from DM transport.
+     * Input format: [12B iv][N ciphertext+authTag]
+     * @param {Uint8Array} encrypted - Encrypted binary (iv + ciphertext)
+     * @param {CryptoKey} aesKey - AES-256-GCM key (from ECDH shared secret)
+     * @returns {Promise<Uint8Array>} - Decrypted raw binary
+     */
+    async decryptBinary(encrypted, aesKey) {
+        if (!(encrypted instanceof Uint8Array) || encrypted.byteLength < 28) {
+            throw new Error(`Invalid encrypted binary: expected Uint8Array ≥28 bytes (12B IV + 16B tag), got ${encrypted?.byteLength ?? 0}`);
+        }
+        const iv = encrypted.slice(0, 12);
+        const ciphertext = encrypted.slice(12);
+        const plaintext = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv },
+            aesKey,
+            ciphertext
+        );
+        return new Uint8Array(plaintext);
+    }
+
+    /**
      * Check if a data object is an encrypted DM envelope.
      * @param {Object} data - Raw data from Streamr
      * @returns {boolean}

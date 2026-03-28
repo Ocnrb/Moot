@@ -15,13 +15,14 @@
 import { Logger } from './logger.js';
 import { CONFIG } from './config.js';
 import { CryptoError } from './utils/errors.js';
-import { streamrController } from './streamr.js';
+import { streamrController, STREAM_CONFIG } from './streamr.js';
 import { channelManager } from './channels.js';
 import { secureStorage } from './secureStorage.js';
 import { authManager } from './auth.js';
 import { identityManager } from './identity.js';
 import { relayManager } from './relayManager.js';
 import { dmCrypto } from './dmCrypto.js';
+import { mediaController } from './media.js';
 
 class DMManager {
     constructor() {
@@ -226,14 +227,32 @@ class DMManager {
                 await streamrController.addDMDecryptKey(peerAddress);
             }
 
+            // Partition 0: Control (presence, typing)
             this.inboxEphemeralSubscription = await streamrController.subscribeWithHistory(
                 this.inboxEphemeralStreamId,
-                0,  // partition 0 = control
+                STREAM_CONFIG.EPHEMERAL_STREAM.CONTROL,
                 (data) => this.routeInboxControl(data),
                 0,  // no history — ephemeral
                 null
             );
-            Logger.info('DM: Ephemeral subscription active (on-demand)');
+
+            // Partition 1: Media signals (piece_request, source_request, etc.)
+            await streamrController.subscribeToPartition(
+                this.inboxEphemeralStreamId,
+                STREAM_CONFIG.EPHEMERAL_STREAM.MEDIA_SIGNALS,
+                (data) => this.routeInboxMedia(data),
+                null
+            );
+
+            // Partition 2: Media data (file_piece — binary)
+            await streamrController.subscribeToPartition(
+                this.inboxEphemeralStreamId,
+                STREAM_CONFIG.EPHEMERAL_STREAM.MEDIA_DATA,
+                (data, senderId) => this.routeInboxMedia(data, senderId),
+                null
+            );
+
+            Logger.info('DM: Ephemeral subscription active (control + media signals + media data)');
         } catch (error) {
             Logger.warn('DM: Ephemeral subscription failed (non-critical):', error.message);
             this.inboxEphemeralSubscription = null;
@@ -339,6 +358,53 @@ class DMManager {
 
         // Forward to channelManager with the conversation's messageStreamId
         channelManager.handleControlMessage(channelStreamId, controlData);
+    }
+
+    /**
+     * Route an incoming media message from DM inbox ephemeral to mediaController.
+     * @param {Object|Uint8Array} data - Media data (JSON or binary)
+     * @param {string} [senderId] - Publisher ID (provided for binary messages)
+     */
+    async routeInboxMedia(data, senderId) {
+        // For JSON messages, senderId is embedded in data.senderId
+        const sender = senderId || data?.senderId;
+        if (!sender) return;
+
+        const senderAddress = sender.toLowerCase();
+        const myAddress = authManager.getAddress()?.toLowerCase();
+        if (senderAddress === myAddress) return;
+
+        // Block check
+        if (secureStorage.isBlocked(senderAddress)) return;
+
+        // Find conversation for this sender
+        const channelStreamId = this.conversations.get(senderAddress);
+        if (!channelStreamId) return;
+
+        // Decrypt media with ECDH shared key (Alice-Bob specific)
+        try {
+            const privateKey = authManager.wallet?.privateKey;
+            const peerPubKey = await this.getPeerPublicKey(senderAddress);
+
+            if (privateKey && peerPubKey) {
+                const aesKey = await dmCrypto.getSharedKey(privateKey, senderAddress, peerPubKey);
+
+                if (data instanceof Uint8Array) {
+                    // P2: Binary media — decrypt with ECDH key
+                    data = await dmCrypto.decryptBinary(data, aesKey);
+                } else if (dmCrypto.isEncrypted(data)) {
+                    // P1: JSON signal — decrypt envelope with ECDH key
+                    data = await dmCrypto.decrypt(data, aesKey);
+                    data.senderId = senderAddress;
+                }
+            }
+        } catch (e) {
+            Logger.warn('DM: Media decryption failed from', senderAddress, e.message);
+            return;
+        }
+
+        // Forward to mediaController — it handles binary decode and dispatch
+        mediaController.handleMediaMessage(channelStreamId, data, senderId);
     }
 
     /**

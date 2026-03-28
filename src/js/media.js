@@ -7,7 +7,7 @@
  */
 
 import { Logger } from './logger.js';
-import { streamrController, deriveEphemeralId } from './streamr.js';
+import { streamrController, deriveEphemeralId, STREAM_CONFIG } from './streamr.js';
 import { authManager } from './auth.js';
 import { identityManager } from './identity.js';
 import { channelManager } from './channels.js';
@@ -34,6 +34,7 @@ const CONFIG = {
     PIECE_SIZE: APP_CONFIG.media.pieceSize,
     PIECE_SEND_DELAY: APP_CONFIG.media.pieceSendDelayMs,
     MAX_CONCURRENT_REQUESTS: APP_CONFIG.media.maxConcurrentRequests,
+    CONCURRENT_SENDS: APP_CONFIG.media.concurrentSends || 3,
     PIECE_REQUEST_TIMEOUT: APP_CONFIG.media.pieceRequestTimeoutMs,
     MAX_FILE_SIZE: APP_CONFIG.media.maxFileSize,
     
@@ -53,6 +54,62 @@ const CONFIG = {
     PERSIST_PRIVATE_CHANNELS: false        // Don't persist files from private channels (privacy)
     
 };
+
+// ==================== BINARY PROTOCOL ====================
+// Binary encoding for MEDIA_DATA partition (partition 2)
+// Format: [1 byte type] [header bytes] [payload]
+const BINARY_MSG_TYPE = {
+    FILE_PIECE: 0x01
+};
+
+/**
+ * Encode a file_piece as Uint8Array for binary transport.
+ * Format: [1B type=0x01] [36B fileId UTF-8] [4B pieceIndex uint32BE] [N bytes raw data]
+ * @param {string} fileId - File ID (UUID, 36 chars)
+ * @param {number} pieceIndex - Piece index
+ * @param {ArrayBuffer|Uint8Array} data - Raw piece data
+ * @returns {Uint8Array}
+ */
+function encodeFilePiece(fileId, pieceIndex, data) {
+    const fileIdBytes = new TextEncoder().encode(fileId); // 36 bytes for UUID
+    const dataBytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+    const buf = new Uint8Array(1 + 36 + 4 + dataBytes.byteLength);
+    buf[0] = BINARY_MSG_TYPE.FILE_PIECE;
+    buf.set(fileIdBytes.slice(0, 36), 1);
+    // pieceIndex as uint32 big-endian at offset 37
+    const view = new DataView(buf.buffer);
+    view.setUint32(37, pieceIndex, false);
+    buf.set(dataBytes, 41);
+    return buf;
+}
+
+/**
+ * Decode a file_piece from binary.
+ * @param {Uint8Array} buf - Binary buffer
+ * @returns {{ type: string, fileId: string, pieceIndex: number, data: Uint8Array }}
+ */
+function decodeFilePiece(buf) {
+    const fileId = new TextDecoder().decode(buf.slice(1, 37));
+    const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    const pieceIndex = view.getUint32(37, false);
+    const data = buf.slice(41);
+    return { type: 'file_piece', fileId, pieceIndex, data };
+}
+
+
+
+/**
+ * Decode any binary media message.
+ * @param {Uint8Array} buf - Binary buffer
+ * @returns {Object} Decoded message with type field
+ */
+function decodeBinaryMedia(buf) {
+    if (!buf || buf.length === 0) return null;
+    switch (buf[0]) {
+        case BINARY_MSG_TYPE.FILE_PIECE: return decodeFilePiece(buf);
+        default: return null;
+    }
+}
 
 class MediaController {
     constructor() {
@@ -96,7 +153,7 @@ class MediaController {
         
         // Piece send queue for throttling
         this.pieceSendQueue = [];
-        this.isSendingPieces = false;
+        this.activeSends = 0;
         this.lastPieceSentTime = 0;
     }
 
@@ -160,7 +217,7 @@ class MediaController {
         
         // Clear piece send queue
         this.pieceSendQueue = [];
-        this.isSendingPieces = false;
+        this.activeSends = 0;
         this.lastPieceSentTime = 0;
         
         // Reset owner
@@ -168,6 +225,25 @@ class MediaController {
         this.persistedStorageSize = 0;
         
         Logger.info('Media controller reset');
+    }
+
+    /**
+     * Get ECDH AES key for DM channels (for encrypting media on -2).
+     * Returns null for non-DM channels (password encryption handled separately).
+     * @param {string} messageStreamId - Channel message stream ID
+     * @returns {Promise<CryptoKey|null>}
+     */
+    async _getDMMediaKey(messageStreamId) {
+        const channel = channelManager.getChannel(messageStreamId);
+        if (channel?.type !== 'dm' || !channel.peerAddress) return null;
+
+        const privateKey = authManager.wallet?.privateKey;
+        if (!privateKey) return null;
+
+        const peerPubKey = await dmManager.getPeerPublicKey(channel.peerAddress);
+        if (!peerPubKey) return null;
+
+        return dmCrypto.getSharedKey(privateKey, channel.peerAddress, peerPubKey);
     }
 
     /**
@@ -287,6 +363,12 @@ class MediaController {
             // Trigger callback to announce file
             if (tempRef.callback) {
                 await tempRef.callback(metadata);
+            }
+            
+            // Lazy-subscribe to media partitions P1+P2 (sender needs P1 to receive piece_requests)
+            if (tempRef.streamId) {
+                const ephemeralStreamId = deriveEphemeralId(tempRef.streamId);
+                await streamrController.ensureMediaSubscription(ephemeralStreamId);
             }
             
             // Persist for seeding across sessions (after announcement)
@@ -442,8 +524,6 @@ class MediaController {
         this.imageCache.set(data.imageId, data.data);
         this.imageCacheBytes += data.data.length * 2;
         this.evictImageCacheIfNeeded();
-        // Clear from pending requests (image arrived)
-        this._pendingImageRequests?.delete(data.imageId);
         Logger.debug('Image received:', data.imageId);
         
         // Notify handlers
@@ -557,28 +637,21 @@ class MediaController {
     }
 
     /**
-     * Request image data from network
+     * Check if there are active media transfers (downloads or seeds) for a given channel.
+     * Used by subscriptionManager to decide whether to keep P1/P2 alive on channel switch.
      * @param {string} messageStreamId - Channel message stream ID
-     * @param {string} imageId - Image ID to request
-     * @param {string} password - Channel password (optional)
+     * @returns {boolean}
      */
-    async requestImage(messageStreamId, imageId, password = null) {
-        // Dedup: skip if already requested recently (30s cooldown)
-        if (!this._pendingImageRequests) this._pendingImageRequests = new Map();
-        const now = Date.now();
-        if (this._pendingImageRequests.has(imageId)) {
-            const lastReq = this._pendingImageRequests.get(imageId);
-            if (now - lastReq < 30000) return;
+    hasActiveMediaTransfers(messageStreamId) {
+        // Check active downloads
+        for (const [, transfer] of this.incomingFiles) {
+            if (transfer.streamId === messageStreamId) return true;
         }
-        this._pendingImageRequests.set(imageId, now);
-
-        const ephemeralStreamId = deriveEphemeralId(messageStreamId);
-        const request = {
-            type: 'image_request',
-            imageId: imageId
-        };
-        await streamrController.publishMedia(ephemeralStreamId, request, password);
-        Logger.debug('Image requested:', imageId);
+        // Check active seeds (local files being served)
+        for (const [, fileInfo] of this.localFiles) {
+            if (fileInfo.streamId === messageStreamId) return true;
+        }
+        return false;
     }
 
     // ==================== VIDEO/FILE HANDLING ====================
@@ -658,18 +731,21 @@ class MediaController {
      * @param {string} messageStreamId - Channel message stream ID
      * @param {Object} data - Media data
      */
-    handleMediaMessage(messageStreamId, data) {
+    handleMediaMessage(messageStreamId, data, senderId) {
+        // Handle binary data from MEDIA_DATA partition
+        if (data instanceof Uint8Array) {
+            const decoded = decodeBinaryMedia(data);
+            if (!decoded) {
+                Logger.debug('Unknown binary media message');
+                return;
+            }
+            if (senderId) decoded.senderId = senderId;
+            return this.handleMediaMessage(messageStreamId, decoded);
+        }
+        
         if (!data || !data.type) return;
         
         switch (data.type) {
-            case 'image_data':
-                this.handleImageData(data);
-                break;
-                
-            case 'image_request':
-                this.handleImageRequest(messageStreamId, data);
-                break;
-                
             case 'piece_request':
                 this.handlePieceRequest(messageStreamId, data);
                 break;
@@ -692,32 +768,6 @@ class MediaController {
     }
 
     /**
-     * Handle image request (from another peer)
-     * Response is encrypted with channel password for private channels
-     * Response goes to ephemeralStream (not stored)
-     */
-    async handleImageRequest(messageStreamId, data) {
-        const imageData = this.imageCache.get(data.imageId);
-        if (!imageData) return;
-        
-        // Get channel password for encryption
-        const channel = channelManager.getChannel(messageStreamId);
-        const password = channel?.password || null;
-        
-        // Derive ephemeral stream ID for response
-        const ephemeralStreamId = deriveEphemeralId(messageStreamId);
-        
-        // Send the image data to ephemeralStream (encrypted if password channel)
-        const payload = {
-            type: 'image_data',
-            imageId: data.imageId,
-            data: imageData
-        };
-        await streamrController.publishMedia(ephemeralStreamId, payload, password);
-        Logger.debug('Image data sent in response to request:', data.imageId, password ? '(encrypted)' : '');
-    }
-
-    /**
      * Start downloading a file
      * @param {string} messageStreamId - Channel message stream ID
      * @param {Object} metadata - File metadata from announcement
@@ -730,6 +780,10 @@ class MediaController {
             Logger.warn('Download already in progress:', fileId);
             return;
         }
+        
+        // Lazy-subscribe to media partitions P1+P2 (needed for piece_request/file_piece)
+        const ephemeralStreamId = deriveEphemeralId(messageStreamId);
+        await streamrController.ensureMediaSubscription(ephemeralStreamId);
         
         // Initialize transfer state
         const transfer = {
@@ -900,7 +954,14 @@ class MediaController {
             targetSeederId: seederId
         };
         
-        await streamrController.publishMedia(ephemeralStreamId, request, transfer.password);
+        // DM channels: encrypt signal with ECDH shared key
+        const dmKey = await this._getDMMediaKey(transfer.streamId);
+        if (dmKey) {
+            const encrypted = await dmCrypto.encrypt(request, dmKey);
+            await streamrController.publishMediaSignal(ephemeralStreamId, encrypted, null);
+        } else {
+            await streamrController.publishMediaSignal(ephemeralStreamId, request, transfer.password);
+        }
     }
 
     /**
@@ -943,15 +1004,11 @@ class MediaController {
     }
 
     /**
-     * Process the piece send queue with throttling
-     * Ensures minimum PIECE_SEND_DELAY between sends (~44 MB/s max)
+     * Process the piece send queue with bounded concurrency
+     * Allows up to CONCURRENT_SENDS parallel Streamr publishes to hide network latency
      */
     async processPieceQueue() {
-        if (this.isSendingPieces || this.pieceSendQueue.length === 0) return;
-        
-        this.isSendingPieces = true;
-        
-        while (this.pieceSendQueue.length > 0) {
+        while (this.pieceSendQueue.length > 0 && this.activeSends < CONFIG.CONCURRENT_SENDS) {
             const { messageStreamId, fileId, pieceIndex, resolve } = this.pieceSendQueue.shift();
             
             // Throttle: wait for minimum delay since last send
@@ -960,14 +1017,18 @@ class MediaController {
             if (elapsed < CONFIG.PIECE_SEND_DELAY) {
                 await new Promise(r => setTimeout(r, CONFIG.PIECE_SEND_DELAY - elapsed));
             }
-            
-            // Send the piece
-            await this._sendPieceImmediate(messageStreamId, fileId, pieceIndex);
             this.lastPieceSentTime = Date.now();
-            resolve();
+            
+            // Launch send concurrently (don't await)
+            this.activeSends++;
+            this._sendPieceImmediate(messageStreamId, fileId, pieceIndex)
+                .then(() => resolve())
+                .catch(() => resolve())
+                .finally(() => {
+                    this.activeSends--;
+                    this.processPieceQueue(); // drain next from queue
+                });
         }
-        
-        this.isSendingPieces = false;
     }
 
     /**
@@ -985,7 +1046,6 @@ class MediaController {
         
         const chunk = file.slice(start, end);
         const arrayBuffer = await chunk.arrayBuffer();
-        const base64 = this.arrayBufferToBase64(arrayBuffer);
         
         // Get channel password for encryption
         const channel = channelManager.getChannel(messageStreamId);
@@ -994,15 +1054,19 @@ class MediaController {
         // Derive ephemeral stream ID for P2P data
         const ephemeralStreamId = deriveEphemeralId(messageStreamId);
         
-        const payload = {
-            type: 'file_piece',
-            fileId,
-            pieceIndex,
-            data: base64
-        };
+        // Encode as binary for MEDIA_DATA partition (zero base64 overhead)
+        let binaryPayload = encodeFilePiece(fileId, pieceIndex, arrayBuffer);
         
-        await streamrController.publishMedia(ephemeralStreamId, payload, password);
-        Logger.debug('Sent piece', pieceIndex, 'of', fileId, password ? '(encrypted)' : '');
+        // DM channels: encrypt binary with ECDH shared key (Alice-Bob specific)
+        const dmKey = await this._getDMMediaKey(messageStreamId);
+        if (dmKey) {
+            binaryPayload = await dmCrypto.encryptBinary(binaryPayload, dmKey);
+            await streamrController.publishMediaData(ephemeralStreamId, binaryPayload, null);
+            Logger.debug('Sent piece (binary+ECDH)', pieceIndex, 'of', fileId);
+        } else {
+            await streamrController.publishMediaData(ephemeralStreamId, binaryPayload, password);
+            Logger.debug('Sent piece (binary)', pieceIndex, 'of', fileId, password ? '(encrypted)' : '');
+        }
     }
 
     /**
@@ -1038,8 +1102,15 @@ class MediaController {
         // Mark as processing to prevent race conditions
         transfer.pieceStatus[pieceIndex] = 'processing';
         
-        // Decode piece
-        const pieceBuffer = this.base64ToArrayBuffer(data.data);
+        // Decode piece (Uint8Array from binary protocol, or base64 legacy)
+        let pieceBuffer;
+        if (data.data instanceof Uint8Array) {
+            pieceBuffer = data.data.buffer.byteLength === data.data.length 
+                ? data.data.buffer 
+                : data.data.buffer.slice(data.data.byteOffset, data.data.byteOffset + data.data.byteLength);
+        } else {
+            pieceBuffer = this.base64ToArrayBuffer(data.data);
+        }
         if (!pieceBuffer) {
             Logger.error('Failed to decode piece:', pieceIndex);
             transfer.pieceStatus[pieceIndex] = 'pending';
@@ -1204,7 +1275,15 @@ class MediaController {
             type: 'source_request',
             fileId
         };
-        await streamrController.publishMedia(ephemeralStreamId, request, password);
+
+        // DM channels: encrypt signal with ECDH shared key
+        const dmKey = await this._getDMMediaKey(messageStreamId);
+        if (dmKey) {
+            const encrypted = await dmCrypto.encrypt(request, dmKey);
+            await streamrController.publishMediaSignal(ephemeralStreamId, encrypted, null);
+        } else {
+            await streamrController.publishMediaSignal(ephemeralStreamId, request, password);
+        }
         Logger.debug('Requested sources for:', fileId);
     }
 
@@ -1233,7 +1312,15 @@ class MediaController {
             type: 'source_announce',
             fileId
         };
-        await streamrController.publishMedia(ephemeralStreamId, announce, password);
+
+        // DM channels: encrypt signal with ECDH shared key
+        const dmKey = await this._getDMMediaKey(messageStreamId);
+        if (dmKey) {
+            const encrypted = await dmCrypto.encrypt(announce, dmKey);
+            await streamrController.publishMediaSignal(ephemeralStreamId, encrypted, null);
+        } else {
+            await streamrController.publishMediaSignal(ephemeralStreamId, announce, password);
+        }
         Logger.debug('Announced as source for:', fileId);
     }
 
@@ -1252,6 +1339,14 @@ class MediaController {
             
             if (this.handlers.onSeederUpdate) {
                 this.handlers.onSeederUpdate(data.fileId, seeders.size);
+            }
+            
+            // Immediately trigger download if we have enough seeders (don't wait for discovery timer)
+            const transfer = this.incomingFiles.get(data.fileId);
+            if (transfer && !transfer.downloadStarted && transfer.pieceStatus && seeders.size >= CONFIG.MIN_SEEDERS) {
+                transfer.downloadStarted = true;
+                Logger.info(`Seeder arrived early — starting download with ${seeders.size} seeders for ${data.fileId}`);
+                this.manageDownload(data.fileId);
             }
         }
     }
@@ -1613,6 +1708,17 @@ class MediaController {
      */
     async reannounceForChannel(messageStreamId, password = null) {
         if (!CONFIG.AUTO_SEED_ON_JOIN) return;
+        
+        // Check if we have any files to seed for this channel
+        let hasFiles = false;
+        for (const [, fileInfo] of this.localFiles) {
+            if (fileInfo.streamId === messageStreamId) { hasFiles = true; break; }
+        }
+        if (!hasFiles) return;
+        
+        // Lazy-subscribe to media partitions P1+P2 (seeder needs P1 to receive piece_requests)
+        const ephemeralStreamId = deriveEphemeralId(messageStreamId);
+        await streamrController.ensureMediaSubscription(ephemeralStreamId);
         
         let reannounced = 0;
         

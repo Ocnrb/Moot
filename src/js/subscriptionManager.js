@@ -113,8 +113,16 @@ class SubscriptionManager {
             // Get ephemeral stream ID
             const ephemeralStreamId = channel?.ephemeralStreamId || deriveEphemeralId(messageStreamId);
 
-            // Unsubscribe from BOTH streams
-            await streamrController.unsubscribeFromDualStream(messageStreamId, ephemeralStreamId);
+            // If active media transfers exist (downloads/seeds), keep P1/P2 alive
+            // Only unsubscribe message stream + ephemeral P0 (control)
+            if (mediaController.hasActiveMediaTransfers(messageStreamId)) {
+                Logger.info('Active media transfers — keeping P1/P2 alive for:', messageStreamId);
+                await streamrController.unsubscribe(messageStreamId);
+                await streamrController.unsubscribeFromPartition(ephemeralStreamId, STREAM_CONFIG.EPHEMERAL_STREAM.CONTROL);
+            } else {
+                // No active transfers — full unsubscribe (both streams, all partitions)
+                await streamrController.unsubscribeFromDualStream(messageStreamId, ephemeralStreamId);
+            }
             Logger.debug('Downgraded to background:', messageStreamId);
         } catch (error) {
             Logger.warn('Failed to downgrade channel:', messageStreamId, error.message);
@@ -173,7 +181,7 @@ class SubscriptionManager {
                 {
                     onMessage: (msg) => this._handlePreviewMessage(msg),
                     onControl: (ephMsg) => this._handlePreviewEphemeral(ephMsg),
-                    onMedia: (mediaMsg) => this._handlePreviewMedia(messageStreamId, mediaMsg)
+                    onMedia: (mediaMsg, senderId) => this._handlePreviewMedia(messageStreamId, mediaMsg, senderId)
                 },
                 null, // password
                 STREAM_CONFIG.INITIAL_MESSAGES // historyCount - load recent messages
@@ -240,14 +248,14 @@ class SubscriptionManager {
      * Essential for P2P file transfers to work in preview mode
      * @private
      */
-    _handlePreviewMedia(messageStreamId, msg) {
-        if (!msg?.type) return;
+    _handlePreviewMedia(messageStreamId, msg, senderId) {
+        if (!msg?.type && !(msg instanceof Uint8Array)) return;
         
-        Logger.debug('Preview media:', msg.type);
+        Logger.debug('Preview media:', msg instanceof Uint8Array ? 'binary' : msg.type);
         
         // Forward to mediaController for processing
         // This enables piece_request handling, file_piece reception, etc.
-        mediaController.handleMediaMessage(messageStreamId, msg);
+        mediaController.handleMediaMessage(messageStreamId, msg, senderId);
     }
 
     /**
